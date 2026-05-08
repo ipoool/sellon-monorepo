@@ -12,13 +12,13 @@ export function Header() {
           </Link>
           <nav className="flex items-center gap-6">
             <Link
-              href="#fitur"
+              href="/#fitur"
               className="hidden text-sm text-neutral-600 transition-colors hover:text-neutral-900 sm:inline"
             >
               Fitur
             </Link>
             <Link
-              href="#harga"
+              href="/#harga"
               className="hidden text-sm text-neutral-600 transition-colors hover:text-neutral-900 sm:inline"
             >
               Harga
