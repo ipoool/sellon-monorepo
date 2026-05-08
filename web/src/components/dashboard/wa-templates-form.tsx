@@ -6,7 +6,6 @@ import { Save, Info } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -164,36 +163,37 @@ export function WhatsAppTemplatesForm({
 
       {templates.map((t) => (
         <Card key={t.key}>
-          <div className="mb-3 flex items-start justify-between gap-3">
-            <div>
-              <h2 className="font-semibold text-neutral-900">{t.title}</h2>
-              <p className="mt-0.5 text-sm text-neutral-500">{t.description}</p>
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-xs font-medium text-neutral-500">
-                Variabel:
-              </span>
-              {t.placeholders.map((p) => (
-                <Badge key={p} variant="outline" className="font-mono text-xs">
-                  {`{${p}}`}
-                </Badge>
-              ))}
-            </div>
-
-            <Label htmlFor={t.key} className="sr-only">
+          <header className="mb-4">
+            <h2
+              id={`${t.key}-title`}
+              className="font-semibold text-neutral-900 no-underline"
+            >
               {t.title}
-            </Label>
-            <textarea
-              id={t.key}
-              name={t.key}
-              rows={9}
-              defaultValue={initial[t.key] ?? t.defaultBody}
-              className="rounded-lg border border-neutral-200 bg-white px-3 py-2 font-mono text-xs leading-relaxed text-neutral-900 placeholder:text-neutral-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
-            />
+            </h2>
+            <p className="mt-1 text-sm leading-relaxed text-neutral-600 no-underline">
+              {t.description}
+            </p>
+          </header>
+
+          <div className="mb-3 flex flex-wrap items-center gap-1.5">
+            <span className="text-xs font-medium text-neutral-500">
+              Variabel:
+            </span>
+            {t.placeholders.map((p) => (
+              <Badge key={p} variant="outline" className="font-mono text-xs">
+                {`{${p}}`}
+              </Badge>
+            ))}
           </div>
+
+          <textarea
+            id={t.key}
+            name={t.key}
+            rows={9}
+            defaultValue={initial[t.key] ?? t.defaultBody}
+            aria-labelledby={`${t.key}-title`}
+            className="w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 font-mono text-xs leading-relaxed text-neutral-900 placeholder:text-neutral-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+          />
         </Card>
       ))}
 
