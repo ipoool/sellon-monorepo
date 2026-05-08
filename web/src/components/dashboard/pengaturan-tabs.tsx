@@ -9,7 +9,7 @@ const tabs = [
   { label: "Profil Toko", href: "/dasbor/pengaturan/toko", icon: Store },
   { label: "Pembayaran", href: "/dasbor/pengaturan/pembayaran", icon: CreditCard },
   { label: "Pengiriman", href: "/dasbor/pengaturan/pengiriman", icon: Truck, disabled: true },
-  { label: "WhatsApp", href: "/dasbor/pengaturan/whatsapp", icon: MessageCircle, disabled: true },
+  { label: "WhatsApp", href: "/dasbor/pengaturan/whatsapp", icon: MessageCircle },
 ];
 
 export function PengaturanTabs() {

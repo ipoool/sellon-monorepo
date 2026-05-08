@@ -102,6 +102,59 @@ func (r *ProductRepo) List(ctx context.Context, f ListProductsFilter) ([]Product
 	return out, total, rows.Err()
 }
 
+// ListActiveByStore returns active products for storefront display (public).
+func (r *ProductRepo) ListActiveByStore(ctx context.Context, storeID uuid.UUID) ([]Product, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, store_id, category_id, name, slug, description, price_cents, stock,
+		       weight_g, length_cm, width_cm, height_cm, status, photo_urls, has_variants,
+		       created_at, updated_at
+		FROM products
+		WHERE store_id = $1 AND status = 'active'
+		ORDER BY created_at DESC
+		LIMIT 200
+	`, storeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Product
+	for rows.Next() {
+		var p Product
+		if err := rows.Scan(
+			&p.ID, &p.StoreID, &p.CategoryID, &p.Name, &p.Slug, &p.Description,
+			&p.PriceCents, &p.Stock, &p.WeightG, &p.LengthCm, &p.WidthCm, &p.HeightCm,
+			&p.Status, &p.PhotoURLs, &p.HasVariants, &p.CreatedAt, &p.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// FindBySlug looks up a product within a store by its slug.
+func (r *ProductRepo) FindBySlug(ctx context.Context, storeID uuid.UUID, slug string) (*Product, error) {
+	const q = `
+		SELECT id, store_id, category_id, name, slug, description, price_cents, stock,
+		       weight_g, length_cm, width_cm, height_cm, status, photo_urls, has_variants,
+		       created_at, updated_at
+		FROM products WHERE store_id = $1 AND slug = $2
+	`
+	var p Product
+	err := r.pool.QueryRow(ctx, q, storeID, slug).Scan(
+		&p.ID, &p.StoreID, &p.CategoryID, &p.Name, &p.Slug, &p.Description,
+		&p.PriceCents, &p.Stock, &p.WeightG, &p.LengthCm, &p.WidthCm, &p.HeightCm,
+		&p.Status, &p.PhotoURLs, &p.HasVariants, &p.CreatedAt, &p.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrProductNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
 func (r *ProductRepo) FindByID(ctx context.Context, storeID, id uuid.UUID) (*Product, error) {
 	const q = `
 		SELECT id, store_id, category_id, name, slug, description, price_cents, stock,

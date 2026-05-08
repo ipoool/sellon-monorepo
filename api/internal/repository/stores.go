@@ -37,6 +37,27 @@ func NewStoreRepo(pool *pgxpool.Pool) *StoreRepo {
 
 var ErrStoreNotFound = errors.New("store not found")
 
+func (r *StoreRepo) FindBySlug(ctx context.Context, slug string) (*Store, error) {
+	const q = `
+		SELECT id, owner_id, slug, name, description, logo_url, category, city,
+		       whatsapp_number, instagram, tiktok, is_open, created_at, updated_at
+		FROM stores WHERE slug = $1
+	`
+	var s Store
+	err := r.pool.QueryRow(ctx, q, slug).Scan(
+		&s.ID, &s.OwnerID, &s.Slug, &s.Name, &s.Description, &s.LogoURL,
+		&s.Category, &s.City, &s.WhatsAppNumber, &s.Instagram, &s.TikTok,
+		&s.IsOpen, &s.CreatedAt, &s.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrStoreNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
 func (r *StoreRepo) FindByOwnerID(ctx context.Context, ownerID uuid.UUID) (*Store, error) {
 	const q = `
 		SELECT id, owner_id, slug, name, description, logo_url, category, city,

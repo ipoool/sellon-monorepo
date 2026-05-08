@@ -2,9 +2,12 @@ package repository
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -14,15 +17,39 @@ type Order struct {
 	OrderNumber       string
 	Status            string
 	PaymentStatus     string
-	PaymentMethod     string
-	SubtotalCents     int64
-	ShippingCents     int64
-	TotalCents        int64
-	Courier           string
-	CustomerName      string
-	CustomerWhatsApp  string
-	CustomerCity      string
-	CreatedAt         time.Time
+	PaymentMethod    string
+	SubtotalCents    int64
+	ShippingCents    int64
+	TotalCents       int64
+	Courier          string
+	CourierService   string
+	TrackingNumber   string
+	CustomerName     string
+	CustomerWhatsApp string
+	CustomerAddress  string
+	CustomerCity     string
+	Notes            string
+	CreatedAt        time.Time
+}
+
+type OrderItemInput struct {
+	ProductID    uuid.UUID
+	ProductName  string
+	UnitCents    int64
+	Quantity     int
+}
+
+type CreateOrderInput struct {
+	StoreID         uuid.UUID
+	CustomerName    string
+	CustomerWA      string
+	CustomerAddress string
+	CustomerCity    string
+	Courier         string
+	PaymentMethod   string
+	Notes           string
+	ShippingCents   int64
+	Items           []OrderItemInput
 }
 
 type OrderRepo struct {
@@ -74,4 +101,84 @@ func (r *OrderRepo) StatsForStore(ctx context.Context, storeID uuid.UUID) (today
 		FROM orders WHERE store_id = $1
 	`, storeID).Scan(&todayCount, &monthRevenueCents)
 	return
+}
+
+// Create inserts an order + items + upserts customer in one transaction.
+func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, error) {
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	// Subtotal
+	var subtotal int64
+	for _, it := range in.Items {
+		subtotal += it.UnitCents * int64(it.Quantity)
+	}
+	total := subtotal + in.ShippingCents
+
+	// Upsert customer (by store_id + whatsapp_number); atomic order/spend increment.
+	var customerID uuid.UUID
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO customers (store_id, name, whatsapp_number, address, city,
+		                       total_orders, total_spent_cents, last_order_at)
+		VALUES ($1, $2, $3, $4, $5, 1, $6, now())
+		ON CONFLICT (store_id, whatsapp_number) DO UPDATE SET
+		    name = EXCLUDED.name,
+		    address = EXCLUDED.address,
+		    city = EXCLUDED.city,
+		    total_orders = customers.total_orders + 1,
+		    total_spent_cents = customers.total_spent_cents + EXCLUDED.total_spent_cents,
+		    last_order_at = now(),
+		    updated_at = now()
+		RETURNING id
+	`, in.StoreID, in.CustomerName, in.CustomerWA, in.CustomerAddress, in.CustomerCity, total).Scan(&customerID); err != nil {
+		return nil, fmt.Errorf("upsert customer: %w", err)
+	}
+
+	// Generate human-friendly order number: SO-YYYYMMDD-XXXX (4-char random)
+	orderNum := generateOrderNumber()
+
+	var o Order
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO orders (store_id, customer_id, order_number, status, payment_status,
+		                   payment_method, subtotal_cents, shipping_cents, total_cents,
+		                   courier, customer_name, customer_whatsapp, customer_address, customer_city,
+		                   notes)
+		VALUES ($1, $2, $3, 'pending', 'unpaid', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		RETURNING id, store_id, order_number, status, payment_status, payment_method,
+		          subtotal_cents, shipping_cents, total_cents, courier,
+		          customer_name, customer_whatsapp, customer_city, created_at
+	`,
+		in.StoreID, customerID, orderNum,
+		in.PaymentMethod, subtotal, in.ShippingCents, total,
+		in.Courier, in.CustomerName, in.CustomerWA, in.CustomerAddress, in.CustomerCity, in.Notes,
+	).Scan(
+		&o.ID, &o.StoreID, &o.OrderNumber, &o.Status, &o.PaymentStatus, &o.PaymentMethod,
+		&o.SubtotalCents, &o.ShippingCents, &o.TotalCents, &o.Courier,
+		&o.CustomerName, &o.CustomerWhatsApp, &o.CustomerCity, &o.CreatedAt,
+	); err != nil {
+		return nil, fmt.Errorf("insert order: %w", err)
+	}
+
+	for _, it := range in.Items {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO order_items (order_id, product_id, product_name, unit_price_cents, quantity, subtotal_cents)
+			VALUES ($1, $2, $3, $4, $5, $6)
+		`, o.ID, it.ProductID, it.ProductName, it.UnitCents, it.Quantity, it.UnitCents*int64(it.Quantity)); err != nil {
+			return nil, fmt.Errorf("insert order_item: %w", err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return &o, nil
+}
+
+func generateOrderNumber() string {
+	now := time.Now().UTC()
+	rand4 := strings.ToUpper(uuid.New().String()[:4])
+	return fmt.Sprintf("SO-%s-%s", now.Format("20060102"), rand4)
 }

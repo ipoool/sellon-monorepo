@@ -8,10 +8,11 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { ShareProductButton } from "@/components/dashboard/share-product-button";
 import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import { formatRupiah, formatDateID } from "@/lib/format";
-import type { Product } from "@/lib/types";
+import type { Product, Store } from "@/lib/types";
 
 export const metadata = { title: "Produk — SellOn" };
 
@@ -35,11 +36,13 @@ export default async function ProdukListPage({
   if (status) params.set("status", status);
   const qs = params.toString() ? `?${params.toString()}` : "";
 
-  const data = await serverApi<{ products: Product[]; total: number }>(
-    `/api/v1/products${qs}`,
-  );
+  const [data, storeRes] = await Promise.all([
+    serverApi<{ products: Product[]; total: number }>(`/api/v1/products${qs}`),
+    serverApi<{ store: Store | null }>("/api/v1/store"),
+  ]);
   const products = data?.products ?? [];
   const total = data?.total ?? 0;
+  const storeSlug = storeRes?.store?.slug ?? "";
 
   return (
     <DashboardShell
@@ -159,13 +162,22 @@ export default async function ProdukListPage({
                   <td className="px-5 py-3 text-neutral-600">
                     {formatDateID(p.created_at)}
                   </td>
-                  <td className="px-5 py-3 text-right">
-                    <Link
-                      href={`/dasbor/produk/${p.id}`}
-                      className="text-sm font-medium text-brand-600 hover:text-brand-700"
-                    >
-                      Edit
-                    </Link>
+                  <td className="px-5 py-3">
+                    <div className="flex items-center justify-end gap-2">
+                      {storeSlug && (
+                        <ShareProductButton
+                          storeSlug={storeSlug}
+                          productSlug={p.slug}
+                          productName={p.name}
+                        />
+                      )}
+                      <Link
+                        href={`/dasbor/produk/${p.id}`}
+                        className="text-sm font-medium text-brand-600 hover:text-brand-700"
+                      >
+                        Edit
+                      </Link>
+                    </div>
                   </td>
                 </tr>
               ))}

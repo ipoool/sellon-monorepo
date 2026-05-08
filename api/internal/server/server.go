@@ -30,6 +30,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	orders := repository.NewOrderRepo(pool)
 	customers := repository.NewCustomerRepo(pool)
 	gateways := repository.NewPaymentRepo(pool)
+	waTemplates := repository.NewWATemplateRepo(pool)
 
 	googleVerifier := auth.NewGoogleVerifier(cfg.GoogleClientID)
 	jwtSvc := auth.NewJWTService(cfg.JWTSecret, cfg.JWTTTL)
@@ -45,6 +46,8 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	customerHandler := handler.NewCustomerHandler(customers, stores, logger)
 	paymentHandler := handler.NewPaymentHandler(gateways, stores, encryptor, logger)
 	dashHandler := handler.NewDashboardHandler(stores, products, orders, customers, logger)
+	storefrontHandler := handler.NewStorefrontHandler(stores, products, orders, logger)
+	waTemplateHandler := handler.NewWATemplateHandler(waTemplates, stores, logger)
 
 	requireAuth := middleware.RequireAuth(jwtSvc)
 
@@ -59,6 +62,13 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/info", handler.Info(cfg))
+
+		// Public storefront (no auth)
+		r.Route("/storefront/{slug}", func(r chi.Router) {
+			r.Get("/", storefrontHandler.GetStore)
+			r.Get("/products/{productSlug}", storefrontHandler.GetProduct)
+			r.Post("/orders", storefrontHandler.CreateOrder)
+		})
 
 		r.Route("/auth", func(r chi.Router) {
 			r.Post("/google", authHandler.Google)
@@ -102,6 +112,11 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 				r.Get("/", paymentHandler.Get)
 				r.Put("/", paymentHandler.Save)
 				r.Post("/verify", paymentHandler.Verify)
+			})
+
+			r.Route("/whatsapp-templates", func(r chi.Router) {
+				r.Get("/", waTemplateHandler.Get)
+				r.Put("/", waTemplateHandler.Save)
 			})
 		})
 	})
