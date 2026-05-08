@@ -84,6 +84,8 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 			r.Route("/products", func(r chi.Router) {
 				r.Get("/", productHandler.List)
 				r.Post("/", productHandler.Create)
+				r.Get("/bulk/template", productHandler.BulkTemplate)
+				r.Post("/bulk", productHandler.BulkUpload)
 				r.Get("/{id}", productHandler.Get)
 				r.Put("/{id}", productHandler.Update)
 				r.Delete("/{id}", productHandler.Delete)

@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { Plus, Package } from "lucide-react";
+import { Plus, Package, FileSpreadsheet } from "lucide-react";
 
 import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { Button } from "@/components/ui/button";
@@ -45,12 +45,20 @@ export default async function ProdukListPage({
       pageTitle="Produk"
       pageSubtitle={`${total} produk di katalog`}
       actions={
-        <Link href="/dasbor/produk/baru">
-          <Button size="sm">
-            <Plus className="size-4" aria-hidden />
-            Tambah Produk
-          </Button>
-        </Link>
+        <>
+          <Link href="/dasbor/produk/bulk-upload">
+            <Button size="sm" variant="outline">
+              <FileSpreadsheet className="size-4" aria-hidden />
+              Upload Massal
+            </Button>
+          </Link>
+          <Link href="/dasbor/produk/baru">
+            <Button size="sm">
+              <Plus className="size-4" aria-hidden />
+              Tambah Produk
+            </Button>
+          </Link>
+        </>
       }
     >
       {/* Filter bar */}
