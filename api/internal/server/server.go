@@ -14,6 +14,7 @@ import (
 	"github.com/sellon/sellon/api/internal/config"
 	"github.com/sellon/sellon/api/internal/handler"
 	"github.com/sellon/sellon/api/internal/middleware"
+	"github.com/sellon/sellon/api/internal/payments"
 	"github.com/sellon/sellon/api/internal/repository"
 )
 
@@ -39,15 +40,18 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 		return nil, err
 	}
 
+	midtransClient := payments.NewMidtransClient()
+
 	authHandler := handler.NewAuthHandler(users, googleVerifier, jwtSvc, logger, cfg.IsProd())
 	storeHandler := handler.NewStoreHandler(stores, logger)
 	productHandler := handler.NewProductHandler(products, stores, logger)
-	orderHandler := handler.NewOrderHandler(orders, stores, logger)
+	orderHandler := handler.NewOrderHandler(orders, stores, gateways, encryptor, midtransClient, logger)
 	customerHandler := handler.NewCustomerHandler(customers, stores, logger)
-	paymentHandler := handler.NewPaymentHandler(gateways, stores, encryptor, logger)
+	paymentHandler := handler.NewPaymentHandler(gateways, stores, encryptor, logger, cfg.WebhookBaseURL)
 	dashHandler := handler.NewDashboardHandler(stores, products, orders, customers, logger)
 	storefrontHandler := handler.NewStorefrontHandler(stores, products, orders, logger)
 	waTemplateHandler := handler.NewWATemplateHandler(waTemplates, stores, logger)
+	webhookHandler := handler.NewWebhookHandler(gateways, orders, encryptor, logger)
 
 	requireAuth := middleware.RequireAuth(jwtSvc)
 
@@ -59,6 +63,9 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	r.Use(middleware.CORS(cfg.WebOrigin))
 
 	r.Get("/health", handler.Health)
+
+	// Public webhook routes (no auth — token in URL is the secret)
+	r.Post("/webhooks/midtrans/{token}", webhookHandler.Midtrans)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/info", handler.Info(cfg))
@@ -106,6 +113,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 				r.Get("/{id}", orderHandler.Get)
 				r.Patch("/{id}/status", orderHandler.UpdateStatus)
 				r.Patch("/{id}/notes", orderHandler.UpdateNotes)
+				r.Post("/{id}/payment-link", orderHandler.GeneratePaymentLink)
 			})
 
 			r.Route("/customers", func(r chi.Router) {
@@ -117,6 +125,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 				r.Get("/", paymentHandler.Get)
 				r.Put("/", paymentHandler.Save)
 				r.Post("/verify", paymentHandler.Verify)
+				r.Post("/rotate-webhook", paymentHandler.RotateWebhook)
 			})
 
 			r.Route("/whatsapp-templates", func(r chi.Router) {

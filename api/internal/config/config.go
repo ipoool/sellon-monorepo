@@ -26,6 +26,10 @@ type Config struct {
 	JWTSecret      string
 	JWTTTL         time.Duration
 	WebOrigin      string
+
+	// Public base URL for webhooks (no trailing slash). Sellers paste
+	// {WebhookBaseURL}/webhooks/midtrans/{token} into Midtrans dashboard.
+	WebhookBaseURL string
 }
 
 func Load() (*Config, error) {
@@ -38,6 +42,7 @@ func Load() (*Config, error) {
 	v.SetDefault("api_log_level", "debug")
 	v.SetDefault("jwt_ttl_hours", 24*7)
 	v.SetDefault("web_origin", "http://localhost:3000")
+	v.SetDefault("webhook_base_url", "http://localhost:8080")
 
 	cfg := &Config{
 		Port:           v.GetString("api_port"),
@@ -54,6 +59,7 @@ func Load() (*Config, error) {
 		JWTSecret:      v.GetString("jwt_secret"),
 		JWTTTL:         time.Duration(v.GetInt("jwt_ttl_hours")) * time.Hour,
 		WebOrigin:      v.GetString("web_origin"),
+		WebhookBaseURL: strings.TrimRight(v.GetString("webhook_base_url"), "/"),
 	}
 
 	if cfg.JWTSecret == "" {

@@ -11,6 +11,10 @@ import {
   ExternalLink,
   FlaskConical,
   Rocket,
+  Copy,
+  Check,
+  RefreshCw,
+  Webhook,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -39,6 +43,10 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
   const [error, setError] = useState<string | null>(null);
   const [savedFlash, setSavedFlash] = useState(false);
   const [verifyMsg, setVerifyMsg] = useState<string | null>(null);
+
+  const [webhookURL, setWebhookURL] = useState(initial?.webhook_url ?? "");
+  const [webhookCopied, setWebhookCopied] = useState(false);
+  const [rotating, setRotating] = useState(false);
 
   // Confirm dialog state — opens at SAVE time when the mode in the form
   // differs from what's stored in the DB.
@@ -156,6 +164,41 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
       setError(err instanceof Error ? err.message : "Gagal menyimpan");
     } finally {
       setPending(false);
+    }
+  }
+
+  async function copyWebhookURL() {
+    if (!webhookURL) return;
+    try {
+      await navigator.clipboard.writeText(webhookURL);
+      setWebhookCopied(true);
+      setTimeout(() => setWebhookCopied(false), 2000);
+    } catch {
+      // ignore
+    }
+  }
+
+  async function rotateWebhookURL() {
+    if (
+      !confirm(
+        "Generate URL webhook baru? URL lama akan langsung non-aktif — kamu harus update di dashboard Midtrans.",
+      )
+    )
+      return;
+    setRotating(true);
+    try {
+      const res = await fetch(
+        `${apiBase}/api/v1/payments/midtrans/rotate-webhook`,
+        { method: "POST", credentials: "include" },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      if (data.webhook_url) setWebhookURL(data.webhook_url);
+      router.refresh();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Gagal rotate token");
+    } finally {
+      setRotating(false);
     }
   }
 
@@ -408,6 +451,114 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
           </div>
         </div>
       </form>
+
+      {/* Webhook URL — only after first save (token exists) */}
+      {webhookURL && (
+        <Card>
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <Webhook className="size-4 text-brand-600" aria-hidden />
+                <h3 className="font-semibold text-neutral-900">URL Webhook</h3>
+                <Badge variant="brand">Penting</Badge>
+              </div>
+              <p className="mt-1 text-sm text-neutral-600">
+                Masukkan URL ini di Midtrans dashboard supaya status pembayaran
+                ter-update otomatis di SellOn saat pembeli bayar.
+              </p>
+            </div>
+            <a
+              href={
+                isSandbox
+                  ? "https://dashboard.sandbox.midtrans.com/settings/vtweb_configuration"
+                  : "https://dashboard.midtrans.com/settings/vtweb_configuration"
+              }
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hidden text-sm font-medium text-brand-600 hover:text-brand-700 sm:inline-flex sm:items-center sm:gap-1"
+            >
+              Buka Midtrans
+              <ExternalLink className="size-3.5" aria-hidden />
+            </a>
+          </div>
+
+          <div className="flex items-stretch gap-2">
+            <code className="flex flex-1 items-center overflow-hidden rounded-lg border border-neutral-200 bg-neutral-50 px-3 font-mono text-xs text-neutral-800">
+              <span className="truncate">{webhookURL}</span>
+            </code>
+            <Button
+              type="button"
+              variant="outline"
+              size="md"
+              onClick={copyWebhookURL}
+              aria-label="Salin URL webhook"
+            >
+              {webhookCopied ? (
+                <>
+                  <Check className="size-4 text-success" aria-hidden />
+                  Tersalin
+                </>
+              ) : (
+                <>
+                  <Copy className="size-4" aria-hidden />
+                  Salin
+                </>
+              )}
+            </Button>
+          </div>
+
+          <ol className="mt-5 flex flex-col gap-2 text-sm text-neutral-700">
+            <li className="flex gap-3">
+              <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-brand-50 text-xs font-semibold text-brand-700">
+                1
+              </span>
+              <span>
+                Salin URL di atas. Login ke{" "}
+                <strong>
+                  dashboard{isSandbox ? " sandbox" : ""} Midtrans
+                </strong>
+                .
+              </span>
+            </li>
+            <li className="flex gap-3">
+              <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-brand-50 text-xs font-semibold text-brand-700">
+                2
+              </span>
+              <span>
+                Buka <strong>Settings → Configuration → Notification URL</strong>{" "}
+                (atau <strong>Payment Notification URL</strong>).
+              </span>
+            </li>
+            <li className="flex gap-3">
+              <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-brand-50 text-xs font-semibold text-brand-700">
+                3
+              </span>
+              <span>
+                Paste URL ke field tersebut, klik <strong>Update</strong>. Test
+                dengan <strong>Send Test Notification</strong> di Midtrans.
+              </span>
+            </li>
+          </ol>
+
+          <div className="mt-5 flex items-center justify-between border-t border-neutral-200 pt-4">
+            <p className="text-xs text-neutral-500">
+              URL berisi token rahasia per toko. Jangan dibagikan publik. Kalau
+              kena leak, generate URL baru.
+            </p>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={rotateWebhookURL}
+              disabled={rotating}
+              className="text-danger hover:bg-danger/10"
+            >
+              <RefreshCw className="size-4" aria-hidden />
+              {rotating ? "Memproses…" : "Generate URL baru"}
+            </Button>
+          </div>
+        </Card>
+      )}
 
       <Card variant="ghost">
         <div className="flex items-start gap-3 text-sm text-neutral-600">

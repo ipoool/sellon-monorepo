@@ -131,4 +131,5 @@ export type GatewayInfo = {
   client_key_prod: string;
   enabled_methods: string[];
   last_verify_status?: string;
+  webhook_url: string;
 };

@@ -262,6 +262,61 @@ func (r *OrderRepo) Cancel(ctx context.Context, storeID, id uuid.UUID, reason st
 	return nil
 }
 
+// FindByOrderNumber looks up an order by store + order_number (unique pair).
+// Used by the webhook handler to map a Midtrans order_id back to our row.
+func (r *OrderRepo) FindByOrderNumber(ctx context.Context, storeID uuid.UUID, orderNumber string) (*Order, error) {
+	const q = `
+		SELECT id, store_id, order_number, status, payment_status, payment_method,
+		       subtotal_cents, shipping_cents, total_cents,
+		       courier, courier_service, tracking_number,
+		       customer_name, customer_whatsapp, customer_address, customer_city,
+		       notes, seller_notes, payment_url,
+		       paid_at, shipped_at, completed_at, cancelled_at, cancellation_reason,
+		       created_at, updated_at
+		FROM orders WHERE store_id = $1 AND order_number = $2
+	`
+	var o Order
+	err := r.pool.QueryRow(ctx, q, storeID, orderNumber).Scan(
+		&o.ID, &o.StoreID, &o.OrderNumber, &o.Status, &o.PaymentStatus, &o.PaymentMethod,
+		&o.SubtotalCents, &o.ShippingCents, &o.TotalCents,
+		&o.Courier, &o.CourierService, &o.TrackingNumber,
+		&o.CustomerName, &o.CustomerWhatsApp, &o.CustomerAddress, &o.CustomerCity,
+		&o.Notes, &o.SellerNotes, &o.PaymentURL,
+		&o.PaidAt, &o.ShippedAt, &o.CompletedAt, &o.CancelledAt, &o.CancellationReason,
+		&o.CreatedAt, &o.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrOrderNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &o, nil
+}
+
+// SetPaymentStatus updates payment_status (+ stamps paid_at if newly paid).
+// Used by webhook + manual mark-paid path.
+func (r *OrderRepo) SetPaymentStatus(ctx context.Context, storeID, id uuid.UUID, paymentStatus, paymentMethod string) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE orders
+		SET payment_status = $3,
+		    payment_method = COALESCE(NULLIF($4, ''), payment_method),
+		    paid_at = CASE WHEN $3 = 'paid' AND paid_at IS NULL THEN now() ELSE paid_at END,
+		    updated_at = now()
+		WHERE id = $1 AND store_id = $2
+	`, id, storeID, paymentStatus, paymentMethod)
+	return err
+}
+
+// SetPaymentURL stores the Midtrans Snap redirect URL on the order.
+func (r *OrderRepo) SetPaymentURL(ctx context.Context, storeID, id uuid.UUID, url string) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE orders SET payment_url = $3, updated_at = now()
+		WHERE id = $1 AND store_id = $2
+	`, id, storeID, url)
+	return err
+}
+
 // MarkPaid sets payment_status='paid', stamps paid_at. Used for manual confirmation.
 func (r *OrderRepo) MarkPaid(ctx context.Context, storeID, id uuid.UUID) error {
 	tag, err := r.pool.Exec(ctx, `

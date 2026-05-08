@@ -9,6 +9,9 @@ import {
   Truck,
   Award,
   CreditCard,
+  Link2,
+  Copy,
+  Check,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -41,6 +44,8 @@ export function OrderStatusActions({ order, className }: Props) {
 
   const [showShipForm, setShowShipForm] = useState(false);
   const [showCancelForm, setShowCancelForm] = useState(false);
+  const [paymentLink, setPaymentLink] = useState(order.payment_url);
+  const [paymentCopied, setPaymentCopied] = useState(false);
 
   async function call(action: string, body: Record<string, unknown> = {}) {
     setPending(action);
@@ -65,6 +70,42 @@ export function OrderStatusActions({ order, className }: Props) {
   }
 
   const isFinal = order.status === "completed" || order.status === "cancelled";
+
+  async function generatePaymentLink() {
+    setPending("payment_link");
+    setError(null);
+    try {
+      const res = await fetch(
+        `${apiBase}/api/v1/orders/${order.id}/payment-link`,
+        {
+          method: "POST",
+          credentials: "include",
+        },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      if (data.payment_url) setPaymentLink(data.payment_url);
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Gagal generate link");
+    } finally {
+      setPending(null);
+    }
+  }
+
+  async function copyPaymentLink() {
+    if (!paymentLink) return;
+    try {
+      await navigator.clipboard.writeText(paymentLink);
+      setPaymentCopied(true);
+      setTimeout(() => setPaymentCopied(false), 2000);
+    } catch {
+      // ignore
+    }
+  }
+
+  const canGeneratePaymentLink =
+    !isFinal && order.payment_status !== "paid";
 
   return (
     <div className={cn("flex flex-col gap-3", className)}>
@@ -268,6 +309,73 @@ export function OrderStatusActions({ order, className }: Props) {
               </Button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* Payment link generator (Midtrans Snap) */}
+      {canGeneratePaymentLink && (
+        <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-2 text-sm font-medium text-neutral-900">
+              <Link2 className="size-4 text-brand-600" aria-hidden />
+              Link Pembayaran (Midtrans Snap)
+            </div>
+            {!paymentLink && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={generatePaymentLink}
+                disabled={pending === "payment_link"}
+              >
+                <Link2 className="size-4" aria-hidden />
+                {pending === "payment_link"
+                  ? "Memproses…"
+                  : "Generate Link Pembayaran"}
+              </Button>
+            )}
+          </div>
+
+          {paymentLink ? (
+            <div className="mt-3 flex items-stretch gap-2">
+              <code className="flex flex-1 items-center overflow-hidden rounded-md border border-neutral-200 bg-white px-3 font-mono text-xs text-neutral-800">
+                <span className="truncate">{paymentLink}</span>
+              </code>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={copyPaymentLink}
+                aria-label="Salin link pembayaran"
+              >
+                {paymentCopied ? (
+                  <>
+                    <Check className="size-4 text-success" aria-hidden />
+                    Tersalin
+                  </>
+                ) : (
+                  <>
+                    <Copy className="size-4" aria-hidden />
+                    Salin
+                  </>
+                )}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={generatePaymentLink}
+                disabled={pending === "payment_link"}
+                title="Re-generate link"
+              >
+                <Link2 className="size-4" aria-hidden />
+                Refresh
+              </Button>
+            </div>
+          ) : (
+            <p className="mt-2 text-xs text-neutral-600">
+              Link akan generate dari Midtrans Snap pakai mode aktif
+              (sandbox/production) toko-mu. Pembeli klik link → bayar →
+              status di sini auto-update via webhook.
+            </p>
+          )}
         </div>
       )}
 

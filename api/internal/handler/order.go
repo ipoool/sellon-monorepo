@@ -11,18 +11,22 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/sellon/sellon/api/internal/auth"
+	"github.com/sellon/sellon/api/internal/payments"
 	"github.com/sellon/sellon/api/internal/pkg/response"
 	"github.com/sellon/sellon/api/internal/repository"
 )
 
 type OrderHandler struct {
-	orders *repository.OrderRepo
-	stores *repository.StoreRepo
-	logger *slog.Logger
+	orders    *repository.OrderRepo
+	stores    *repository.StoreRepo
+	gateways  *repository.PaymentRepo
+	encryptor *auth.AESEncryptor
+	midtrans  *payments.MidtransClient
+	logger    *slog.Logger
 }
 
-func NewOrderHandler(orders *repository.OrderRepo, stores *repository.StoreRepo, logger *slog.Logger) *OrderHandler {
-	return &OrderHandler{orders: orders, stores: stores, logger: logger}
+func NewOrderHandler(orders *repository.OrderRepo, stores *repository.StoreRepo, gateways *repository.PaymentRepo, enc *auth.AESEncryptor, midtrans *payments.MidtransClient, logger *slog.Logger) *OrderHandler {
+	return &OrderHandler{orders: orders, stores: stores, gateways: gateways, encryptor: enc, midtrans: midtrans, logger: logger}
 }
 
 type orderListItemDTO struct {
@@ -297,4 +301,111 @@ func (h *OrderHandler) UpdateNotes(w http.ResponseWriter, r *http.Request) {
 func (h *OrderHandler) storeFor(r *http.Request) (*repository.Store, error) {
 	uid, _ := auth.UserIDFromContext(r.Context())
 	return h.stores.FindByOwnerID(r.Context(), uid)
+}
+
+// POST /api/v1/orders/{id}/payment-link
+//
+// Calls Midtrans Snap with the seller's decrypted server key (active env)
+// and stores the redirect_url on the order. Idempotent if a URL is already
+// stored — returns the cached one (Snap allows reuse for the same order_id
+// until expiry).
+func (h *OrderHandler) GeneratePaymentLink(w http.ResponseWriter, r *http.Request) {
+	store, err := h.storeFor(r)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "toko belum dibuat")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	order, err := h.orders.FindByID(r.Context(), store.ID, id)
+	if errors.Is(err, repository.ErrOrderNotFound) {
+		response.Error(w, http.StatusNotFound, "pesanan tidak ditemukan")
+		return
+	}
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if order.Status == "cancelled" {
+		response.Error(w, http.StatusBadRequest, "pesanan dibatalkan, tidak bisa generate link")
+		return
+	}
+	if order.PaymentStatus == "paid" {
+		response.Error(w, http.StatusBadRequest, "pesanan sudah lunas")
+		return
+	}
+
+	gateway, err := h.gateways.Get(r.Context(), store.ID, "midtrans")
+	if errors.Is(err, repository.ErrGatewayNotFound) {
+		response.Error(w, http.StatusBadRequest, "konfigurasi Midtrans belum diisi — Pengaturan → Pembayaran")
+		return
+	}
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	var encryptedKey []byte
+	if gateway.IsSandbox {
+		encryptedKey = gateway.ServerKeySandboxEncrypted
+	} else {
+		encryptedKey = gateway.ServerKeyProdEncrypted
+	}
+	if len(encryptedKey) == 0 {
+		response.Error(w, http.StatusBadRequest,
+			"Server Key untuk mode aktif belum diisi")
+		return
+	}
+	keyBytes, err := h.encryptor.Decrypt(encryptedKey)
+	if err != nil {
+		h.logger.Error("decrypt server key", "err", err)
+		response.Error(w, http.StatusInternalServerError, "gagal decrypt key")
+		return
+	}
+
+	items, err := h.orders.ListItems(r.Context(), order.ID)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	snapItems := make([]payments.SnapItem, 0, len(items))
+	for _, it := range items {
+		snapItems = append(snapItems, payments.SnapItem{
+			ID: it.ID.String(), Name: it.ProductName,
+			Price: it.UnitPriceCents, Quantity: it.Quantity,
+		})
+	}
+	if order.ShippingCents > 0 {
+		snapItems = append(snapItems, payments.SnapItem{
+			ID: "shipping", Name: "Ongkos Kirim",
+			Price: order.ShippingCents, Quantity: 1,
+		})
+	}
+
+	snap, err := h.midtrans.CreateSnapTransaction(payments.SnapTransactionInput{
+		OrderID:       order.OrderNumber,
+		GrossAmount:   order.TotalCents,
+		CustomerName:  order.CustomerName,
+		CustomerPhone: order.CustomerWhatsApp,
+		Items:         snapItems,
+		IsSandbox:     gateway.IsSandbox,
+		ServerKey:     string(keyBytes),
+	})
+	if err != nil {
+		h.logger.Warn("midtrans snap failed", "err", err, "order", order.OrderNumber)
+		response.Error(w, http.StatusBadGateway, "Midtrans menolak request: "+err.Error())
+		return
+	}
+
+	if err := h.orders.SetPaymentURL(r.Context(), store.ID, order.ID, snap.RedirectURL); err != nil {
+		h.logger.Error("save payment url", "err", err)
+	}
+
+	response.JSON(w, http.StatusOK, map[string]any{
+		"payment_url": snap.RedirectURL,
+		"token":       snap.Token,
+	})
 }

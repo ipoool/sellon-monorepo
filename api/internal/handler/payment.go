@@ -13,28 +13,30 @@ import (
 )
 
 type PaymentHandler struct {
-	gateways  *repository.PaymentRepo
-	stores    *repository.StoreRepo
-	encryptor *auth.AESEncryptor
-	logger    *slog.Logger
+	gateways       *repository.PaymentRepo
+	stores         *repository.StoreRepo
+	encryptor      *auth.AESEncryptor
+	logger         *slog.Logger
+	webhookBaseURL string
 }
 
-func NewPaymentHandler(gateways *repository.PaymentRepo, stores *repository.StoreRepo, enc *auth.AESEncryptor, logger *slog.Logger) *PaymentHandler {
-	return &PaymentHandler{gateways: gateways, stores: stores, encryptor: enc, logger: logger}
+func NewPaymentHandler(gateways *repository.PaymentRepo, stores *repository.StoreRepo, enc *auth.AESEncryptor, logger *slog.Logger, webhookBaseURL string) *PaymentHandler {
+	return &PaymentHandler{gateways: gateways, stores: stores, encryptor: enc, logger: logger, webhookBaseURL: webhookBaseURL}
 }
 
 type gatewayDTO struct {
-	Provider                string   `json:"provider"`
-	IsConfigured            bool     `json:"is_configured"`
-	IsSandbox               bool     `json:"is_sandbox"`
-	HasSandboxServerKey     bool     `json:"has_sandbox_server_key"`
-	HasProdServerKey        bool     `json:"has_prod_server_key"`
-	SandboxServerKeyMasked  string   `json:"sandbox_server_key_masked"`
-	ProdServerKeyMasked     string   `json:"prod_server_key_masked"`
-	ClientKeySandbox        string   `json:"client_key_sandbox"`
-	ClientKeyProd           string   `json:"client_key_prod"`
-	EnabledMethods          []string `json:"enabled_methods"`
-	LastVerifyStatus        string   `json:"last_verify_status,omitempty"`
+	Provider               string   `json:"provider"`
+	IsConfigured           bool     `json:"is_configured"`
+	IsSandbox              bool     `json:"is_sandbox"`
+	HasSandboxServerKey    bool     `json:"has_sandbox_server_key"`
+	HasProdServerKey       bool     `json:"has_prod_server_key"`
+	SandboxServerKeyMasked string   `json:"sandbox_server_key_masked"`
+	ProdServerKeyMasked    string   `json:"prod_server_key_masked"`
+	ClientKeySandbox       string   `json:"client_key_sandbox"`
+	ClientKeyProd          string   `json:"client_key_prod"`
+	EnabledMethods         []string `json:"enabled_methods"`
+	LastVerifyStatus       string   `json:"last_verify_status,omitempty"`
+	WebhookURL             string   `json:"webhook_url"`
 }
 
 // GET /api/v1/payments/midtrans
@@ -51,6 +53,7 @@ func (h *PaymentHandler) Get(w http.ResponseWriter, r *http.Request) {
 			IsSandbox:      true,
 			IsConfigured:   false,
 			EnabledMethods: []string{},
+			WebhookURL:     "",
 		})
 		return
 	}
@@ -71,6 +74,29 @@ func (h *PaymentHandler) Get(w http.ResponseWriter, r *http.Request) {
 		ClientKeyProd:          g.ClientKeyProd,
 		EnabledMethods:         g.EnabledMethods,
 		LastVerifyStatus:       g.LastVerifyStatus,
+		WebhookURL:             h.webhookBaseURL + "/webhooks/midtrans/" + g.WebhookToken,
+	})
+}
+
+// POST /api/v1/payments/midtrans/rotate-webhook
+func (h *PaymentHandler) RotateWebhook(w http.ResponseWriter, r *http.Request) {
+	store, err := h.storeFor(r)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "toko belum dibuat")
+		return
+	}
+	token, err := h.gateways.RotateWebhookToken(r.Context(), store.ID, "midtrans")
+	if errors.Is(err, repository.ErrGatewayNotFound) {
+		response.Error(w, http.StatusBadRequest, "gateway belum dikonfigurasi")
+		return
+	}
+	if err != nil {
+		h.logger.Error("rotate webhook", "err", err)
+		response.Error(w, http.StatusInternalServerError, "gagal rotate token")
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]string{
+		"webhook_url": h.webhookBaseURL + "/webhooks/midtrans/" + token,
 	})
 }
 
