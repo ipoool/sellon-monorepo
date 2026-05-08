@@ -131,10 +131,12 @@ export default async function BantuanPage() {
                   Cari bantuan
                 </label>
                 <div className="relative">
-                  <Search
-                    className="absolute left-4 top-1/2 size-5 -translate-y-1/2 text-neutral-400"
+                  <span
                     aria-hidden
-                  />
+                    className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-4 text-neutral-400"
+                  >
+                    <Search className="size-5" />
+                  </span>
                   <input
                     id="bantuan-search"
                     type="search"

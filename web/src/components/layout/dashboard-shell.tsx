@@ -61,15 +61,17 @@ export function DashboardShell({
                 Cari
               </label>
               <div className="relative">
-                <Search
-                  className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-neutral-400"
+                <span
                   aria-hidden
-                />
+                  className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-neutral-400"
+                >
+                  <Search className="size-4" />
+                </span>
                 <input
                   id="topbar-search"
                   type="search"
                   placeholder="Cari produk, pesanan, pelanggan…"
-                  className="w-full rounded-lg border border-neutral-200 bg-neutral-50 py-2 pl-9 pr-3 text-sm placeholder:text-neutral-400 focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+                  className="h-10 w-full rounded-lg border border-neutral-200 bg-neutral-50 pl-9 pr-3 text-sm placeholder:text-neutral-400 focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/30"
                 />
               </div>
             </div>
