@@ -17,7 +17,7 @@ export function Header({ me }: HeaderProps) {
             href="/"
             className="font-display text-lg font-semibold tracking-tight text-neutral-900"
           >
-            TokoFlow
+            SellOn
           </Link>
           <nav className="flex items-center gap-3 sm:gap-6">
             <Link

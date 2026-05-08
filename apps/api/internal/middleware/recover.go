@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"runtime/debug"
 
-	"github.com/tokoflow/tokoflow/apps/api/internal/pkg/response"
+	"github.com/sellon/sellon/apps/api/internal/pkg/response"
 )
 
 func Recover(logger *slog.Logger) func(http.Handler) http.Handler {

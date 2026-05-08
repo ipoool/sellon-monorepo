@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const SessionCookieName = "tokoflow_session"
+const SessionCookieName = "sellon_session"
 
 type SessionClaims struct {
 	UserID uuid.UUID `json:"uid"`
@@ -31,7 +31,7 @@ func (s *JWTService) Issue(userID uuid.UUID) (string, time.Time, error) {
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(exp),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			Issuer:    "tokoflow-api",
+			Issuer:    "sellon-api",
 			Subject:   userID.String(),
 		},
 	}

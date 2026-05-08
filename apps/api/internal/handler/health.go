@@ -3,7 +3,7 @@ package handler
 import (
 	"net/http"
 
-	"github.com/tokoflow/tokoflow/apps/api/internal/pkg/response"
+	"github.com/sellon/sellon/apps/api/internal/pkg/response"
 )
 
 func Health(w http.ResponseWriter, r *http.Request) {

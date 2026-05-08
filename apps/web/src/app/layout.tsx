@@ -9,7 +9,7 @@ const plusJakarta = Plus_Jakarta_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "TokoFlow — Jualan via WhatsApp Tanpa Potongan Marketplace",
+  title: "SellOn — Jualan via WhatsApp Tanpa Potongan Marketplace",
   description:
     "Platform UMKM untuk kelola katalog, pembayaran QRIS, dan pesanan via WhatsApp.",
 };

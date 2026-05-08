@@ -6,9 +6,9 @@ import { Header } from "@/components/layout/header";
 import { getMe } from "@/lib/server-auth";
 
 export const metadata: Metadata = {
-  title: "Syarat & Ketentuan — TokoFlow",
+  title: "Syarat & Ketentuan — SellOn",
   description:
-    "Syarat dan Ketentuan penggunaan platform TokoFlow untuk UMKM Indonesia.",
+    "Syarat dan Ketentuan penggunaan platform SellOn untuk UMKM Indonesia.",
 };
 
 const lastUpdated = "8 Mei 2026";
@@ -50,13 +50,13 @@ export default async function SyaratKetentuanPage() {
                 </p>
                 <ul className="mt-3 list-disc space-y-1 pl-6">
                   <li>
-                    <strong>&ldquo;TokoFlow&rdquo;</strong>, <strong>&ldquo;kami&rdquo;</strong>, atau <strong>&ldquo;Platform&rdquo;</strong> adalah layanan perangkat lunak yang dioperasikan oleh PT TokoFlow Indonesia (atau entitas hukum yang menjadi penerusnya).
+                    <strong>&ldquo;SellOn&rdquo;</strong>, <strong>&ldquo;kami&rdquo;</strong>, atau <strong>&ldquo;Platform&rdquo;</strong> adalah layanan perangkat lunak yang dioperasikan oleh PT SellOn Indonesia (atau entitas hukum yang menjadi penerusnya).
                   </li>
                   <li>
-                    <strong>&ldquo;Penjual&rdquo;</strong> atau <strong>&ldquo;Anda&rdquo;</strong> adalah pemilik usaha (individu atau badan usaha) yang menggunakan TokoFlow untuk menerima pesanan.
+                    <strong>&ldquo;Penjual&rdquo;</strong> atau <strong>&ldquo;Anda&rdquo;</strong> adalah pemilik usaha (individu atau badan usaha) yang menggunakan SellOn untuk menerima pesanan.
                   </li>
                   <li>
-                    <strong>&ldquo;Pembeli&rdquo;</strong> adalah pihak yang melakukan pembelian dari Penjual melalui katalog yang dibuat di TokoFlow.
+                    <strong>&ldquo;Pembeli&rdquo;</strong> adalah pihak yang melakukan pembelian dari Penjual melalui katalog yang dibuat di SellOn.
                   </li>
                   <li>
                     <strong>&ldquo;PJP&rdquo;</strong> adalah Penyedia Jasa Pembayaran yang berlisensi dari Bank Indonesia (mis. Midtrans, Xendit) yang akun-nya didaftarkan oleh Penjual sendiri.
@@ -66,13 +66,13 @@ export default async function SyaratKetentuanPage() {
 
               <Section number="2" title="Penerimaan Syarat">
                 <p>
-                  Dengan mendaftar, mengakses, atau menggunakan TokoFlow, Anda menyatakan telah membaca, memahami, dan menyetujui untuk terikat pada Syarat &amp; Ketentuan ini, termasuk pembaruan-nya. Jika Anda tidak menyetujui, mohon untuk tidak menggunakan layanan kami.
+                  Dengan mendaftar, mengakses, atau menggunakan SellOn, Anda menyatakan telah membaca, memahami, dan menyetujui untuk terikat pada Syarat &amp; Ketentuan ini, termasuk pembaruan-nya. Jika Anda tidak menyetujui, mohon untuk tidak menggunakan layanan kami.
                 </p>
               </Section>
 
-              <Section number="3" title="Layanan TokoFlow">
+              <Section number="3" title="Layanan SellOn">
                 <p>
-                  TokoFlow adalah perangkat lunak yang membantu Penjual untuk:
+                  SellOn adalah perangkat lunak yang membantu Penjual untuk:
                 </p>
                 <ul className="mt-3 list-disc space-y-1 pl-6">
                   <li>Membuat dan membagikan katalog produk via WhatsApp;</li>
@@ -81,22 +81,22 @@ export default async function SyaratKetentuanPage() {
                   <li>Mengirim notifikasi otomatis ke Pembeli via WhatsApp.</li>
                 </ul>
                 <p className="mt-3">
-                  TokoFlow adalah <strong>fasilitator perangkat lunak</strong>, bukan marketplace dan bukan PJP. Kami tidak pernah memegang dana Pembeli.
+                  SellOn adalah <strong>fasilitator perangkat lunak</strong>, bukan marketplace dan bukan PJP. Kami tidak pernah memegang dana Pembeli.
                 </p>
               </Section>
 
               <Section number="4" title="Akun & Pendaftaran">
                 <p>
-                  Untuk menggunakan TokoFlow, Anda harus membuat akun dengan informasi yang akurat dan terkini. Anda bertanggung jawab penuh atas keamanan kredensial akun Anda dan semua aktivitas yang terjadi di dalamnya.
+                  Untuk menggunakan SellOn, Anda harus membuat akun dengan informasi yang akurat dan terkini. Anda bertanggung jawab penuh atas keamanan kredensial akun Anda dan semua aktivitas yang terjadi di dalamnya.
                 </p>
                 <p className="mt-3">
-                  Akun TokoFlow saat ini dapat dibuat melalui sign-in dengan akun Google Anda. Dengan masuk, Anda mengizinkan kami untuk membaca alamat email, nama, dan foto profil Anda dari Google.
+                  Akun SellOn saat ini dapat dibuat melalui sign-in dengan akun Google Anda. Dengan masuk, Anda mengizinkan kami untuk membaca alamat email, nama, dan foto profil Anda dari Google.
                 </p>
               </Section>
 
               <Section number="5" title="Pemrosesan Pembayaran (Model Fasilitator)">
                 <p>
-                  TokoFlow tidak menerima, menyimpan, atau menyalurkan dana Pembeli. Pembayaran QRIS, virtual account, atau metode lainnya diproses oleh PJP yang akun-nya didaftarkan oleh Penjual sendiri (mis. Midtrans atau Xendit milik Penjual).
+                  SellOn tidak menerima, menyimpan, atau menyalurkan dana Pembeli. Pembayaran QRIS, virtual account, atau metode lainnya diproses oleh PJP yang akun-nya didaftarkan oleh Penjual sendiri (mis. Midtrans atau Xendit milik Penjual).
                 </p>
                 <p className="mt-3">
                   Konsekuensinya:
@@ -104,16 +104,16 @@ export default async function SyaratKetentuanPage() {
                 <ul className="mt-3 list-disc space-y-1 pl-6">
                   <li>Dana hasil penjualan masuk langsung ke rekening Penjual yang terdaftar di PJP, sesuai jadwal settlement PJP tersebut;</li>
                   <li>Sengketa pembayaran (refund, chargeback, dispute) ditangani sesuai prosedur PJP, dan Penjual bertanggung jawab atas resolusinya;</li>
-                  <li>TokoFlow tidak berwenang menahan, membekukan, atau mengembalikan dana Pembeli.</li>
+                  <li>SellOn tidak berwenang menahan, membekukan, atau mengembalikan dana Pembeli.</li>
                 </ul>
               </Section>
 
               <Section number="6" title="Biaya Berlangganan">
                 <p>
-                  TokoFlow menerapkan biaya berlangganan bulanan tetap sesuai paket yang Anda pilih (Gratis, Pro, atau Bisnis). TokoFlow <strong>tidak</strong> mengambil komisi atau take-rate dari nilai transaksi Anda.
+                  SellOn menerapkan biaya berlangganan bulanan tetap sesuai paket yang Anda pilih (Gratis, Pro, atau Bisnis). SellOn <strong>tidak</strong> mengambil komisi atau take-rate dari nilai transaksi Anda.
                 </p>
                 <p className="mt-3">
-                  Biaya jaringan PJP (mis. fee QRIS) tetap berlaku dan dipotong langsung oleh PJP. Biaya tersebut bukan pendapatan TokoFlow.
+                  Biaya jaringan PJP (mis. fee QRIS) tetap berlaku dan dipotong langsung oleh PJP. Biaya tersebut bukan pendapatan SellOn.
                 </p>
               </Section>
 
@@ -131,7 +131,7 @@ export default async function SyaratKetentuanPage() {
 
               <Section number="8" title="Larangan">
                 <p>
-                  Anda dilarang menggunakan TokoFlow untuk menjual atau mempromosikan:
+                  Anda dilarang menggunakan SellOn untuk menjual atau mempromosikan:
                 </p>
                 <ul className="mt-3 list-disc space-y-1 pl-6">
                   <li>Barang ilegal (narkotika, senjata tanpa izin, satwa dilindungi, dll.);</li>
@@ -146,7 +146,7 @@ export default async function SyaratKetentuanPage() {
 
               <Section number="9" title="Pembatasan Tanggung Jawab">
                 <p>
-                  TokoFlow disediakan &ldquo;sebagaimana adanya&rdquo;. Sejauh diizinkan oleh hukum yang berlaku, kami tidak bertanggung jawab atas kerugian tidak langsung, kehilangan keuntungan, atau kerusakan reputasi yang timbul dari penggunaan Platform.
+                  SellOn disediakan &ldquo;sebagaimana adanya&rdquo;. Sejauh diizinkan oleh hukum yang berlaku, kami tidak bertanggung jawab atas kerugian tidak langsung, kehilangan keuntungan, atau kerusakan reputasi yang timbul dari penggunaan Platform.
                 </p>
                 <p className="mt-3">
                   Tanggung jawab kami terbatas pada biaya berlangganan yang telah Anda bayarkan dalam 12 bulan terakhir.
@@ -175,10 +175,10 @@ export default async function SyaratKetentuanPage() {
                 <p>
                   Pertanyaan terkait Syarat &amp; Ketentuan ini dapat dikirim ke{" "}
                   <a
-                    href="mailto:legal@tokoflow.id"
+                    href="mailto:legal@sellon.id"
                     className="font-medium text-brand-600 hover:text-brand-700"
                   >
-                    legal@tokoflow.id
+                    legal@sellon.id
                   </a>
                   .
                 </p>

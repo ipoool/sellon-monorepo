@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import type { Me } from "@/lib/auth-types";
 
-const SESSION_COOKIE = "tokoflow_session";
+const SESSION_COOKIE = "sellon_session";
 
 function apiBase() {
   return (

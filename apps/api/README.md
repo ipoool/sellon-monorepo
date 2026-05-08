@@ -1,6 +1,6 @@
-# tokoflow-api
+# sellon-api
 
-Go backend service untuk TokoFlow — chi router, pgx, Postgres, Redis, slog.
+Go backend service untuk SellOn — chi router, pgx, Postgres, Redis, slog.
 
 ## Endpoints
 

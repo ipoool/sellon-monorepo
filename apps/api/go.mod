@@ -1,4 +1,4 @@
-module github.com/tokoflow/tokoflow/apps/api
+module github.com/sellon/sellon/apps/api
 
 go 1.25.0
 

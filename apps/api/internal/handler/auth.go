@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/tokoflow/tokoflow/apps/api/internal/auth"
-	"github.com/tokoflow/tokoflow/apps/api/internal/pkg/response"
-	"github.com/tokoflow/tokoflow/apps/api/internal/repository"
+	"github.com/sellon/sellon/apps/api/internal/auth"
+	"github.com/sellon/sellon/apps/api/internal/pkg/response"
+	"github.com/sellon/sellon/apps/api/internal/repository"
 )
 
 type AuthHandler struct {

@@ -1,8 +1,8 @@
-# TokoFlow
+# SellOn
 
 SaaS WhatsApp commerce untuk UMKM Indonesia — buat katalog produk, terima pembayaran QRIS, dan kelola pesanan via WhatsApp tanpa potongan marketplace.
 
-TokoFlow memakai model **facilitator**: setiap seller pakai akun Midtrans/Xendit mereka sendiri, dana mengalir langsung ke seller, platform tidak pernah pegang uang pembeli. Repository ini berisi backend Go (chi + pgx + Postgres + Redis) dan frontend Next.js 15 (App Router + Tailwind v4) di dalam monorepo tunggal.
+SellOn memakai model **facilitator**: setiap seller pakai akun Midtrans/Xendit mereka sendiri, dana mengalir langsung ke seller, platform tidak pernah pegang uang pembeli. Repository ini berisi backend Go (chi + pgx + Postgres + Redis) dan frontend Next.js 15 (App Router + Tailwind v4) di dalam monorepo tunggal.
 
 ## Prerequisites
 
@@ -19,7 +19,7 @@ make dev
 
 - API: http://localhost:8080
 - Web: http://localhost:3000
-- Postgres: `localhost:5432` (user/pass: `tokoflow`)
+- Postgres: `localhost:5432` (user/pass: `sellon`)
 - Redis: `localhost:6379`
 
 Health check:
@@ -31,7 +31,7 @@ curl http://localhost:8080/health
 ## Struktur
 
 ```
-tokoflow/
+sellon/
 ├── apps/
 │   ├── api/          Go backend (chi, pgx, slog, viper)
 │   └── web/          Next.js 15 frontend (App Router, Tailwind v4)
@@ -54,7 +54,7 @@ Lihat `apps/api/README.md` dan `apps/web/README.md` untuk detail per service.
 
 ## Google Sign-In Setup
 
-TokoFlow login pakai Google Identity Services. Untuk mengaktifkan:
+SellOn login pakai Google Identity Services. Untuk mengaktifkan:
 
 1. Buka [Google Cloud Console → APIs & Services → Credentials](https://console.cloud.google.com/apis/credentials).
 2. **Create Credentials → OAuth Client ID** → application type: **Web application**.
@@ -74,6 +74,6 @@ Buka http://localhost:3100/masuk → klik "Continue with Google" → akun otomat
 
 - Frontend pakai `accounts.google.com/gsi/client` untuk render tombol dan menerima ID token.
 - ID token di-POST ke `/api/v1/auth/google`. Backend verify pakai `google.golang.org/api/idtoken` (cek audience = client ID, signature, expiration).
-- Backend issue JWT (HS256, TTL default 7 hari) lalu set di `tokoflow_session` httpOnly cookie (`SameSite=Lax`).
+- Backend issue JWT (HS256, TTL default 7 hari) lalu set di `sellon_session` httpOnly cookie (`SameSite=Lax`).
 - Protected route Go (`/api/v1/auth/me`) divalidasi via middleware `RequireAuth`.
 - Server-side Next.js (`getMe()` di `src/lib/server-auth.ts`) baca cookie dan forward ke `/auth/me` lewat `API_INTERNAL_URL` — `/dasbor` redirect ke `/masuk` kalau session invalid.

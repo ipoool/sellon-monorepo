@@ -36,7 +36,7 @@ export default async function MasukPage() {
             href="/"
             className="font-display text-2xl font-semibold text-neutral-900"
           >
-            TokoFlow
+            SellOn
           </Link>
           <h1 className="mt-4 font-display text-2xl font-semibold tracking-tight text-neutral-900 sm:text-3xl">
             Masuk untuk mulai jualan
@@ -90,7 +90,7 @@ export default async function MasukPage() {
                 >
                   Syarat &amp; Ketentuan
                 </Link>{" "}
-                TokoFlow.
+                SellOn.
               </p>
             </div>
           </CardContent>
@@ -99,10 +99,10 @@ export default async function MasukPage() {
         <p className="mt-6 text-center text-sm text-neutral-500">
           Butuh bantuan?{" "}
           <a
-            href="mailto:halo@tokoflow.id"
+            href="mailto:halo@sellon.id"
             className="font-medium text-brand-600 hover:text-brand-700"
           >
-            halo@tokoflow.id
+            halo@sellon.id
           </a>
         </p>
       </div>

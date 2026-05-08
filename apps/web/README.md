@@ -1,6 +1,6 @@
-# tokoflow-web
+# sellon-web
 
-Frontend Next.js 16 (App Router) untuk TokoFlow — TypeScript + Tailwind CSS v4 + komponen UI handcrafted.
+Frontend Next.js 16 (App Router) untuk SellOn — TypeScript + Tailwind CSS v4 + komponen UI handcrafted.
 
 ## Run
 

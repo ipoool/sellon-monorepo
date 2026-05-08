@@ -24,4 +24,4 @@ web-shell:
 	docker compose exec web sh
 
 db-shell:
-	docker compose exec postgres psql -U tokoflow -d tokoflow
+	docker compose exec postgres psql -U sellon -d sellon
