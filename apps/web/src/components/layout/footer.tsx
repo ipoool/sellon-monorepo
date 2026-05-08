@@ -19,13 +19,13 @@ const columns: FooterColumn[] = [
       { label: "Fitur", href: "/#fitur" },
       { label: "Harga", href: "/#harga" },
       { label: "Cara Kerja", href: "/#cara-kerja" },
-      { label: "Roadmap" },
+      { label: "Roadmap", href: "/roadmap" },
     ],
   },
   {
     title: "Perusahaan",
     links: [
-      { label: "Tentang Kami" },
+      { label: "Tentang Kami", href: "/tentang" },
       { label: "Karir" },
       { label: "Blog" },
       { label: "Press Kit" },
