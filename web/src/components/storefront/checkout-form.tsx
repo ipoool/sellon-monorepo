@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import { ShoppingCart, MessageCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -63,6 +64,7 @@ export function CheckoutForm({
   product,
   isOpen,
 }: Props) {
+  const router = useRouter();
   const [qty, setQty] = useState(1);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -125,15 +127,13 @@ export function CheckoutForm({
         catatan_pembeli: notes ? `Catatan: ${notes}` : "",
       });
 
+      // Open WhatsApp in a new tab so seller gets the notification
       const url = waLink(storeWhatsApp || "", message);
       if (url) {
         window.open(url, "_blank", "noopener,noreferrer");
-      } else {
-        // Penjual belum set nomor WA — show fallback alert
-        alert(
-          `Pesanan tercatat (${data.order_number}). Toko belum set WhatsApp — silakan kontak penjual lewat channel lain.`,
-        );
       }
+      // Redirect buyer to the order/payment page (in this tab)
+      router.push(`/${storeSlug}/pesanan/${data.order_number}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Gagal membuat pesanan");
     } finally {

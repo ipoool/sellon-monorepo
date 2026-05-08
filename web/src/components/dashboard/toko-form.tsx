@@ -10,7 +10,8 @@ import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Select } from "@/components/ui/select";
-import type { Store } from "@/lib/types";
+import { JamBukaEditor } from "@/components/dashboard/jam-buka-editor";
+import type { OpenHours, Store } from "@/lib/types";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
@@ -41,6 +42,13 @@ export function TokoForm({ initial }: { initial: Store | null }) {
     setSuccess(false);
 
     const fd = new FormData(e.currentTarget);
+    let openHours: OpenHours = {};
+    try {
+      const raw = String(fd.get("open_hours") ?? "");
+      if (raw) openHours = JSON.parse(raw);
+    } catch {
+      // fall back to empty
+    }
     const body = {
       name: String(fd.get("name") ?? ""),
       slug: String(fd.get("slug") ?? ""),
@@ -51,6 +59,7 @@ export function TokoForm({ initial }: { initial: Store | null }) {
       whatsapp_number: String(fd.get("whatsapp_number") ?? ""),
       instagram: String(fd.get("instagram") ?? ""),
       tiktok: String(fd.get("tiktok") ?? ""),
+      open_hours: openHours,
       is_open: fd.get("is_open") === "on",
     };
 
@@ -215,26 +224,41 @@ export function TokoForm({ initial }: { initial: Store | null }) {
       </Card>
 
       {!isCreating && (
-        <Card>
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h2 className="font-semibold text-neutral-900">Status Toko</h2>
+        <>
+          <Card>
+            <div className="mb-4">
+              <h2 className="font-semibold text-neutral-900">Jam Buka</h2>
               <p className="mt-0.5 text-sm text-neutral-500">
-                Saat dimatikan, halaman publik tampil &ldquo;sedang tutup&rdquo; dan tidak
-                bisa terima order baru.
+                Atur jam operasional per hari. Tampil di halaman toko.
               </p>
             </div>
-            <label className="flex cursor-pointer items-center gap-3">
-              <input
-                type="checkbox"
-                name="is_open"
-                defaultChecked={initial?.is_open ?? true}
-                className="size-4 rounded border-neutral-300 accent-brand-500 focus:ring-brand-500/30"
-              />
-              <Badge variant="success">Toko buka</Badge>
-            </label>
-          </div>
-        </Card>
+            <JamBukaEditor
+              name="open_hours"
+              initial={initial?.open_hours ?? {}}
+            />
+          </Card>
+
+          <Card>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="font-semibold text-neutral-900">Status Toko</h2>
+                <p className="mt-0.5 text-sm text-neutral-500">
+                  Saat dimatikan, halaman publik tampil &ldquo;sedang tutup&rdquo; dan tidak
+                  bisa terima order baru. Override jam buka di atas.
+                </p>
+              </div>
+              <label className="flex cursor-pointer items-center gap-3">
+                <input
+                  type="checkbox"
+                  name="is_open"
+                  defaultChecked={initial?.is_open ?? true}
+                  className="size-4 rounded border-neutral-300 accent-brand-500 focus:ring-brand-500/30"
+                />
+                <Badge variant="success">Toko buka</Badge>
+              </label>
+            </div>
+          </Card>
+        </>
       )}
 
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">

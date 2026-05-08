@@ -32,6 +32,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	customers := repository.NewCustomerRepo(pool)
 	gateways := repository.NewPaymentRepo(pool)
 	waTemplates := repository.NewWATemplateRepo(pool)
+	bankAccounts := repository.NewBankAccountRepo(pool)
 
 	googleVerifier := auth.NewGoogleVerifier(cfg.GoogleClientID)
 	jwtSvc := auth.NewJWTService(cfg.JWTSecret, cfg.JWTTTL)
@@ -49,9 +50,10 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	customerHandler := handler.NewCustomerHandler(customers, stores, logger)
 	paymentHandler := handler.NewPaymentHandler(gateways, stores, encryptor, logger, cfg.WebhookBaseURL)
 	dashHandler := handler.NewDashboardHandler(stores, products, orders, customers, logger)
-	storefrontHandler := handler.NewStorefrontHandler(stores, products, orders, logger)
+	storefrontHandler := handler.NewStorefrontHandler(stores, products, orders, bankAccounts, logger)
 	waTemplateHandler := handler.NewWATemplateHandler(waTemplates, stores, logger)
 	webhookHandler := handler.NewWebhookHandler(gateways, orders, encryptor, logger)
+	bankAccountHandler := handler.NewBankAccountHandler(bankAccounts, stores, logger)
 
 	requireAuth := middleware.RequireAuth(jwtSvc)
 
@@ -75,6 +77,8 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 			r.Get("/", storefrontHandler.GetStore)
 			r.Get("/products/{productSlug}", storefrontHandler.GetProduct)
 			r.Post("/orders", storefrontHandler.CreateOrder)
+			r.Get("/orders/{number}", storefrontHandler.GetOrder)
+			r.Post("/orders/{number}/mark-paid", storefrontHandler.MarkPaymentPending)
 		})
 
 		r.Route("/auth", func(r chi.Router) {
@@ -131,6 +135,13 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 			r.Route("/whatsapp-templates", func(r chi.Router) {
 				r.Get("/", waTemplateHandler.Get)
 				r.Put("/", waTemplateHandler.Save)
+			})
+
+			r.Route("/bank-accounts", func(r chi.Router) {
+				r.Get("/", bankAccountHandler.List)
+				r.Post("/", bankAccountHandler.Create)
+				r.Put("/{id}", bankAccountHandler.Update)
+				r.Delete("/{id}", bankAccountHandler.Delete)
 			})
 		})
 	})

@@ -18,25 +18,27 @@ type StorefrontHandler struct {
 	stores   *repository.StoreRepo
 	products *repository.ProductRepo
 	orders   *repository.OrderRepo
+	banks    *repository.BankAccountRepo
 	logger   *slog.Logger
 }
 
-func NewStorefrontHandler(s *repository.StoreRepo, p *repository.ProductRepo, o *repository.OrderRepo, logger *slog.Logger) *StorefrontHandler {
-	return &StorefrontHandler{stores: s, products: p, orders: o, logger: logger}
+func NewStorefrontHandler(s *repository.StoreRepo, p *repository.ProductRepo, o *repository.OrderRepo, b *repository.BankAccountRepo, logger *slog.Logger) *StorefrontHandler {
+	return &StorefrontHandler{stores: s, products: p, orders: o, banks: b, logger: logger}
 }
 
 type publicStoreDTO struct {
-	ID             string `json:"id"`
-	Slug           string `json:"slug"`
-	Name           string `json:"name"`
-	Description    string `json:"description"`
-	LogoURL        string `json:"logo_url"`
-	Category       string `json:"category"`
-	City           string `json:"city"`
-	WhatsAppNumber string `json:"whatsapp_number"`
-	Instagram      string `json:"instagram"`
-	TikTok         string `json:"tiktok"`
-	IsOpen         bool   `json:"is_open"`
+	ID             string          `json:"id"`
+	Slug           string          `json:"slug"`
+	Name           string          `json:"name"`
+	Description    string          `json:"description"`
+	LogoURL        string          `json:"logo_url"`
+	Category       string          `json:"category"`
+	City           string          `json:"city"`
+	WhatsAppNumber string          `json:"whatsapp_number"`
+	Instagram      string          `json:"instagram"`
+	TikTok         string          `json:"tiktok"`
+	OpenHours      json.RawMessage `json:"open_hours"`
+	IsOpen         bool            `json:"is_open"`
 }
 
 type publicProductDTO struct {
@@ -50,11 +52,15 @@ type publicProductDTO struct {
 }
 
 func toPublicStore(s *repository.Store) publicStoreDTO {
+	openHours := json.RawMessage(s.OpenHours)
+	if len(openHours) == 0 {
+		openHours = json.RawMessage("{}")
+	}
 	return publicStoreDTO{
 		ID: s.ID.String(), Slug: s.Slug, Name: s.Name, Description: s.Description,
 		LogoURL: s.LogoURL, Category: s.Category, City: s.City,
 		WhatsAppNumber: s.WhatsAppNumber, Instagram: s.Instagram, TikTok: s.TikTok,
-		IsOpen: s.IsOpen,
+		OpenHours: openHours, IsOpen: s.IsOpen,
 	}
 }
 
@@ -235,4 +241,110 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 		"order_number": order.OrderNumber,
 		"total_cents":  order.TotalCents,
 	})
+}
+
+type publicBankDTO struct {
+	BankName   string `json:"bank_name"`
+	HolderName string `json:"holder_name"`
+	AccountNo  string `json:"account_no"`
+	IsPrimary  bool   `json:"is_primary"`
+	QRISURL    string `json:"qris_url"`
+}
+
+// GET /api/v1/storefront/{slug}/orders/{number} — public buyer view
+func (h *StorefrontHandler) GetOrder(w http.ResponseWriter, r *http.Request) {
+	slug := chi.URLParam(r, "slug")
+	orderNum := chi.URLParam(r, "number")
+
+	store, err := h.stores.FindBySlug(r.Context(), slug)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "toko tidak ditemukan")
+		return
+	}
+	order, err := h.orders.FindByOrderNumber(r.Context(), store.ID, orderNum)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "pesanan tidak ditemukan")
+		return
+	}
+	items, err := h.orders.ListItems(r.Context(), order.ID)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	itemsOut := make([]map[string]any, 0, len(items))
+	for _, it := range items {
+		itemsOut = append(itemsOut, map[string]any{
+			"product_name":      it.ProductName,
+			"variant_name":      it.VariantName,
+			"unit_price_cents":  it.UnitPriceCents,
+			"quantity":          it.Quantity,
+			"subtotal_cents":    it.SubtotalCents,
+		})
+	}
+
+	banks, _ := h.banks.ListByStore(r.Context(), store.ID)
+	banksOut := make([]publicBankDTO, 0, len(banks))
+	for _, b := range banks {
+		banksOut = append(banksOut, publicBankDTO{
+			BankName: b.BankName, HolderName: b.HolderName, AccountNo: b.AccountNo,
+			IsPrimary: b.IsPrimary, QRISURL: b.QRISURL,
+		})
+	}
+
+	response.JSON(w, http.StatusOK, map[string]any{
+		"store": map[string]any{
+			"slug": store.Slug, "name": store.Name,
+			"whatsapp_number": store.WhatsAppNumber,
+		},
+		"order": map[string]any{
+			"id":               order.ID.String(),
+			"order_number":     order.OrderNumber,
+			"status":           order.Status,
+			"payment_status":   order.PaymentStatus,
+			"payment_method":   order.PaymentMethod,
+			"subtotal_cents":   order.SubtotalCents,
+			"shipping_cents":   order.ShippingCents,
+			"total_cents":      order.TotalCents,
+			"courier":          order.Courier,
+			"tracking_number":  order.TrackingNumber,
+			"customer_name":    order.CustomerName,
+			"customer_whatsapp": order.CustomerWhatsApp,
+			"customer_address": order.CustomerAddress,
+			"customer_city":    order.CustomerCity,
+			"payment_url":      order.PaymentURL,
+			"created_at":       order.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			"items":            itemsOut,
+		},
+		"bank_accounts": banksOut,
+	})
+}
+
+// POST /api/v1/storefront/{slug}/orders/{number}/mark-paid
+// Buyer-triggered: signals that they've paid via manual transfer.
+// We move payment_status to 'pending' (under verification by seller).
+func (h *StorefrontHandler) MarkPaymentPending(w http.ResponseWriter, r *http.Request) {
+	slug := chi.URLParam(r, "slug")
+	orderNum := chi.URLParam(r, "number")
+
+	store, err := h.stores.FindBySlug(r.Context(), slug)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "toko tidak ditemukan")
+		return
+	}
+	order, err := h.orders.FindByOrderNumber(r.Context(), store.ID, orderNum)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "pesanan tidak ditemukan")
+		return
+	}
+	// Only allow if currently unpaid; idempotent for already-pending.
+	if order.PaymentStatus == "paid" {
+		response.Error(w, http.StatusBadRequest, "pesanan sudah lunas")
+		return
+	}
+	if err := h.orders.SetPaymentStatus(r.Context(), store.ID, order.ID, "pending", order.PaymentMethod); err != nil {
+		h.logger.Error("buyer mark paid", "err", err)
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

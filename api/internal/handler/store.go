@@ -23,25 +23,30 @@ func NewStoreHandler(stores *repository.StoreRepo, logger *slog.Logger) *StoreHa
 }
 
 type storeDTO struct {
-	ID             string `json:"id"`
-	Slug           string `json:"slug"`
-	Name           string `json:"name"`
-	Description    string `json:"description"`
-	LogoURL        string `json:"logo_url"`
-	Category       string `json:"category"`
-	City           string `json:"city"`
-	WhatsAppNumber string `json:"whatsapp_number"`
-	Instagram      string `json:"instagram"`
-	TikTok         string `json:"tiktok"`
-	IsOpen         bool   `json:"is_open"`
+	ID             string          `json:"id"`
+	Slug           string          `json:"slug"`
+	Name           string          `json:"name"`
+	Description    string          `json:"description"`
+	LogoURL        string          `json:"logo_url"`
+	Category       string          `json:"category"`
+	City           string          `json:"city"`
+	WhatsAppNumber string          `json:"whatsapp_number"`
+	Instagram      string          `json:"instagram"`
+	TikTok         string          `json:"tiktok"`
+	OpenHours      json.RawMessage `json:"open_hours"`
+	IsOpen         bool            `json:"is_open"`
 }
 
 func toStoreDTO(s *repository.Store) storeDTO {
+	openHours := json.RawMessage(s.OpenHours)
+	if len(openHours) == 0 {
+		openHours = json.RawMessage("{}")
+	}
 	return storeDTO{
 		ID: s.ID.String(), Slug: s.Slug, Name: s.Name, Description: s.Description,
 		LogoURL: s.LogoURL, Category: s.Category, City: s.City,
 		WhatsAppNumber: s.WhatsAppNumber, Instagram: s.Instagram, TikTok: s.TikTok,
-		IsOpen: s.IsOpen,
+		OpenHours: openHours, IsOpen: s.IsOpen,
 	}
 }
 
@@ -102,15 +107,16 @@ func (h *StoreHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateStoreReq struct {
-	Name           string `json:"name"`
-	Description    string `json:"description"`
-	LogoURL        string `json:"logo_url"`
-	Category       string `json:"category"`
-	City           string `json:"city"`
-	WhatsAppNumber string `json:"whatsapp_number"`
-	Instagram      string `json:"instagram"`
-	TikTok         string `json:"tiktok"`
-	IsOpen         bool   `json:"is_open"`
+	Name           string          `json:"name"`
+	Description    string          `json:"description"`
+	LogoURL        string          `json:"logo_url"`
+	Category       string          `json:"category"`
+	City           string          `json:"city"`
+	WhatsAppNumber string          `json:"whatsapp_number"`
+	Instagram      string          `json:"instagram"`
+	TikTok         string          `json:"tiktok"`
+	OpenHours      json.RawMessage `json:"open_hours"`
+	IsOpen         bool            `json:"is_open"`
 }
 
 // PUT /api/v1/store
@@ -132,11 +138,16 @@ func (h *StoreHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var openHours []byte
+	if len(req.OpenHours) > 0 {
+		openHours = []byte(req.OpenHours)
+	}
 	store, err := h.stores.Update(r.Context(), existing.ID, repository.UpdateStoreInput{
 		Name: strings.TrimSpace(req.Name), Description: req.Description, LogoURL: req.LogoURL,
 		Category: req.Category, City: req.City,
 		WhatsAppNumber: req.WhatsAppNumber, Instagram: req.Instagram, TikTok: req.TikTok,
-		IsOpen: req.IsOpen,
+		OpenHoursJSON: openHours,
+		IsOpen:        req.IsOpen,
 	})
 	if err != nil {
 		h.logger.Error("update store", "err", err)

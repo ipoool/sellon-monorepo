@@ -1,3 +1,7 @@
+export type DayOfWeek = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+export type DayHours = { open: string; close: string; closed?: boolean };
+export type OpenHours = Partial<Record<DayOfWeek, DayHours>>;
+
 export type Store = {
   id: string;
   slug: string;
@@ -9,7 +13,17 @@ export type Store = {
   whatsapp_number: string;
   instagram: string;
   tiktok: string;
+  open_hours: OpenHours;
   is_open: boolean;
+};
+
+export type BankAccount = {
+  id: string;
+  bank_name: string;
+  holder_name: string;
+  account_no: string;
+  is_primary: boolean;
+  qris_url: string;
 };
 
 export type Product = {
