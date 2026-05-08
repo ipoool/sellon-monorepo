@@ -12,19 +12,27 @@ import (
 
 	"github.com/sellon/sellon/api/internal/pkg/response"
 	"github.com/sellon/sellon/api/internal/repository"
+	"github.com/sellon/sellon/api/internal/shipping"
 )
 
 type StorefrontHandler struct {
 	stores     *repository.StoreRepo
 	products   *repository.ProductRepo
+	variants   *repository.VariantRepo
 	orders     *repository.OrderRepo
 	banks      *repository.BankAccountRepo
 	categories *repository.CategoryRepo
 	logger     *slog.Logger
 }
 
-func NewStorefrontHandler(s *repository.StoreRepo, p *repository.ProductRepo, o *repository.OrderRepo, b *repository.BankAccountRepo, c *repository.CategoryRepo, logger *slog.Logger) *StorefrontHandler {
-	return &StorefrontHandler{stores: s, products: p, orders: o, banks: b, categories: c, logger: logger}
+func NewStorefrontHandler(
+	s *repository.StoreRepo, p *repository.ProductRepo, v *repository.VariantRepo,
+	o *repository.OrderRepo, b *repository.BankAccountRepo, c *repository.CategoryRepo,
+	logger *slog.Logger,
+) *StorefrontHandler {
+	return &StorefrontHandler{
+		stores: s, products: p, variants: v, orders: o, banks: b, categories: c, logger: logger,
+	}
 }
 
 type publicStoreDTO struct {
@@ -56,6 +64,13 @@ type publicProductDTO struct {
 type publicCategoryDTO struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+}
+
+type publicVariantDTO struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	PriceCents int64  `json:"price_cents"`
+	Stock      int    `json:"stock"`
 }
 
 func toPublicStore(s *repository.Store) publicStoreDTO {
@@ -148,14 +163,26 @@ func (h *StorefrontHandler) GetProduct(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusNotFound, "produk tidak tersedia")
 		return
 	}
+
+	vRows, _ := h.variants.ListByProduct(r.Context(), p.ID)
+	vOut := make([]publicVariantDTO, 0, len(vRows))
+	for _, v := range vRows {
+		vOut = append(vOut, publicVariantDTO{
+			ID: v.ID.String(), Name: v.Name,
+			PriceCents: v.PriceCents, Stock: v.Stock,
+		})
+	}
+
 	response.JSON(w, http.StatusOK, map[string]any{
-		"store":   toPublicStore(store),
-		"product": toPublicProduct(p),
+		"store":    toPublicStore(store),
+		"product":  toPublicProduct(p),
+		"variants": vOut,
 	})
 }
 
 type orderItemReq struct {
 	ProductID string `json:"product_id"`
+	VariantID string `json:"variant_id"`
 	Quantity  int    `json:"quantity"`
 }
 
@@ -225,14 +252,48 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 			response.Error(w, http.StatusBadRequest, "produk "+p.Name+" tidak tersedia")
 			return
 		}
-		if p.Stock < it.Quantity {
-			response.Error(w, http.StatusBadRequest, "stok "+p.Name+" tidak cukup")
+
+		// If product has variants, variant_id is required and price/stock
+		// come from the variant. Otherwise fall back to product fields.
+		unitCents := p.PriceCents
+		productName := p.Name
+		variantName := ""
+		var variantID *uuid.UUID
+		stock := p.Stock
+
+		if p.HasVariants {
+			if it.VariantID == "" {
+				response.Error(w, http.StatusBadRequest,
+					"produk "+p.Name+" punya varian — pilih varian dulu")
+				return
+			}
+			vid, err := uuid.Parse(it.VariantID)
+			if err != nil {
+				response.Error(w, http.StatusBadRequest, "variant_id invalid")
+				return
+			}
+			variant, err := h.variants.FindByID(r.Context(), vid)
+			if err != nil || variant.ProductID != p.ID {
+				response.Error(w, http.StatusBadRequest, "varian tidak ditemukan")
+				return
+			}
+			unitCents = variant.PriceCents
+			variantName = variant.Name
+			variantID = &variant.ID
+			stock = variant.Stock
+		}
+
+		if stock < it.Quantity {
+			response.Error(w, http.StatusBadRequest,
+				"stok "+productName+" tidak cukup")
 			return
 		}
 		items = append(items, repository.OrderItemInput{
 			ProductID:   p.ID,
-			ProductName: p.Name,
-			UnitCents:   p.PriceCents,
+			VariantID:   variantID,
+			ProductName: productName,
+			VariantName: variantName,
+			UnitCents:   unitCents,
 			Quantity:    it.Quantity,
 		})
 	}
@@ -335,6 +396,68 @@ func (h *StorefrontHandler) GetOrder(w http.ResponseWriter, r *http.Request) {
 			"items":            itemsOut,
 		},
 		"bank_accounts": banksOut,
+	})
+}
+
+type shippingQuoteItem struct {
+	ProductID string `json:"product_id"`
+	Quantity  int    `json:"quantity"`
+}
+
+type shippingQuoteReq struct {
+	City  string              `json:"city"`
+	Items []shippingQuoteItem `json:"items"`
+}
+
+// POST /api/v1/storefront/{slug}/shipping/quote
+//
+// Public — buyer hits this on the product detail page once they fill in
+// their city. Returns a list of available courier options + prices.
+func (h *StorefrontHandler) ShippingQuote(w http.ResponseWriter, r *http.Request) {
+	slug := chi.URLParam(r, "slug")
+	store, err := h.stores.FindBySlug(r.Context(), slug)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "toko tidak ditemukan")
+		return
+	}
+
+	var req shippingQuoteReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+
+	// Sum weights from line items (best-effort: missing weight defaults to 250g)
+	totalWeightG := 0
+	for _, it := range req.Items {
+		pid, err := uuid.Parse(it.ProductID)
+		if err != nil {
+			continue
+		}
+		p, err := h.products.FindByID(r.Context(), store.ID, pid)
+		if err != nil {
+			continue
+		}
+		w := p.WeightG
+		if w <= 0 {
+			w = 250
+		}
+		qty := it.Quantity
+		if qty < 1 {
+			qty = 1
+		}
+		totalWeightG += w * qty
+	}
+	if totalWeightG == 0 {
+		totalWeightG = 250
+	}
+
+	options := shipping.QuoteOptions(req.City, store.City, totalWeightG)
+	response.JSON(w, http.StatusOK, map[string]any{
+		"options":         options,
+		"total_weight_g":  totalWeightG,
+		"buyer_city":      req.City,
+		"seller_city":     store.City,
 	})
 }
 

@@ -52,10 +52,12 @@ type OrderItem struct {
 }
 
 type OrderItemInput struct {
-	ProductID    uuid.UUID
-	ProductName  string
-	UnitCents    int64
-	Quantity     int
+	ProductID   uuid.UUID
+	VariantID   *uuid.UUID
+	ProductName string
+	VariantName string
+	UnitCents   int64
+	Quantity    int
 }
 
 type CreateOrderInput struct {
@@ -430,9 +432,13 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 
 	for _, it := range in.Items {
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO order_items (order_id, product_id, product_name, unit_price_cents, quantity, subtotal_cents)
-			VALUES ($1, $2, $3, $4, $5, $6)
-		`, o.ID, it.ProductID, it.ProductName, it.UnitCents, it.Quantity, it.UnitCents*int64(it.Quantity)); err != nil {
+			INSERT INTO order_items (order_id, product_id, variant_id, product_name, variant_name,
+			                         unit_price_cents, quantity, subtotal_cents)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		`,
+			o.ID, it.ProductID, it.VariantID, it.ProductName, it.VariantName,
+			it.UnitCents, it.Quantity, it.UnitCents*int64(it.Quantity),
+		); err != nil {
 			return nil, fmt.Errorf("insert order_item: %w", err)
 		}
 	}

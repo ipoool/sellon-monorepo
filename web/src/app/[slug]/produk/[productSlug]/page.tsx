@@ -27,12 +27,24 @@ type Product = {
   price_cents: number;
   stock: number;
   photo_urls: string[];
+  has_variants: boolean;
+};
+
+type StorefrontVariant = {
+  id: string;
+  name: string;
+  price_cents: number;
+  stock: number;
 };
 
 async function fetchProduct(
   slug: string,
   productSlug: string,
-): Promise<{ store: Store; product: Product } | null> {
+): Promise<{
+  store: Store;
+  product: Product;
+  variants: StorefrontVariant[];
+} | null> {
   try {
     const res = await fetch(
       `${apiBase}/api/v1/storefront/${slug}/products/${productSlug}`,
@@ -67,7 +79,13 @@ export default async function ProductDetailPage({
   const { slug, productSlug } = await params;
   const data = await fetchProduct(slug, productSlug);
   if (!data) notFound();
-  const { store, product } = data;
+  const { store, product, variants = [] } = data;
+  const totalStock = product.has_variants
+    ? variants.reduce((sum, v) => sum + v.stock, 0)
+    : product.stock;
+  const minPrice = product.has_variants && variants.length > 0
+    ? Math.min(...variants.map((v) => v.price_cents))
+    : product.price_cents;
 
   return (
     <div className="min-h-svh bg-neutral-50">
@@ -126,13 +144,18 @@ export default async function ProductDetailPage({
                   {product.name}
                 </h1>
                 <p className="mt-3 font-display text-3xl font-semibold text-neutral-900">
-                  {formatRupiah(product.price_cents)}
+                  {product.has_variants && variants.length > 1
+                    ? `Mulai ${formatRupiah(minPrice)}`
+                    : formatRupiah(minPrice)}
                 </p>
                 <div className="mt-2 flex items-center gap-2">
-                  {product.stock > 0 ? (
-                    <Badge variant="success">Stok {product.stock}</Badge>
+                  {totalStock > 0 ? (
+                    <Badge variant="success">Stok {totalStock}</Badge>
                   ) : (
                     <Badge variant="warning">Stok habis</Badge>
+                  )}
+                  {product.has_variants && (
+                    <Badge variant="brand">{variants.length} varian</Badge>
                   )}
                 </div>
 
@@ -158,7 +181,9 @@ export default async function ProductDetailPage({
                     name: product.name,
                     price_cents: product.price_cents,
                     stock: product.stock,
+                    has_variants: product.has_variants,
                   }}
+                  variants={variants}
                   isOpen={store.is_open}
                 />
               </div>
