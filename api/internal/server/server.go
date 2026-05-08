@@ -101,7 +101,12 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 				r.Delete("/{id}", productHandler.Delete)
 			})
 
-			r.Get("/orders", orderHandler.List)
+			r.Route("/orders", func(r chi.Router) {
+				r.Get("/", orderHandler.List)
+				r.Get("/{id}", orderHandler.Get)
+				r.Patch("/{id}/status", orderHandler.UpdateStatus)
+				r.Patch("/{id}/notes", orderHandler.UpdateNotes)
+			})
 
 			r.Route("/customers", func(r chi.Router) {
 				r.Get("/", customerHandler.List)

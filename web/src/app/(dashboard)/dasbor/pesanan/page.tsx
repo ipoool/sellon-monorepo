@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
-import { Inbox, Send } from "lucide-react";
+import Link from "next/link";
+import { Inbox, Send, ArrowRight } from "lucide-react";
 
 import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { Card } from "@/components/ui/card";
@@ -76,13 +77,19 @@ export default async function PesananPage() {
                 <th className="px-5 py-3">Status</th>
                 <th className="px-5 py-3">Pembayaran</th>
                 <th className="px-5 py-3">Tanggal</th>
+                <th className="px-5 py-3"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-200">
               {orders.map((o) => (
                 <tr key={o.id} className="hover:bg-neutral-50">
                   <td className="px-5 py-3 font-mono text-xs text-neutral-700">
-                    {o.order_number}
+                    <Link
+                      href={`/dasbor/pesanan/${o.id}`}
+                      className="hover:text-brand-700"
+                    >
+                      {o.order_number}
+                    </Link>
                   </td>
                   <td className="px-5 py-3">
                     <div>
@@ -109,6 +116,15 @@ export default async function PesananPage() {
                   </td>
                   <td className="px-5 py-3 text-neutral-600">
                     {formatDateTimeID(o.created_at)}
+                  </td>
+                  <td className="px-5 py-3 text-right">
+                    <Link
+                      href={`/dasbor/pesanan/${o.id}`}
+                      className="inline-flex items-center gap-1 text-sm font-medium text-brand-600 hover:text-brand-700"
+                    >
+                      Detail
+                      <ArrowRight className="size-3.5" aria-hidden />
+                    </Link>
                   </td>
                 </tr>
               ))}

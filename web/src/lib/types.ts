@@ -29,17 +29,26 @@ export type Product = {
   created_at: string;
 };
 
+export type OrderStatus =
+  | "pending"
+  | "confirmed"
+  | "processing"
+  | "shipped"
+  | "completed"
+  | "cancelled";
+
+export type PaymentStatus =
+  | "unpaid"
+  | "pending"
+  | "paid"
+  | "failed"
+  | "refunded";
+
 export type Order = {
   id: string;
   order_number: string;
-  status:
-    | "pending"
-    | "confirmed"
-    | "processing"
-    | "shipped"
-    | "completed"
-    | "cancelled";
-  payment_status: "unpaid" | "pending" | "paid" | "failed" | "refunded";
+  status: OrderStatus;
+  payment_status: PaymentStatus;
   payment_method: string;
   subtotal_cents: number;
   shipping_cents: number;
@@ -49,6 +58,44 @@ export type Order = {
   customer_whatsapp: string;
   customer_city: string;
   created_at: string;
+};
+
+export type OrderItem = {
+  id: string;
+  product_name: string;
+  variant_name: string;
+  unit_price_cents: number;
+  quantity: number;
+  subtotal_cents: number;
+};
+
+export type OrderDetail = {
+  id: string;
+  order_number: string;
+  status: OrderStatus;
+  payment_status: PaymentStatus;
+  payment_method: string;
+  subtotal_cents: number;
+  shipping_cents: number;
+  total_cents: number;
+  courier: string;
+  courier_service: string;
+  tracking_number: string;
+  customer_name: string;
+  customer_whatsapp: string;
+  customer_address: string;
+  customer_city: string;
+  notes: string;
+  seller_notes: string;
+  payment_url: string;
+  paid_at: string | null;
+  shipped_at: string | null;
+  completed_at: string | null;
+  cancelled_at: string | null;
+  cancellation_reason: string;
+  created_at: string;
+  updated_at: string;
+  items: OrderItem[];
 };
 
 export type Customer = {

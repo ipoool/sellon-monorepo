@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -12,24 +13,42 @@ import (
 )
 
 type Order struct {
-	ID                uuid.UUID
-	StoreID           uuid.UUID
-	OrderNumber       string
-	Status            string
-	PaymentStatus     string
-	PaymentMethod    string
-	SubtotalCents    int64
-	ShippingCents    int64
-	TotalCents       int64
-	Courier          string
-	CourierService   string
-	TrackingNumber   string
-	CustomerName     string
-	CustomerWhatsApp string
-	CustomerAddress  string
-	CustomerCity     string
-	Notes            string
-	CreatedAt        time.Time
+	ID                 uuid.UUID
+	StoreID            uuid.UUID
+	OrderNumber        string
+	Status             string
+	PaymentStatus      string
+	PaymentMethod      string
+	SubtotalCents      int64
+	ShippingCents      int64
+	TotalCents         int64
+	Courier            string
+	CourierService     string
+	TrackingNumber     string
+	CustomerName       string
+	CustomerWhatsApp   string
+	CustomerAddress    string
+	CustomerCity       string
+	Notes              string
+	SellerNotes        string
+	PaymentURL         string
+	PaidAt             *time.Time
+	ShippedAt          *time.Time
+	CompletedAt        *time.Time
+	CancelledAt        *time.Time
+	CancellationReason string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
+type OrderItem struct {
+	ID             uuid.UUID
+	ProductID      *uuid.UUID
+	ProductName    string
+	VariantName    string
+	UnitPriceCents int64
+	Quantity       int
+	SubtotalCents  int64
 }
 
 type OrderItemInput struct {
@@ -101,6 +120,170 @@ func (r *OrderRepo) StatsForStore(ctx context.Context, storeID uuid.UUID) (today
 		FROM orders WHERE store_id = $1
 	`, storeID).Scan(&todayCount, &monthRevenueCents)
 	return
+}
+
+var ErrOrderNotFound = errors.New("order not found")
+var ErrInvalidTransition = errors.New("invalid status transition")
+
+// FindByID returns full order with all fields. Tenant-isolated by storeID.
+func (r *OrderRepo) FindByID(ctx context.Context, storeID, id uuid.UUID) (*Order, error) {
+	const q = `
+		SELECT id, store_id, order_number, status, payment_status, payment_method,
+		       subtotal_cents, shipping_cents, total_cents,
+		       courier, courier_service, tracking_number,
+		       customer_name, customer_whatsapp, customer_address, customer_city,
+		       notes, seller_notes, payment_url,
+		       paid_at, shipped_at, completed_at, cancelled_at, cancellation_reason,
+		       created_at, updated_at
+		FROM orders WHERE id = $1 AND store_id = $2
+	`
+	var o Order
+	err := r.pool.QueryRow(ctx, q, id, storeID).Scan(
+		&o.ID, &o.StoreID, &o.OrderNumber, &o.Status, &o.PaymentStatus, &o.PaymentMethod,
+		&o.SubtotalCents, &o.ShippingCents, &o.TotalCents,
+		&o.Courier, &o.CourierService, &o.TrackingNumber,
+		&o.CustomerName, &o.CustomerWhatsApp, &o.CustomerAddress, &o.CustomerCity,
+		&o.Notes, &o.SellerNotes, &o.PaymentURL,
+		&o.PaidAt, &o.ShippedAt, &o.CompletedAt, &o.CancelledAt, &o.CancellationReason,
+		&o.CreatedAt, &o.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrOrderNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &o, nil
+}
+
+func (r *OrderRepo) ListItems(ctx context.Context, orderID uuid.UUID) ([]OrderItem, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, product_id, product_name, variant_name, unit_price_cents, quantity, subtotal_cents
+		FROM order_items WHERE order_id = $1 ORDER BY created_at ASC
+	`, orderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []OrderItem
+	for rows.Next() {
+		var it OrderItem
+		if err := rows.Scan(
+			&it.ID, &it.ProductID, &it.ProductName, &it.VariantName,
+			&it.UnitPriceCents, &it.Quantity, &it.SubtotalCents,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, it)
+	}
+	return out, rows.Err()
+}
+
+// Confirm transitions pending -> confirmed. Idempotent on already-confirmed.
+func (r *OrderRepo) Confirm(ctx context.Context, storeID, id uuid.UUID) error {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE orders SET status = 'confirmed', updated_at = now()
+		WHERE id = $1 AND store_id = $2 AND status = 'pending'
+	`, id, storeID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrInvalidTransition
+	}
+	return nil
+}
+
+// Process transitions confirmed -> processing.
+func (r *OrderRepo) Process(ctx context.Context, storeID, id uuid.UUID) error {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE orders SET status = 'processing', updated_at = now()
+		WHERE id = $1 AND store_id = $2 AND status = 'confirmed'
+	`, id, storeID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrInvalidTransition
+	}
+	return nil
+}
+
+// Ship transitions confirmed/processing -> shipped, requires tracking number.
+func (r *OrderRepo) Ship(ctx context.Context, storeID, id uuid.UUID, courier, service, tracking string) error {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE orders SET status = 'shipped',
+		    courier = COALESCE(NULLIF($3, ''), courier),
+		    courier_service = COALESCE(NULLIF($4, ''), courier_service),
+		    tracking_number = $5,
+		    shipped_at = now(),
+		    updated_at = now()
+		WHERE id = $1 AND store_id = $2 AND status IN ('confirmed', 'processing')
+	`, id, storeID, courier, service, tracking)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrInvalidTransition
+	}
+	return nil
+}
+
+// Complete transitions shipped -> completed.
+func (r *OrderRepo) Complete(ctx context.Context, storeID, id uuid.UUID) error {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE orders SET status = 'completed', completed_at = now(), updated_at = now()
+		WHERE id = $1 AND store_id = $2 AND status = 'shipped'
+	`, id, storeID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrInvalidTransition
+	}
+	return nil
+}
+
+// Cancel transitions any non-final order -> cancelled with optional reason.
+func (r *OrderRepo) Cancel(ctx context.Context, storeID, id uuid.UUID, reason string) error {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE orders SET status = 'cancelled',
+		    cancellation_reason = $3,
+		    cancelled_at = now(),
+		    updated_at = now()
+		WHERE id = $1 AND store_id = $2 AND status NOT IN ('completed', 'cancelled')
+	`, id, storeID, reason)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrInvalidTransition
+	}
+	return nil
+}
+
+// MarkPaid sets payment_status='paid', stamps paid_at. Used for manual confirmation.
+func (r *OrderRepo) MarkPaid(ctx context.Context, storeID, id uuid.UUID) error {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE orders SET payment_status = 'paid', paid_at = now(), updated_at = now()
+		WHERE id = $1 AND store_id = $2 AND payment_status != 'paid'
+	`, id, storeID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrInvalidTransition
+	}
+	return nil
+}
+
+// SetSellerNotes overwrites the seller's internal notes for an order.
+func (r *OrderRepo) SetSellerNotes(ctx context.Context, storeID, id uuid.UUID, notes string) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE orders SET seller_notes = $3, updated_at = now()
+		WHERE id = $1 AND store_id = $2
+	`, id, storeID, notes)
+	return err
 }
 
 // Create inserts an order + items + upserts customer in one transaction.
