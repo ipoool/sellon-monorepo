@@ -56,7 +56,7 @@ export function LogoutButton() {
         ref={dialogRef}
         aria-labelledby="logout-title"
         aria-describedby="logout-description"
-        className="rounded-xl border border-neutral-200 bg-white p-0 shadow-elevated backdrop:bg-neutral-900/40 backdrop:backdrop-blur-sm"
+        className="fixed left-1/2 top-1/2 m-0 -translate-x-1/2 -translate-y-1/2 rounded-xl border border-neutral-200 bg-white p-0 shadow-elevated backdrop:bg-neutral-900/40 backdrop:backdrop-blur-sm"
       >
         <div className="w-[min(92vw,400px)] p-6">
           <div className="flex size-10 items-center justify-center rounded-lg bg-brand-50 text-brand-600">

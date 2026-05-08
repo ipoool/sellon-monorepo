@@ -40,19 +40,14 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
   const [savedFlash, setSavedFlash] = useState(false);
   const [verifyMsg, setVerifyMsg] = useState<string | null>(null);
 
-  // Mode-switch confirmation dialog state.
+  // Confirm dialog state — opens at SAVE time when the mode in the form
+  // differs from what's stored in the DB.
   const [pendingMode, setPendingMode] = useState<"sandbox" | "production" | null>(null);
   const [confirmInput, setConfirmInput] = useState("");
+  const [pendingPayload, setPendingPayload] = useState<Record<string, unknown> | null>(null);
   const switchDialogRef = useRef<HTMLDialogElement>(null);
 
-  function requestModeSwitch(target: "sandbox" | "production") {
-    const targetIsSandbox = target === "sandbox";
-    if (targetIsSandbox === isSandbox) return; // already on this mode
-    setPendingMode(target);
-    setConfirmInput("");
-  }
-
-  // Open / close native dialog imperatively when pendingMode changes.
+  // Open / close native dialog imperatively.
   useEffect(() => {
     const dialog = switchDialogRef.current;
     if (!dialog) return;
@@ -60,31 +55,28 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
     if (!pendingMode && dialog.open) dialog.close();
   }, [pendingMode]);
 
-  // Sync ESC + backdrop click into pendingMode = null
+  // ESC + backdrop click cancels the dialog.
   useEffect(() => {
     const dialog = switchDialogRef.current;
     if (!dialog) return;
-    const onClick = (e: MouseEvent) => {
-      if (e.target === dialog) setPendingMode(null);
+    const cancel = () => {
+      setPendingMode(null);
+      setPendingPayload(null);
+      setConfirmInput("");
     };
-    const onCancel = () => setPendingMode(null);
+    const onClick = (e: MouseEvent) => {
+      if (e.target === dialog) cancel();
+    };
     dialog.addEventListener("click", onClick);
-    dialog.addEventListener("cancel", onCancel);
+    dialog.addEventListener("cancel", cancel);
     return () => {
       dialog.removeEventListener("click", onClick);
-      dialog.removeEventListener("cancel", onCancel);
+      dialog.removeEventListener("cancel", cancel);
     };
   }, []);
 
   const requiredPhrase = pendingMode === "production" ? "PRODUCTION" : "SANDBOX";
   const canConfirmSwitch = confirmInput === requiredPhrase;
-
-  function confirmModeSwitch() {
-    if (!pendingMode || !canConfirmSwitch) return;
-    setIsSandbox(pendingMode === "sandbox");
-    setPendingMode(null);
-    setConfirmInput("");
-  }
 
   const isConfigured = initial?.is_configured ?? false;
   const lastStatus = initial?.last_verify_status || "";
@@ -103,9 +95,8 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
     ? "SB-Mid-client-..."
     : "Mid-client-...";
 
-  async function onSubmit(e: FormEvent<HTMLFormElement>) {
+  function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setPending(true);
     setError(null);
     setSavedFlash(false);
 
@@ -125,7 +116,6 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
       enabled_methods: enabledMethods,
       sandbox_server_key: isSandbox ? submittedServerKey : "",
       prod_server_key: !isSandbox ? submittedServerKey : "",
-      // Preserve the inactive env's client key by sending its current value.
       sandbox_client_key: isSandbox
         ? submittedClientKey
         : initial?.client_key_sandbox ?? "",
@@ -134,6 +124,23 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
         : initial?.client_key_prod ?? "",
     };
 
+    // If the saved mode differs from what's in the form (and we already have
+    // a config), require typed confirmation before committing the switch.
+    const savedMode = initial?.is_sandbox ?? true;
+    const modeIsChanging = (initial?.is_configured ?? false) && savedMode !== isSandbox;
+
+    if (modeIsChanging) {
+      setPendingMode(isSandbox ? "sandbox" : "production");
+      setPendingPayload(body);
+      setConfirmInput("");
+      return;
+    }
+
+    void doSave(body);
+  }
+
+  async function doSave(body: Record<string, unknown>) {
+    setPending(true);
     try {
       const res = await fetch(`${apiBase}/api/v1/payments/midtrans`, {
         method: "PUT",
@@ -150,6 +157,16 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
     } finally {
       setPending(false);
     }
+  }
+
+  async function confirmModeSwitchAndSave() {
+    if (!canConfirmSwitch || !pendingPayload) return;
+    const payload = pendingPayload;
+    // Close dialog optimistically; doSave handles error state.
+    setPendingMode(null);
+    setPendingPayload(null);
+    setConfirmInput("");
+    await doSave(payload);
   }
 
   async function onVerify() {
@@ -235,7 +252,7 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
               description="Uji coba dengan akun sandbox Midtrans"
               active={isSandbox}
               hasKey={hasSandboxKey}
-              onClick={() => requestModeSwitch("sandbox")}
+              onClick={() => setIsSandbox(true)}
             />
             <ModeOption
               role="tab"
@@ -244,7 +261,7 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
               description="Pembayaran asli dari pembeli"
               active={!isSandbox}
               hasKey={hasProdKey}
-              onClick={() => requestModeSwitch("production")}
+              onClick={() => setIsSandbox(false)}
             />
           </div>
         </Card>
@@ -411,7 +428,7 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
         ref={switchDialogRef}
         aria-labelledby="mode-switch-title"
         aria-describedby="mode-switch-description"
-        className="rounded-xl border border-neutral-200 bg-white p-0 shadow-elevated backdrop:bg-neutral-900/40 backdrop:backdrop-blur-sm"
+        className="fixed left-1/2 top-1/2 m-0 -translate-x-1/2 -translate-y-1/2 rounded-xl border border-neutral-200 bg-white p-0 shadow-elevated backdrop:bg-neutral-900/40 backdrop:backdrop-blur-sm"
       >
         <div className="w-[min(94vw,460px)] p-6">
           <div
@@ -480,7 +497,7 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
               onKeyDown={(e) => {
                 if (e.key === "Enter" && canConfirmSwitch) {
                   e.preventDefault();
-                  confirmModeSwitch();
+                  void confirmModeSwitchAndSave();
                 }
               }}
             />
@@ -494,7 +511,12 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
               type="button"
               variant="ghost"
               size="md"
-              onClick={() => setPendingMode(null)}
+              onClick={() => {
+                setPendingMode(null);
+                setPendingPayload(null);
+                setConfirmInput("");
+              }}
+              disabled={pending}
             >
               Batal
             </Button>
@@ -502,15 +524,17 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
               type="button"
               variant={pendingMode === "production" ? "destructive" : "default"}
               size="md"
-              disabled={!canConfirmSwitch}
-              onClick={confirmModeSwitch}
+              disabled={!canConfirmSwitch || pending}
+              onClick={() => void confirmModeSwitchAndSave()}
             >
               {pendingMode === "production" ? (
                 <Rocket className="size-4" aria-hidden />
               ) : (
                 <FlaskConical className="size-4" aria-hidden />
               )}
-              Pindah ke {pendingMode === "production" ? "Production" : "Sandbox"}
+              {pending
+                ? "Menyimpan…"
+                : `Konfirmasi & Simpan (${pendingMode === "production" ? "Production" : "Sandbox"})`}
             </Button>
           </div>
         </div>
