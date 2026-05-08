@@ -25,14 +25,14 @@ Butuh Go 1.25+ dan `air`:
 
 ```bash
 go install github.com/air-verse/air@latest
-cp ../../.env.example ../../.env
+cp ../.env.example ../.env
 air -c .air.toml
 ```
 
 ## Struktur
 
 ```
-apps/api/
+api/
 ├── cmd/server/main.go            entry point
 ├── internal/
 │   ├── config/                   viper-based env loader

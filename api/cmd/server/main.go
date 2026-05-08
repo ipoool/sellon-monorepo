@@ -8,9 +8,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/sellon/sellon/apps/api/internal/config"
-	"github.com/sellon/sellon/apps/api/internal/db"
-	"github.com/sellon/sellon/apps/api/internal/server"
+	"github.com/sellon/sellon/api/internal/config"
+	"github.com/sellon/sellon/api/internal/db"
+	"github.com/sellon/sellon/api/internal/server"
 )
 
 func main() {

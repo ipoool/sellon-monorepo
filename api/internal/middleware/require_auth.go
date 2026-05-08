@@ -5,8 +5,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/sellon/sellon/apps/api/internal/auth"
-	"github.com/sellon/sellon/apps/api/internal/pkg/response"
+	"github.com/sellon/sellon/api/internal/auth"
+	"github.com/sellon/sellon/api/internal/pkg/response"
 )
 
 // RequireAuth reads the session cookie, verifies the JWT, and stores the

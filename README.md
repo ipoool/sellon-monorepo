@@ -32,15 +32,14 @@ curl http://localhost:8080/health
 
 ```
 sellon/
-├── apps/
-│   ├── api/          Go backend (chi, pgx, slog, viper)
-│   └── web/          Next.js 15 frontend (App Router, Tailwind v4)
+├── api/              Go backend (chi, pgx, slog, viper)
+├── web/              Next.js 16 frontend (App Router, Tailwind v4)
 ├── docker-compose.yml
 ├── Makefile
 └── .env.example
 ```
 
-Lihat `apps/api/README.md` dan `apps/web/README.md` untuk detail per service.
+Lihat `api/README.md` dan `web/README.md` untuk detail per service.
 
 ## Make Targets
 

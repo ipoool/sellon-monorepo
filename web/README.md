@@ -19,7 +19,7 @@ App di http://localhost:3000.
 Butuh Node 20+ dan pnpm (via `corepack enable`):
 
 ```bash
-cp ../../.env.example ../../.env
+cp ../.env.example ../.env
 pnpm install
 pnpm dev
 ```
@@ -27,7 +27,7 @@ pnpm dev
 ## Struktur
 
 ```
-apps/web/
+web/
 ├── src/
 │   ├── app/
 │   │   ├── layout.tsx           Root layout + font loader

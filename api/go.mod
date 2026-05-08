@@ -1,4 +1,4 @@
-module github.com/sellon/sellon/apps/api
+module github.com/sellon/sellon/api
 
 go 1.25.0
 

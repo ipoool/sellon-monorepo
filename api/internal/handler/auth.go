@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/sellon/sellon/apps/api/internal/auth"
-	"github.com/sellon/sellon/apps/api/internal/pkg/response"
-	"github.com/sellon/sellon/apps/api/internal/repository"
+	"github.com/sellon/sellon/api/internal/auth"
+	"github.com/sellon/sellon/api/internal/pkg/response"
+	"github.com/sellon/sellon/api/internal/repository"
 )
 
 type AuthHandler struct {

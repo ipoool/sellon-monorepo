@@ -1,13 +1,13 @@
 services:
   api:
     build:
-      context: ./apps/api
+      context: ./api
       target: dev
     container_name: sellon-api
     ports:
       - "${API_PORT:-8080}:8080"
     volumes:
-      - ./apps/api:/app
+      - ./api:/app
       - go-modules:/go/pkg/mod
     env_file: .env
     depends_on:
@@ -19,13 +19,13 @@ services:
 
   web:
     build:
-      context: ./apps/web
+      context: ./web
       target: dev
     container_name: sellon-web
     ports:
       - "${WEB_PORT:-3000}:3000"
     volumes:
-      - ./apps/web:/app
+      - ./web:/app
       - /app/node_modules
       - /app/.next
     env_file: .env

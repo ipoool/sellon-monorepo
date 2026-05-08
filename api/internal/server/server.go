@@ -10,11 +10,11 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/sellon/sellon/apps/api/internal/auth"
-	"github.com/sellon/sellon/apps/api/internal/config"
-	"github.com/sellon/sellon/apps/api/internal/handler"
-	"github.com/sellon/sellon/apps/api/internal/middleware"
-	"github.com/sellon/sellon/apps/api/internal/repository"
+	"github.com/sellon/sellon/api/internal/auth"
+	"github.com/sellon/sellon/api/internal/config"
+	"github.com/sellon/sellon/api/internal/handler"
+	"github.com/sellon/sellon/api/internal/middleware"
+	"github.com/sellon/sellon/api/internal/repository"
 )
 
 type Server struct {

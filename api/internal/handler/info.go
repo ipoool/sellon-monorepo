@@ -3,8 +3,8 @@ package handler
 import (
 	"net/http"
 
-	"github.com/sellon/sellon/apps/api/internal/config"
-	"github.com/sellon/sellon/apps/api/internal/pkg/response"
+	"github.com/sellon/sellon/api/internal/config"
+	"github.com/sellon/sellon/api/internal/pkg/response"
 )
 
 func Info(cfg *config.Config) http.HandlerFunc {
