@@ -34,9 +34,9 @@ const columns: FooterColumn[] = [
   {
     title: "Resource",
     links: [
-      { label: "Pusat Bantuan" },
-      { label: "Panduan UMKM" },
-      { label: "Status Layanan" },
+      { label: "Pusat Bantuan", href: "/bantuan" },
+      { label: "Panduan UMKM", href: "/panduan" },
+      { label: "Status Layanan", href: "/status" },
       { label: "API Docs" },
     ],
   },
@@ -44,8 +44,8 @@ const columns: FooterColumn[] = [
     title: "Hukum",
     links: [
       { label: "Syarat & Ketentuan", href: "/syarat-ketentuan" },
-      { label: "Kebijakan Privasi" },
-      { label: "Kebijakan Cookie" },
+      { label: "Kebijakan Privasi", href: "/kebijakan-privasi" },
+      { label: "Kebijakan Cookie", href: "/kebijakan-cookie" },
     ],
   },
 ];
