@@ -142,6 +142,39 @@ func (r *OrderRepo) List(ctx context.Context, f ListOrdersFilter) ([]Order, erro
 	return out, rows.Err()
 }
 
+func (r *OrderRepo) ListByCustomer(ctx context.Context, storeID, customerID uuid.UUID, limit int) ([]Order, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 25
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, store_id, order_number, status, payment_status, payment_method,
+		       subtotal_cents, shipping_cents, total_cents, courier,
+		       customer_name, customer_whatsapp, customer_city, created_at
+		FROM orders
+		WHERE store_id = $1 AND customer_id = $2
+		ORDER BY created_at DESC
+		LIMIT $3
+	`, storeID, customerID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Order
+	for rows.Next() {
+		var o Order
+		if err := rows.Scan(
+			&o.ID, &o.StoreID, &o.OrderNumber, &o.Status, &o.PaymentStatus, &o.PaymentMethod,
+			&o.SubtotalCents, &o.ShippingCents, &o.TotalCents, &o.Courier,
+			&o.CustomerName, &o.CustomerWhatsApp, &o.CustomerCity, &o.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, o)
+	}
+	return out, rows.Err()
+}
+
 func (r *OrderRepo) StatsForStore(ctx context.Context, storeID uuid.UUID) (todayCount int, monthRevenueCents int64, err error) {
 	err = r.pool.QueryRow(ctx, `
 		SELECT

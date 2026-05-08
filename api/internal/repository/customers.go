@@ -70,3 +70,34 @@ func (r *CustomerRepo) CountByStore(ctx context.Context, storeID uuid.UUID) (int
 	err := r.pool.QueryRow(ctx, "SELECT COUNT(*) FROM customers WHERE store_id = $1", storeID).Scan(&n)
 	return n, err
 }
+
+func (r *CustomerRepo) FindByID(ctx context.Context, storeID, id uuid.UUID) (*Customer, error) {
+	var c Customer
+	err := r.pool.QueryRow(ctx, `
+		SELECT id, store_id, name, whatsapp_number, email, address, city, province,
+		       postal_code, notes, is_blacklisted, total_orders, total_spent_cents,
+		       last_order_at, created_at
+		FROM customers
+		WHERE store_id = $1 AND id = $2
+	`, storeID, id).Scan(
+		&c.ID, &c.StoreID, &c.Name, &c.WhatsAppNumber, &c.Email,
+		&c.Address, &c.City, &c.Province, &c.PostalCode, &c.Notes,
+		&c.IsBlacklisted, &c.TotalOrders, &c.TotalSpentCents,
+		&c.LastOrderAt, &c.CreatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+// UpdateProfile patches the seller-editable fields (notes + blacklist flag).
+// All other fields are derived from order history and shouldn't be hand-edited.
+func (r *CustomerRepo) UpdateProfile(ctx context.Context, storeID, id uuid.UUID, notes string, isBlacklisted bool) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE customers
+		SET notes = $3, is_blacklisted = $4, updated_at = now()
+		WHERE store_id = $1 AND id = $2
+	`, storeID, id, notes, isBlacklisted)
+	return err
+}

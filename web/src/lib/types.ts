@@ -138,9 +138,23 @@ export type Customer = {
   email: string;
   city: string;
   province: string;
+  address?: string;
+  postal_code?: string;
+  notes?: string;
+  is_blacklisted?: boolean;
   total_orders: number;
   total_spent_cents: number;
   last_order_at: string | null;
+  created_at?: string;
+};
+
+export type CustomerOrderSummary = {
+  id: string;
+  order_number: string;
+  status: OrderStatus;
+  payment_status: PaymentStatus;
+  total_cents: number;
+  created_at: string;
 };
 
 export type DashboardStats = {

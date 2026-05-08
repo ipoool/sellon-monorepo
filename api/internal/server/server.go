@@ -49,7 +49,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	storeHandler := handler.NewStoreHandler(stores, logger)
 	productHandler := handler.NewProductHandler(products, variants, stores, logger)
 	orderHandler := handler.NewOrderHandler(orders, stores, gateways, encryptor, midtransClient, logger)
-	customerHandler := handler.NewCustomerHandler(customers, stores, logger)
+	customerHandler := handler.NewCustomerHandler(customers, orders, stores, logger)
 	paymentHandler := handler.NewPaymentHandler(gateways, stores, encryptor, midtransClient, logger, cfg.WebhookBaseURL)
 	dashHandler := handler.NewDashboardHandler(stores, products, orders, customers, logger)
 	storefrontHandler := handler.NewStorefrontHandler(stores, products, variants, orders, bankAccounts, categories, logger)
@@ -128,6 +128,8 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 			r.Route("/customers", func(r chi.Router) {
 				r.Get("/", customerHandler.List)
 				r.Get("/export", customerHandler.ExportCSV)
+				r.Get("/{id}", customerHandler.Get)
+				r.Put("/{id}", customerHandler.Update)
 			})
 
 			r.Route("/payments/midtrans", func(r chi.Router) {
