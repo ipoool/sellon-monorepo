@@ -23,7 +23,7 @@ services:
       target: dev
     container_name: tokoflow-web
     ports:
-      - "3000:3000"
+      - "${WEB_PORT:-3000}:3000"
     volumes:
       - ./apps/web:/app
       - /app/node_modules
