@@ -15,15 +15,16 @@ import (
 )
 
 type StorefrontHandler struct {
-	stores   *repository.StoreRepo
-	products *repository.ProductRepo
-	orders   *repository.OrderRepo
-	banks    *repository.BankAccountRepo
-	logger   *slog.Logger
+	stores     *repository.StoreRepo
+	products   *repository.ProductRepo
+	orders     *repository.OrderRepo
+	banks      *repository.BankAccountRepo
+	categories *repository.CategoryRepo
+	logger     *slog.Logger
 }
 
-func NewStorefrontHandler(s *repository.StoreRepo, p *repository.ProductRepo, o *repository.OrderRepo, b *repository.BankAccountRepo, logger *slog.Logger) *StorefrontHandler {
-	return &StorefrontHandler{stores: s, products: p, orders: o, banks: b, logger: logger}
+func NewStorefrontHandler(s *repository.StoreRepo, p *repository.ProductRepo, o *repository.OrderRepo, b *repository.BankAccountRepo, c *repository.CategoryRepo, logger *slog.Logger) *StorefrontHandler {
+	return &StorefrontHandler{stores: s, products: p, orders: o, banks: b, categories: c, logger: logger}
 }
 
 type publicStoreDTO struct {
@@ -43,12 +44,18 @@ type publicStoreDTO struct {
 
 type publicProductDTO struct {
 	ID          string   `json:"id"`
+	CategoryID  string   `json:"category_id"`
 	Name        string   `json:"name"`
 	Slug        string   `json:"slug"`
 	Description string   `json:"description"`
 	PriceCents  int64    `json:"price_cents"`
 	Stock       int      `json:"stock"`
 	PhotoURLs   []string `json:"photo_urls"`
+}
+
+type publicCategoryDTO struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 func toPublicStore(s *repository.Store) publicStoreDTO {
@@ -65,10 +72,14 @@ func toPublicStore(s *repository.Store) publicStoreDTO {
 }
 
 func toPublicProduct(p *repository.Product) publicProductDTO {
+	categoryID := ""
+	if p.CategoryID != nil {
+		categoryID = p.CategoryID.String()
+	}
 	return publicProductDTO{
-		ID: p.ID.String(), Name: p.Name, Slug: p.Slug,
-		Description: p.Description, PriceCents: p.PriceCents, Stock: p.Stock,
-		PhotoURLs: p.PhotoURLs,
+		ID: p.ID.String(), CategoryID: categoryID,
+		Name: p.Name, Slug: p.Slug, Description: p.Description,
+		PriceCents: p.PriceCents, Stock: p.Stock, PhotoURLs: p.PhotoURLs,
 	}
 }
 
@@ -96,9 +107,17 @@ func (h *StorefrontHandler) GetStore(w http.ResponseWriter, r *http.Request) {
 	for i := range prods {
 		out = append(out, toPublicProduct(&prods[i]))
 	}
+
+	cats, _ := h.categories.ListByStore(r.Context(), store.ID)
+	catsOut := make([]publicCategoryDTO, 0, len(cats))
+	for _, c := range cats {
+		catsOut = append(catsOut, publicCategoryDTO{ID: c.ID.String(), Name: c.Name})
+	}
+
 	response.JSON(w, http.StatusOK, map[string]any{
-		"store":    toPublicStore(store),
-		"products": out,
+		"store":      toPublicStore(store),
+		"products":   out,
+		"categories": catsOut,
 	})
 }
 

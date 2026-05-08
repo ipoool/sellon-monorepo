@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Trash2, Save, ArrowLeft, Plus, X, Image as ImageIcon } from "lucide-react";
 
@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
-import type { Product } from "@/lib/types";
+import type { Category, Product } from "@/lib/types";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
@@ -26,6 +26,22 @@ export function ProdukForm({ initial }: Props) {
   const [pending, setPending] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [categories, setCategories] = useState<Category[]>([]);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch(`${apiBase}/api/v1/categories`, {
+          credentials: "include",
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as { categories: Category[] };
+        setCategories(data.categories ?? []);
+      } catch {
+        // ignore
+      }
+    })();
+  }, []);
 
   function addPhoto() {
     const url = photoInput.trim();
@@ -50,6 +66,7 @@ export function ProdukForm({ initial }: Props) {
 
     const fd = new FormData(e.currentTarget);
     const body = {
+      category_id: String(fd.get("category_id") ?? ""),
       name: String(fd.get("name") ?? ""),
       slug: String(fd.get("slug") ?? ""),
       description: String(fd.get("description") ?? ""),
@@ -118,7 +135,7 @@ export function ProdukForm({ initial }: Props) {
               placeholder="Keripik Singkong Pedas 500g"
             />
           </div>
-          <div className="flex flex-col gap-1.5 sm:col-span-2">
+          <div className="flex flex-col gap-1.5">
             <Label htmlFor="slug">URL Slug</Label>
             <Input
               id="slug"
@@ -126,6 +143,33 @@ export function ProdukForm({ initial }: Props) {
               defaultValue={initial?.slug ?? ""}
               placeholder="(otomatis dari nama jika kosong)"
             />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="category_id">Kategori</Label>
+            <Select
+              id="category_id"
+              name="category_id"
+              defaultValue={initial?.category_id ?? ""}
+            >
+              <option value="">— Tanpa kategori —</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </Select>
+            {categories.length === 0 && (
+              <p className="text-xs text-neutral-500">
+                Belum ada kategori.{" "}
+                <a
+                  href="/dasbor/pengaturan/kategori"
+                  className="font-medium text-brand-600 hover:text-brand-700"
+                >
+                  Tambah di Pengaturan
+                </a>
+                .
+              </p>
+            )}
           </div>
           <div className="flex flex-col gap-1.5 sm:col-span-2">
             <Label htmlFor="description">Deskripsi</Label>

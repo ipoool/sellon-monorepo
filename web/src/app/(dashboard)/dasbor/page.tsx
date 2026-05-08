@@ -35,15 +35,11 @@ export default async function DasborPage() {
   const me = await getMe();
   if (!me) redirect("/masuk");
 
+  // (dashboard)/layout.tsx already guards: authed + has store.
   const [statsRes, storeRes] = await Promise.all([
     serverApi<DashboardStats>("/api/v1/dashboard/stats"),
     serverApi<{ store: Store | null }>("/api/v1/store"),
   ]);
-
-  // First-time user: no store yet → push them through setup
-  if (statsRes && !statsRes.has_store) {
-    redirect("/dasbor/pengaturan/toko");
-  }
 
   const stats = statsRes ?? {
     has_store: true,

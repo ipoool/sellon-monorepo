@@ -179,6 +179,7 @@ func (r *ProductRepo) FindByID(ctx context.Context, storeID, id uuid.UUID) (*Pro
 
 type SaveProductInput struct {
 	StoreID     uuid.UUID
+	CategoryID  *uuid.UUID
 	Name        string
 	Slug        string
 	Description string
@@ -194,16 +195,16 @@ type SaveProductInput struct {
 
 func (r *ProductRepo) Create(ctx context.Context, in SaveProductInput) (*Product, error) {
 	const q = `
-		INSERT INTO products (store_id, name, slug, description, price_cents, stock,
+		INSERT INTO products (store_id, category_id, name, slug, description, price_cents, stock,
 		                     weight_g, length_cm, width_cm, height_cm, status, photo_urls)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		RETURNING id, store_id, category_id, name, slug, description, price_cents, stock,
 		          weight_g, length_cm, width_cm, height_cm, status, photo_urls, has_variants,
 		          created_at, updated_at
 	`
 	var p Product
 	err := r.pool.QueryRow(ctx, q,
-		in.StoreID, in.Name, in.Slug, in.Description, in.PriceCents, in.Stock,
+		in.StoreID, in.CategoryID, in.Name, in.Slug, in.Description, in.PriceCents, in.Stock,
 		in.WeightG, in.LengthCm, in.WidthCm, in.HeightCm, in.Status, in.PhotoURLs,
 	).Scan(
 		&p.ID, &p.StoreID, &p.CategoryID, &p.Name, &p.Slug, &p.Description,
@@ -219,9 +220,10 @@ func (r *ProductRepo) Create(ctx context.Context, in SaveProductInput) (*Product
 func (r *ProductRepo) Update(ctx context.Context, id uuid.UUID, in SaveProductInput) (*Product, error) {
 	const q = `
 		UPDATE products
-		SET name = $3, slug = $4, description = $5, price_cents = $6, stock = $7,
-		    weight_g = $8, length_cm = $9, width_cm = $10, height_cm = $11,
-		    status = $12, photo_urls = $13, updated_at = now()
+		SET category_id = $3,
+		    name = $4, slug = $5, description = $6, price_cents = $7, stock = $8,
+		    weight_g = $9, length_cm = $10, width_cm = $11, height_cm = $12,
+		    status = $13, photo_urls = $14, updated_at = now()
 		WHERE id = $1 AND store_id = $2
 		RETURNING id, store_id, category_id, name, slug, description, price_cents, stock,
 		          weight_g, length_cm, width_cm, height_cm, status, photo_urls, has_variants,
@@ -229,7 +231,7 @@ func (r *ProductRepo) Update(ctx context.Context, id uuid.UUID, in SaveProductIn
 	`
 	var p Product
 	err := r.pool.QueryRow(ctx, q,
-		id, in.StoreID, in.Name, in.Slug, in.Description, in.PriceCents, in.Stock,
+		id, in.StoreID, in.CategoryID, in.Name, in.Slug, in.Description, in.PriceCents, in.Stock,
 		in.WeightG, in.LengthCm, in.WidthCm, in.HeightCm, in.Status, in.PhotoURLs,
 	).Scan(
 		&p.ID, &p.StoreID, &p.CategoryID, &p.Name, &p.Slug, &p.Description,

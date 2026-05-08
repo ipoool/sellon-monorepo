@@ -38,6 +38,7 @@ type StorefrontStore = {
 
 type StorefrontProduct = {
   id: string;
+  category_id: string;
   name: string;
   slug: string;
   description: string;
@@ -46,9 +47,12 @@ type StorefrontProduct = {
   photo_urls: string[];
 };
 
+type StorefrontCategory = { id: string; name: string };
+
 type StorefrontData = {
   store: StorefrontStore;
   products: StorefrontProduct[];
+  categories: StorefrontCategory[];
 };
 
 const dayLabels: Record<DayOfWeek, string> = {
@@ -123,7 +127,7 @@ export default async function StorefrontPage({
   const { slug } = await params;
   const data = await fetchStorefront(slug);
   if (!data) notFound();
-  const { store, products } = data;
+  const { store, products, categories = [] } = data;
 
   const todayHours = store.open_hours?.[todayKey()];
   const openNow = store.is_open && isCurrentlyOpen(store.open_hours) !== false;
@@ -261,7 +265,11 @@ export default async function StorefrontPage({
             </div>
           )}
 
-          <StorefrontCatalog storeSlug={slug} products={products} />
+          <StorefrontCatalog
+            storeSlug={slug}
+            products={products}
+            categories={categories}
+          />
         </Container>
       </main>
 

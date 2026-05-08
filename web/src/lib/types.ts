@@ -26,8 +26,16 @@ export type BankAccount = {
   qris_url: string;
 };
 
+export type Category = {
+  id: string;
+  name: string;
+  sort_order: number;
+  product_count: number;
+};
+
 export type Product = {
   id: string;
+  category_id: string;
   name: string;
   slug: string;
   description: string;

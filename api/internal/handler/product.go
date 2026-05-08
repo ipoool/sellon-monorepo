@@ -28,6 +28,7 @@ func NewProductHandler(products *repository.ProductRepo, stores *repository.Stor
 
 type productDTO struct {
 	ID          string   `json:"id"`
+	CategoryID  string   `json:"category_id"`
 	Name        string   `json:"name"`
 	Slug        string   `json:"slug"`
 	Description string   `json:"description"`
@@ -44,8 +45,13 @@ type productDTO struct {
 }
 
 func toProductDTO(p *repository.Product) productDTO {
+	categoryID := ""
+	if p.CategoryID != nil {
+		categoryID = p.CategoryID.String()
+	}
 	return productDTO{
-		ID: p.ID.String(), Name: p.Name, Slug: p.Slug, Description: p.Description,
+		ID: p.ID.String(), CategoryID: categoryID,
+		Name: p.Name, Slug: p.Slug, Description: p.Description,
 		PriceCents: p.PriceCents, Stock: p.Stock,
 		WeightG: p.WeightG, LengthCm: p.LengthCm, WidthCm: p.WidthCm, HeightCm: p.HeightCm,
 		Status: p.Status, PhotoURLs: p.PhotoURLs, HasVariants: p.HasVariants,
@@ -118,6 +124,7 @@ func (h *ProductHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 type productInput struct {
+	CategoryID  string   `json:"category_id"`
 	Name        string   `json:"name"`
 	Slug        string   `json:"slug"`
 	Description string   `json:"description"`
@@ -156,7 +163,18 @@ func (in productInput) sanitize() (repository.SaveProductInput, error) {
 	if in.PhotoURLs == nil {
 		in.PhotoURLs = []string{}
 	}
+
+	var categoryID *uuid.UUID
+	if strings.TrimSpace(in.CategoryID) != "" {
+		parsed, err := uuid.Parse(in.CategoryID)
+		if err != nil {
+			return repository.SaveProductInput{}, errors.New("category_id invalid")
+		}
+		categoryID = &parsed
+	}
+
 	return repository.SaveProductInput{
+		CategoryID: categoryID,
 		Name: in.Name, Slug: in.Slug, Description: in.Description,
 		PriceCents: in.PriceCents, Stock: in.Stock,
 		WeightG: in.WeightG, LengthCm: in.LengthCm, WidthCm: in.WidthCm, HeightCm: in.HeightCm,

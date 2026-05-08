@@ -1,11 +1,14 @@
 package handler
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -87,7 +90,7 @@ func formatTime(t interface{ Format(string) string }) string {
 	return t.Format("2006-01-02T15:04:05Z07:00")
 }
 
-// GET /api/v1/orders
+// GET /api/v1/orders?q=&status=&payment_status=
 func (h *OrderHandler) List(w http.ResponseWriter, r *http.Request) {
 	uid, _ := auth.UserIDFromContext(r.Context())
 	store, err := h.stores.FindByOwnerID(r.Context(), uid)
@@ -100,7 +103,14 @@ func (h *OrderHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := h.orders.ListByStore(r.Context(), store.ID, 100)
+	q := r.URL.Query()
+	rows, err := h.orders.List(r.Context(), repository.ListOrdersFilter{
+		StoreID:       store.ID,
+		Search:        strings.TrimSpace(q.Get("q")),
+		Status:        q.Get("status"),
+		PaymentStatus: q.Get("payment_status"),
+		Limit:         200,
+	})
 	if err != nil {
 		h.logger.Error("list orders", "err", err)
 		response.Error(w, http.StatusInternalServerError, "internal error")
@@ -119,6 +129,49 @@ func (h *OrderHandler) List(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	response.JSON(w, http.StatusOK, map[string]any{"orders": out})
+}
+
+// GET /api/v1/orders/export — CSV download (uses same filter params)
+func (h *OrderHandler) Export(w http.ResponseWriter, r *http.Request) {
+	uid, _ := auth.UserIDFromContext(r.Context())
+	store, err := h.stores.FindByOwnerID(r.Context(), uid)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "toko belum dibuat")
+		return
+	}
+	q := r.URL.Query()
+	rows, err := h.orders.List(r.Context(), repository.ListOrdersFilter{
+		StoreID:       store.ID,
+		Search:        strings.TrimSpace(q.Get("q")),
+		Status:        q.Get("status"),
+		PaymentStatus: q.Get("payment_status"),
+		Limit:         1000,
+	})
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="pesanan-`+time.Now().Format("2006-01-02")+`.csv"`)
+	cw := csv.NewWriter(w)
+	defer cw.Flush()
+	_ = cw.Write([]string{
+		"No. Order", "Tanggal", "Status", "Pembayaran", "Metode",
+		"Pembeli", "WhatsApp", "Kota", "Kurir",
+		"Subtotal (Rp)", "Ongkir (Rp)", "Total (Rp)",
+	})
+	for _, o := range rows {
+		_ = cw.Write([]string{
+			o.OrderNumber,
+			o.CreatedAt.Format("2006-01-02 15:04"),
+			o.Status, o.PaymentStatus, o.PaymentMethod,
+			o.CustomerName, o.CustomerWhatsApp, o.CustomerCity, o.Courier,
+			strconv.FormatInt(o.SubtotalCents/100, 10),
+			strconv.FormatInt(o.ShippingCents/100, 10),
+			strconv.FormatInt(o.TotalCents/100, 10),
+		})
+	}
 }
 
 // GET /api/v1/orders/{id}

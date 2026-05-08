@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Store, CreditCard, Truck, MessageCircle } from "lucide-react";
+import { Store, CreditCard, Truck, MessageCircle, Tag } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const tabs = [
   { label: "Profil Toko", href: "/dasbor/pengaturan/toko", icon: Store },
   { label: "Pembayaran", href: "/dasbor/pengaturan/pembayaran", icon: CreditCard },
+  { label: "Kategori", href: "/dasbor/pengaturan/kategori", icon: Tag },
   { label: "Pengiriman", href: "/dasbor/pengaturan/pengiriman", icon: Truck, disabled: true },
   { label: "WhatsApp", href: "/dasbor/pengaturan/whatsapp", icon: MessageCircle },
 ];

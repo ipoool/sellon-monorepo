@@ -5,9 +5,11 @@ import Link from "next/link";
 import { Search, Package } from "lucide-react";
 
 import { formatRupiah } from "@/lib/format";
+import { cn } from "@/lib/utils";
 
 type StorefrontProduct = {
   id: string;
+  category_id: string;
   name: string;
   slug: string;
   description: string;
@@ -16,21 +18,41 @@ type StorefrontProduct = {
   photo_urls: string[];
 };
 
+type StorefrontCategory = {
+  id: string;
+  name: string;
+};
+
 type Props = {
   storeSlug: string;
   products: StorefrontProduct[];
+  categories: StorefrontCategory[];
 };
 
-export function StorefrontCatalog({ storeSlug, products }: Props) {
+export function StorefrontCatalog({ storeSlug, products, categories }: Props) {
   const [query, setQuery] = useState("");
+  const [activeCategoryId, setActiveCategoryId] = useState<string>("");
+
+  // Categories with at least 1 product
+  const usedCategories = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const p of products) {
+      if (p.category_id)
+        counts.set(p.category_id, (counts.get(p.category_id) ?? 0) + 1);
+    }
+    return categories
+      .map((c) => ({ ...c, count: counts.get(c.id) ?? 0 }))
+      .filter((c) => c.count > 0);
+  }, [categories, products]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return products;
-    return products.filter((p) =>
-      (p.name + " " + p.description).toLowerCase().includes(q),
-    );
-  }, [query, products]);
+    return products.filter((p) => {
+      if (activeCategoryId && p.category_id !== activeCategoryId) return false;
+      if (!q) return true;
+      return (p.name + " " + p.description).toLowerCase().includes(q);
+    });
+  }, [query, products, activeCategoryId]);
 
   return (
     <>
@@ -41,7 +63,7 @@ export function StorefrontCatalog({ storeSlug, products }: Props) {
           </h2>
           <span className="text-sm text-neutral-500">
             {filtered.length}
-            {query && filtered.length !== products.length
+            {(query || activeCategoryId) && filtered.length !== products.length
               ? ` dari ${products.length}`
               : ""}{" "}
             item
@@ -64,17 +86,55 @@ export function StorefrontCatalog({ storeSlug, products }: Props) {
         </div>
       </div>
 
+      {usedCategories.length > 0 && (
+        <div className="mb-5 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setActiveCategoryId("")}
+            className={cn(
+              "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+              activeCategoryId === ""
+                ? "border-brand-500 bg-brand-500 text-white"
+                : "border-neutral-200 bg-white text-neutral-700 hover:border-brand-400",
+            )}
+          >
+            Semua
+            <span className="ml-1.5 text-[10px] opacity-70">
+              {products.length}
+            </span>
+          </button>
+          {usedCategories.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => setActiveCategoryId(c.id)}
+              className={cn(
+                "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                activeCategoryId === c.id
+                  ? "border-brand-500 bg-brand-500 text-white"
+                  : "border-neutral-200 bg-white text-neutral-700 hover:border-brand-400",
+              )}
+            >
+              {c.name}
+              <span className="ml-1.5 text-[10px] opacity-70">{c.count}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       {filtered.length === 0 ? (
         <div className="rounded-xl border border-neutral-200 bg-white py-16 text-center shadow-card">
           <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-neutral-100 text-neutral-500">
             <Package className="size-6" aria-hidden />
           </div>
           <p className="mt-4 font-medium text-neutral-900">
-            {query ? "Tidak ada produk yang cocok" : "Belum ada produk"}
+            {query || activeCategoryId
+              ? "Tidak ada produk yang cocok"
+              : "Belum ada produk"}
           </p>
           <p className="mt-1 text-sm text-neutral-600">
-            {query
-              ? "Coba kata kunci lain atau kosongkan kotak pencarian."
+            {query || activeCategoryId
+              ? "Coba ubah kata kunci atau pilih kategori lain."
               : "Toko-mu sedang menyiapkan produk-produknya. Cek lagi nanti ya!"}
           </p>
         </div>

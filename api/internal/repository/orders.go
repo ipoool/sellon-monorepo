@@ -79,19 +79,47 @@ func NewOrderRepo(pool *pgxpool.Pool) *OrderRepo {
 	return &OrderRepo{pool: pool}
 }
 
+type ListOrdersFilter struct {
+	StoreID       uuid.UUID
+	Search        string // matches order_number or customer_name
+	Status        string // "" = all
+	PaymentStatus string // "" = all
+	Limit         int
+}
+
 func (r *OrderRepo) ListByStore(ctx context.Context, storeID uuid.UUID, limit int) ([]Order, error) {
-	if limit <= 0 || limit > 200 {
-		limit = 50
+	return r.List(ctx, ListOrdersFilter{StoreID: storeID, Limit: limit})
+}
+
+func (r *OrderRepo) List(ctx context.Context, f ListOrdersFilter) ([]Order, error) {
+	if f.Limit <= 0 || f.Limit > 1000 {
+		f.Limit = 50
 	}
-	rows, err := r.pool.Query(ctx, `
+	args := []any{f.StoreID}
+	where := "store_id = $1"
+	if f.Search != "" {
+		args = append(args, "%"+f.Search+"%")
+		where += " AND (order_number ILIKE $2 OR customer_name ILIKE $2)"
+	}
+	if f.Status != "" {
+		args = append(args, f.Status)
+		where += " AND status = $" + itoa(len(args))
+	}
+	if f.PaymentStatus != "" {
+		args = append(args, f.PaymentStatus)
+		where += " AND payment_status = $" + itoa(len(args))
+	}
+	args = append(args, f.Limit)
+	q := `
 		SELECT id, store_id, order_number, status, payment_status, payment_method,
 		       subtotal_cents, shipping_cents, total_cents, courier,
 		       customer_name, customer_whatsapp, customer_city, created_at
 		FROM orders
-		WHERE store_id = $1
+		WHERE ` + where + `
 		ORDER BY created_at DESC
-		LIMIT $2
-	`, storeID, limit)
+		LIMIT $` + itoa(len(args))
+
+	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}

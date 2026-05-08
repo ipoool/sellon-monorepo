@@ -33,6 +33,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	gateways := repository.NewPaymentRepo(pool)
 	waTemplates := repository.NewWATemplateRepo(pool)
 	bankAccounts := repository.NewBankAccountRepo(pool)
+	categories := repository.NewCategoryRepo(pool)
 
 	googleVerifier := auth.NewGoogleVerifier(cfg.GoogleClientID)
 	jwtSvc := auth.NewJWTService(cfg.JWTSecret, cfg.JWTTTL)
@@ -50,10 +51,11 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	customerHandler := handler.NewCustomerHandler(customers, stores, logger)
 	paymentHandler := handler.NewPaymentHandler(gateways, stores, encryptor, logger, cfg.WebhookBaseURL)
 	dashHandler := handler.NewDashboardHandler(stores, products, orders, customers, logger)
-	storefrontHandler := handler.NewStorefrontHandler(stores, products, orders, bankAccounts, logger)
+	storefrontHandler := handler.NewStorefrontHandler(stores, products, orders, bankAccounts, categories, logger)
 	waTemplateHandler := handler.NewWATemplateHandler(waTemplates, stores, logger)
 	webhookHandler := handler.NewWebhookHandler(gateways, orders, encryptor, logger)
 	bankAccountHandler := handler.NewBankAccountHandler(bankAccounts, stores, logger)
+	categoryHandler := handler.NewCategoryHandler(categories, stores, logger)
 
 	requireAuth := middleware.RequireAuth(jwtSvc)
 
@@ -114,6 +116,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 
 			r.Route("/orders", func(r chi.Router) {
 				r.Get("/", orderHandler.List)
+				r.Get("/export", orderHandler.Export)
 				r.Get("/{id}", orderHandler.Get)
 				r.Patch("/{id}/status", orderHandler.UpdateStatus)
 				r.Patch("/{id}/notes", orderHandler.UpdateNotes)
@@ -142,6 +145,13 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 				r.Post("/", bankAccountHandler.Create)
 				r.Put("/{id}", bankAccountHandler.Update)
 				r.Delete("/{id}", bankAccountHandler.Delete)
+			})
+
+			r.Route("/categories", func(r chi.Router) {
+				r.Get("/", categoryHandler.List)
+				r.Post("/", categoryHandler.Create)
+				r.Put("/{id}", categoryHandler.Update)
+				r.Delete("/{id}", categoryHandler.Delete)
 			})
 		})
 	})
