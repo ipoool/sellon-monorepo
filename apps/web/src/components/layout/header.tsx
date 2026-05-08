@@ -6,9 +6,11 @@ import type { Me } from "@/lib/auth-types";
 
 type HeaderProps = {
   me?: Me | null;
+  variant?: "marketing" | "app";
 };
 
-export function Header({ me }: HeaderProps) {
+export function Header({ me, variant = "marketing" }: HeaderProps) {
+  const showMarketingLinks = variant === "marketing";
   return (
     <header className="sticky top-0 z-40 border-b border-neutral-200/60 bg-white/80 backdrop-blur">
       <Container>
@@ -20,18 +22,22 @@ export function Header({ me }: HeaderProps) {
             SellOn
           </Link>
           <nav className="flex items-center gap-3 sm:gap-6">
-            <Link
-              href="/#fitur"
-              className="hidden text-sm text-neutral-600 transition-colors hover:text-neutral-900 sm:inline"
-            >
-              Fitur
-            </Link>
-            <Link
-              href="/#harga"
-              className="hidden text-sm text-neutral-600 transition-colors hover:text-neutral-900 sm:inline"
-            >
-              Harga
-            </Link>
+            {showMarketingLinks && (
+              <>
+                <Link
+                  href="/#fitur"
+                  className="hidden text-sm text-neutral-600 transition-colors hover:text-neutral-900 sm:inline"
+                >
+                  Fitur
+                </Link>
+                <Link
+                  href="/#harga"
+                  className="hidden text-sm text-neutral-600 transition-colors hover:text-neutral-900 sm:inline"
+                >
+                  Harga
+                </Link>
+              </>
+            )}
 
             {me ? (
               <div className="flex items-center gap-3">

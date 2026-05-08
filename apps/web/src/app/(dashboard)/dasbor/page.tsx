@@ -24,7 +24,7 @@ export default async function DasborPage() {
 
   return (
     <>
-      <Header me={me} />
+      <Header me={me} variant="app" />
       <main className="py-10 lg:py-14">
         <Container>
           <div className="mb-8">
