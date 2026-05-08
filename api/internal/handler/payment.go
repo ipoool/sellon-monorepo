@@ -24,13 +24,17 @@ func NewPaymentHandler(gateways *repository.PaymentRepo, stores *repository.Stor
 }
 
 type gatewayDTO struct {
-	Provider          string   `json:"provider"`
-	IsConfigured      bool     `json:"is_configured"`
-	IsSandbox         bool     `json:"is_sandbox"`
-	ClientKey         string   `json:"client_key"`
-	ServerKeyMasked   string   `json:"server_key_masked"`
-	EnabledMethods    []string `json:"enabled_methods"`
-	LastVerifyStatus  string   `json:"last_verify_status,omitempty"`
+	Provider                string   `json:"provider"`
+	IsConfigured            bool     `json:"is_configured"`
+	IsSandbox               bool     `json:"is_sandbox"`
+	HasSandboxServerKey     bool     `json:"has_sandbox_server_key"`
+	HasProdServerKey        bool     `json:"has_prod_server_key"`
+	SandboxServerKeyMasked  string   `json:"sandbox_server_key_masked"`
+	ProdServerKeyMasked     string   `json:"prod_server_key_masked"`
+	ClientKeySandbox        string   `json:"client_key_sandbox"`
+	ClientKeyProd           string   `json:"client_key_prod"`
+	EnabledMethods          []string `json:"enabled_methods"`
+	LastVerifyStatus        string   `json:"last_verify_status,omitempty"`
 }
 
 // GET /api/v1/payments/midtrans
@@ -42,7 +46,12 @@ func (h *PaymentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	g, err := h.gateways.Get(r.Context(), store.ID, "midtrans")
 	if errors.Is(err, repository.ErrGatewayNotFound) {
-		response.JSON(w, http.StatusOK, gatewayDTO{Provider: "midtrans", IsConfigured: false, EnabledMethods: []string{}})
+		response.JSON(w, http.StatusOK, gatewayDTO{
+			Provider:       "midtrans",
+			IsSandbox:      true,
+			IsConfigured:   false,
+			EnabledMethods: []string{},
+		})
 		return
 	}
 	if err != nil {
@@ -51,21 +60,28 @@ func (h *PaymentHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response.JSON(w, http.StatusOK, gatewayDTO{
-		Provider:         g.Provider,
-		IsConfigured:     true,
-		IsSandbox:        g.IsSandbox,
-		ClientKey:        g.ClientKey,
-		ServerKeyMasked:  maskKey(len(g.ServerKeyEncrypted)),
-		EnabledMethods:   g.EnabledMethods,
-		LastVerifyStatus: g.LastVerifyStatus,
+		Provider:               g.Provider,
+		IsConfigured:           len(g.ServerKeySandboxEncrypted) > 0 || len(g.ServerKeyProdEncrypted) > 0,
+		IsSandbox:              g.IsSandbox,
+		HasSandboxServerKey:    len(g.ServerKeySandboxEncrypted) > 0,
+		HasProdServerKey:       len(g.ServerKeyProdEncrypted) > 0,
+		SandboxServerKeyMasked: maskKey(len(g.ServerKeySandboxEncrypted)),
+		ProdServerKeyMasked:    maskKey(len(g.ServerKeyProdEncrypted)),
+		ClientKeySandbox:       g.ClientKeySandbox,
+		ClientKeyProd:          g.ClientKeyProd,
+		EnabledMethods:         g.EnabledMethods,
+		LastVerifyStatus:       g.LastVerifyStatus,
 	})
 }
 
 type savePaymentReq struct {
-	ServerKey      string   `json:"server_key"`
-	ClientKey      string   `json:"client_key"`
-	IsSandbox      bool     `json:"is_sandbox"`
-	EnabledMethods []string `json:"enabled_methods"`
+	// Empty = don't change. Non-empty = encrypt + store as that env's key.
+	SandboxServerKey string   `json:"sandbox_server_key"`
+	ProdServerKey    string   `json:"prod_server_key"`
+	SandboxClientKey string   `json:"sandbox_client_key"`
+	ProdClientKey    string   `json:"prod_client_key"`
+	IsSandbox        bool     `json:"is_sandbox"`
+	EnabledMethods   []string `json:"enabled_methods"`
 }
 
 // PUT /api/v1/payments/midtrans
@@ -80,17 +96,50 @@ func (h *PaymentHandler) Save(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	req.ServerKey = strings.TrimSpace(req.ServerKey)
-	if req.ServerKey == "" {
-		response.Error(w, http.StatusBadRequest, "server_key wajib")
-		return
+
+	req.SandboxServerKey = strings.TrimSpace(req.SandboxServerKey)
+	req.ProdServerKey = strings.TrimSpace(req.ProdServerKey)
+
+	// Encrypt only the keys that were provided. Empty -> nil = don't touch.
+	var sandboxBlob, prodBlob []byte
+	if req.SandboxServerKey != "" {
+		sandboxBlob, err = h.encryptor.Encrypt([]byte(req.SandboxServerKey))
+		if err != nil {
+			h.logger.Error("encrypt sandbox", "err", err)
+			response.Error(w, http.StatusInternalServerError, "gagal enkripsi sandbox key")
+			return
+		}
+	}
+	if req.ProdServerKey != "" {
+		prodBlob, err = h.encryptor.Encrypt([]byte(req.ProdServerKey))
+		if err != nil {
+			h.logger.Error("encrypt prod", "err", err)
+			response.Error(w, http.StatusInternalServerError, "gagal enkripsi production key")
+			return
+		}
 	}
 
-	encrypted, err := h.encryptor.Encrypt([]byte(req.ServerKey))
-	if err != nil {
-		h.logger.Error("encrypt", "err", err)
-		response.Error(w, http.StatusInternalServerError, "gagal enkripsi")
-		return
+	// Need at least one server key configured (existing OR new) to keep moving.
+	// If first-time save, must provide the key for whichever mode is currently selected.
+	existing, _ := h.gateways.Get(r.Context(), store.ID, "midtrans")
+	if existing == nil {
+		if req.IsSandbox && sandboxBlob == nil {
+			response.Error(w, http.StatusBadRequest, "Server Key Sandbox wajib diisi")
+			return
+		}
+		if !req.IsSandbox && prodBlob == nil {
+			response.Error(w, http.StatusBadRequest, "Server Key Production wajib diisi")
+			return
+		}
+	} else {
+		if req.IsSandbox && sandboxBlob == nil && len(existing.ServerKeySandboxEncrypted) == 0 {
+			response.Error(w, http.StatusBadRequest, "Mode sandbox aktif tapi Server Key Sandbox belum tersimpan — isi terlebih dahulu")
+			return
+		}
+		if !req.IsSandbox && prodBlob == nil && len(existing.ServerKeyProdEncrypted) == 0 {
+			response.Error(w, http.StatusBadRequest, "Mode produksi aktif tapi Server Key Production belum tersimpan — isi terlebih dahulu")
+			return
+		}
 	}
 
 	if req.EnabledMethods == nil {
@@ -98,9 +147,14 @@ func (h *PaymentHandler) Save(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.gateways.Upsert(r.Context(), repository.SaveGatewayInput{
-		StoreID: store.ID, Provider: "midtrans",
-		ServerKeyEncrypted: encrypted, ClientKey: req.ClientKey,
-		IsSandbox: req.IsSandbox, EnabledMethods: req.EnabledMethods,
+		StoreID:                   store.ID,
+		Provider:                  "midtrans",
+		ServerKeySandboxEncrypted: sandboxBlob,
+		ServerKeyProdEncrypted:    prodBlob,
+		ClientKeySandbox:          req.SandboxClientKey,
+		ClientKeyProd:             req.ProdClientKey,
+		IsSandbox:                 req.IsSandbox,
+		EnabledMethods:            req.EnabledMethods,
 	}); err != nil {
 		h.logger.Error("upsert gateway", "err", err)
 		response.Error(w, http.StatusInternalServerError, "gagal simpan")
@@ -110,24 +164,37 @@ func (h *PaymentHandler) Save(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-// POST /api/v1/payments/midtrans/verify — stub: pretend the keys validate.
-// TODO: real implementation should hit Midtrans /v2/ping with the decrypted server key.
+// POST /api/v1/payments/midtrans/verify — stub
 func (h *PaymentHandler) Verify(w http.ResponseWriter, r *http.Request) {
 	store, err := h.storeFor(r)
 	if err != nil {
 		response.Error(w, http.StatusBadRequest, "toko belum dibuat")
 		return
 	}
-	if _, err := h.gateways.Get(r.Context(), store.ID, "midtrans"); err != nil {
+	g, err := h.gateways.Get(r.Context(), store.ID, "midtrans")
+	if err != nil {
 		response.Error(w, http.StatusBadRequest, "gateway belum dikonfigurasi")
+		return
+	}
+	// Pick the key that matches current mode.
+	hasKey := (g.IsSandbox && len(g.ServerKeySandboxEncrypted) > 0) ||
+		(!g.IsSandbox && len(g.ServerKeyProdEncrypted) > 0)
+	if !hasKey {
+		response.Error(w, http.StatusBadRequest,
+			"Server Key untuk mode aktif belum diisi")
 		return
 	}
 	if err := h.gateways.MarkVerified(r.Context(), store.ID, "midtrans", "ok"); err != nil {
 		response.Error(w, http.StatusInternalServerError, "gagal update status")
 		return
 	}
+	envLabel := "sandbox"
+	if !g.IsSandbox {
+		envLabel = "production"
+	}
 	response.JSON(w, http.StatusOK, map[string]any{
-		"ok": true, "message": "Koneksi simulasi sukses (stub).",
+		"ok":      true,
+		"message": "Koneksi simulasi sukses untuk mode " + envLabel + " (stub).",
 	})
 }
 

@@ -76,8 +76,12 @@ export type GatewayInfo = {
   provider: string;
   is_configured: boolean;
   is_sandbox: boolean;
-  client_key: string;
-  server_key_masked: string;
+  has_sandbox_server_key: boolean;
+  has_prod_server_key: boolean;
+  sandbox_server_key_masked: string;
+  prod_server_key_masked: string;
+  client_key_sandbox: string;
+  client_key_prod: string;
   enabled_methods: string[];
   last_verify_status?: string;
 };

@@ -9,6 +9,8 @@ import {
   CheckCircle2,
   AlertTriangle,
   ExternalLink,
+  FlaskConical,
+  Rocket,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -16,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import type { GatewayInfo } from "@/lib/types";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -30,6 +33,7 @@ const methodOptions = [
 
 export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
   const router = useRouter();
+  const [isSandbox, setIsSandbox] = useState(initial?.is_sandbox ?? true);
   const [pending, setPending] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,6 +42,20 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
 
   const isConfigured = initial?.is_configured ?? false;
   const lastStatus = initial?.last_verify_status || "";
+  const hasSandboxKey = initial?.has_sandbox_server_key ?? false;
+  const hasProdKey = initial?.has_prod_server_key ?? false;
+
+  // Active env's metadata used for several UI bits below.
+  const activeMaskedKey = isSandbox
+    ? initial?.sandbox_server_key_masked
+    : initial?.prod_server_key_masked;
+  const activeHasStoredKey = isSandbox ? hasSandboxKey : hasProdKey;
+  const activePlaceholder = isSandbox
+    ? "SB-Mid-server-..."
+    : "Mid-server-...";
+  const activeClientPlaceholder = isSandbox
+    ? "SB-Mid-client-..."
+    : "Mid-client-...";
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -50,18 +68,25 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
       .filter((m) => fd.get(`method_${m.id}`) === "on")
       .map((m) => m.id);
 
-    const body = {
-      server_key: String(fd.get("server_key") ?? ""),
-      client_key: String(fd.get("client_key") ?? ""),
-      is_sandbox: fd.get("is_sandbox") === "on",
-      enabled_methods: enabledMethods,
-    };
+    const submittedServerKey = String(fd.get("server_key") ?? "").trim();
+    const submittedClientKey = String(fd.get("client_key") ?? "").trim();
 
-    if (!body.server_key) {
-      setError("Server Key wajib diisi");
-      setPending(false);
-      return;
-    }
+    // Build payload: only set the env's fields the user is currently editing.
+    // Server keys: empty = preserve existing. Client keys: always sent (we
+    // overwrite with what's in the field for the active env).
+    const body: Record<string, unknown> = {
+      is_sandbox: isSandbox,
+      enabled_methods: enabledMethods,
+      sandbox_server_key: isSandbox ? submittedServerKey : "",
+      prod_server_key: !isSandbox ? submittedServerKey : "",
+      // Preserve the inactive env's client key by sending its current value.
+      sandbox_client_key: isSandbox
+        ? submittedClientKey
+        : initial?.client_key_sandbox ?? "",
+      prod_client_key: !isSandbox
+        ? submittedClientKey
+        : initial?.client_key_prod ?? "",
+    };
 
     try {
       const res = await fetch(`${apiBase}/api/v1/payments/midtrans`, {
@@ -128,7 +153,11 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
             </p>
           </div>
           <a
-            href="https://dashboard.midtrans.com/settings/access_keys"
+            href={
+              isSandbox
+                ? "https://dashboard.sandbox.midtrans.com/settings/access_keys"
+                : "https://dashboard.midtrans.com/settings/access_keys"
+            }
             target="_blank"
             rel="noopener noreferrer"
             className="hidden text-sm font-medium text-brand-600 hover:text-brand-700 sm:inline-flex sm:items-center sm:gap-1"
@@ -140,18 +169,74 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
       </Card>
 
       <form onSubmit={onSubmit} className="flex flex-col gap-5">
+        {/* Mode switcher */}
         <Card>
-          <div className="mb-4">
-            <h3 className="font-semibold text-neutral-900">API Keys</h3>
-            <p className="mt-0.5 text-sm text-neutral-500">
-              Server Key disimpan terenkripsi (AES-GCM). Tidak akan ditampilkan
-              ulang setelah disimpan — kamu bisa overwrite kapan saja.
-            </p>
+          <h3 className="font-semibold text-neutral-900">Mode</h3>
+          <p className="mt-0.5 text-sm text-neutral-500">
+            Tiap mode punya pasangan API key sendiri. Pindah mode tidak akan
+            menghapus key untuk mode lainnya.
+          </p>
+
+          <div
+            role="tablist"
+            aria-label="Mode pembayaran"
+            className="mt-4 grid grid-cols-2 gap-2"
+          >
+            <ModeOption
+              role="tab"
+              icon={FlaskConical}
+              label="Sandbox"
+              description="Uji coba dengan akun sandbox Midtrans"
+              active={isSandbox}
+              hasKey={hasSandboxKey}
+              onClick={() => setIsSandbox(true)}
+            />
+            <ModeOption
+              role="tab"
+              icon={Rocket}
+              label="Production"
+              description="Pembayaran asli dari pembeli"
+              active={!isSandbox}
+              hasKey={hasProdKey}
+              onClick={() => setIsSandbox(false)}
+            />
+          </div>
+        </Card>
+
+        {/* API Keys for the currently selected mode */}
+        <Card>
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-semibold text-neutral-900">
+                  API Keys —{" "}
+                  <span className="text-brand-700">
+                    {isSandbox ? "Sandbox" : "Production"}
+                  </span>
+                </h3>
+                <Badge variant={isSandbox ? "warning" : "brand"}>
+                  Sedang aktif
+                </Badge>
+              </div>
+              <p className="mt-0.5 text-sm text-neutral-500">
+                Server Key disimpan terenkripsi (AES-GCM). Tidak ditampilkan
+                ulang setelah disimpan — kamu bisa overwrite kapan saja.
+                {!activeHasStoredKey && (
+                  <>
+                    {" "}
+                    Wajib diisi sebelum mode {isSandbox ? "Sandbox" : "Production"} bisa dipakai.
+                  </>
+                )}
+              </p>
+            </div>
           </div>
 
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="server_key">Server Key (Midtrans)</Label>
+              <Label htmlFor="server_key">
+                Server Key {isSandbox ? "Sandbox" : "Production"}
+                {!activeHasStoredKey && <span className="ml-1 text-danger">*</span>}
+              </Label>
               <div className="relative">
                 <Lock
                   className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-neutral-400"
@@ -161,43 +246,40 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
                   id="server_key"
                   name="server_key"
                   type="password"
-                  required={!isConfigured}
+                  required={!activeHasStoredKey}
                   placeholder={
-                    isConfigured
-                      ? initial?.server_key_masked || "•••••••• tersimpan"
-                      : "SB-Mid-server-..."
+                    activeHasStoredKey
+                      ? activeMaskedKey || "•••••••• tersimpan"
+                      : activePlaceholder
                   }
                   className="pl-9 font-mono text-xs"
                 />
               </div>
+              {activeHasStoredKey && (
+                <p className="text-xs text-neutral-500">
+                  Sudah tersimpan — kosongkan field ini untuk pakai key yang
+                  ada, atau isi nilai baru untuk overwrite.
+                </p>
+              )}
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="client_key">Client Key (opsional)</Label>
+              <Label htmlFor="client_key">
+                Client Key {isSandbox ? "Sandbox" : "Production"} (opsional)
+              </Label>
               <Input
                 id="client_key"
                 name="client_key"
-                defaultValue={initial?.client_key ?? ""}
-                placeholder="SB-Mid-client-..."
+                key={isSandbox ? "client-sandbox" : "client-prod"}
+                defaultValue={
+                  isSandbox
+                    ? initial?.client_key_sandbox ?? ""
+                    : initial?.client_key_prod ?? ""
+                }
+                placeholder={activeClientPlaceholder}
                 className="font-mono text-xs"
               />
             </div>
-
-            <label className="flex items-start gap-3 rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-sm">
-              <input
-                type="checkbox"
-                name="is_sandbox"
-                defaultChecked={initial?.is_sandbox ?? true}
-                className="mt-0.5 size-4 rounded border-neutral-300 text-brand-500 focus:ring-brand-500/30"
-              />
-              <div>
-                <p className="font-medium text-neutral-900">Mode Sandbox</p>
-                <p className="text-xs text-neutral-600">
-                  Aktifkan dulu untuk uji coba pakai akun sandbox Midtrans.
-                  Matikan saat siap terima pembayaran asli.
-                </p>
-              </div>
-            </label>
           </div>
         </Card>
 
@@ -219,7 +301,10 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
                 <input
                   type="checkbox"
                   name={`method_${m.id}`}
-                  defaultChecked={initial?.enabled_methods?.includes(m.id) ?? (m.id === "qris" || m.id === "bank_transfer")}
+                  defaultChecked={
+                    initial?.enabled_methods?.includes(m.id) ??
+                    (m.id === "qris" || m.id === "bank_transfer")
+                  }
                   className="size-4 rounded border-neutral-300 text-brand-500 focus:ring-brand-500/30"
                 />
                 <span className="font-medium text-neutral-900">{m.label}</span>
@@ -231,7 +316,9 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2 text-sm">
             {savedFlash && (
-              <span className="font-medium text-success">✓ Konfigurasi tersimpan</span>
+              <span className="font-medium text-success">
+                ✓ Konfigurasi tersimpan
+              </span>
             )}
             {error && <span className="font-medium text-danger">{error}</span>}
             {verifyMsg && (
@@ -239,7 +326,7 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
             )}
           </div>
           <div className="flex items-center gap-2">
-            {isConfigured && (
+            {isConfigured && activeHasStoredKey && (
               <Button
                 type="button"
                 variant="outline"
@@ -271,5 +358,58 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
         </div>
       </Card>
     </div>
+  );
+}
+
+function ModeOption({
+  icon: Icon,
+  label,
+  description,
+  active,
+  hasKey,
+  onClick,
+  role,
+}: {
+  icon: typeof FlaskConical;
+  label: string;
+  description: string;
+  active: boolean;
+  hasKey: boolean;
+  onClick: () => void;
+  role?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role={role}
+      aria-selected={active}
+      onClick={onClick}
+      className={cn(
+        "flex items-start gap-3 rounded-xl border p-4 text-left transition-all",
+        active
+          ? "border-brand-500 bg-brand-50/50 ring-2 ring-brand-500/20"
+          : "border-neutral-200 bg-white hover:bg-neutral-50",
+      )}
+    >
+      <div
+        className={cn(
+          "flex size-9 shrink-0 items-center justify-center rounded-lg",
+          active ? "bg-brand-500 text-white" : "bg-neutral-100 text-neutral-600",
+        )}
+      >
+        <Icon className="size-4" aria-hidden />
+      </div>
+      <div className="flex-1">
+        <div className="flex items-center gap-2">
+          <p className="font-semibold text-neutral-900">{label}</p>
+          {hasKey ? (
+            <Badge variant="success">Tersimpan</Badge>
+          ) : (
+            <Badge variant="default">Belum diisi</Badge>
+          )}
+        </div>
+        <p className="mt-1 text-xs text-neutral-600">{description}</p>
+      </div>
+    </button>
   );
 }
