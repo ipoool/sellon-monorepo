@@ -51,3 +51,29 @@ Lihat `apps/api/README.md` dan `apps/web/README.md` untuk detail per service.
 | `make logs` | tail combined logs |
 | `make clean` | stop and remove volumes (reset state) |
 | `make api-shell` / `make web-shell` / `make db-shell` | shell ke container |
+
+## Google Sign-In Setup
+
+TokoFlow login pakai Google Identity Services. Untuk mengaktifkan:
+
+1. Buka [Google Cloud Console → APIs & Services → Credentials](https://console.cloud.google.com/apis/credentials).
+2. **Create Credentials → OAuth Client ID** → application type: **Web application**.
+3. **Authorized JavaScript origins** (tambahkan keduanya untuk dev):
+   - `http://localhost:3000`
+   - `http://localhost:3100`
+4. Copy "Client ID" yang dihasilkan, paste ke `.env` di **dua tempat** (nilai sama):
+   ```env
+   GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com
+   NEXT_PUBLIC_GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com
+   ```
+5. Restart container: `docker compose restart api web`.
+
+Buka http://localhost:3100/masuk → klik "Continue with Google" → akun otomatis dibuat di tabel `users` saat pertama kali login.
+
+### Cara kerja
+
+- Frontend pakai `accounts.google.com/gsi/client` untuk render tombol dan menerima ID token.
+- ID token di-POST ke `/api/v1/auth/google`. Backend verify pakai `google.golang.org/api/idtoken` (cek audience = client ID, signature, expiration).
+- Backend issue JWT (HS256, TTL default 7 hari) lalu set di `tokoflow_session` httpOnly cookie (`SameSite=Lax`).
+- Protected route Go (`/api/v1/auth/me`) divalidasi via middleware `RequireAuth`.
+- Server-side Next.js (`getMe()` di `src/lib/server-auth.ts`) baca cookie dan forward ke `/auth/me` lewat `API_INTERNAL_URL` — `/dasbor` redirect ke `/masuk` kalau session invalid.

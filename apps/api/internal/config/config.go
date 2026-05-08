@@ -1,7 +1,9 @@
 package config
 
 import (
+	"errors"
 	"strings"
+	"time"
 
 	"github.com/spf13/viper"
 )
@@ -19,6 +21,11 @@ type Config struct {
 
 	RedisHost string
 	RedisPort string
+
+	GoogleClientID string
+	JWTSecret      string
+	JWTTTL         time.Duration
+	WebOrigin      string
 }
 
 func Load() (*Config, error) {
@@ -29,17 +36,36 @@ func Load() (*Config, error) {
 	v.SetDefault("api_port", "8080")
 	v.SetDefault("api_env", "development")
 	v.SetDefault("api_log_level", "debug")
+	v.SetDefault("jwt_ttl_hours", 24*7)
+	v.SetDefault("web_origin", "http://localhost:3000")
 
-	return &Config{
-		Port:       v.GetString("api_port"),
-		Env:        v.GetString("api_env"),
-		LogLevel:   v.GetString("api_log_level"),
-		DBHost:     v.GetString("postgres_host"),
-		DBPort:     v.GetString("postgres_port"),
-		DBUser:     v.GetString("postgres_user"),
-		DBPassword: v.GetString("postgres_password"),
-		DBName:     v.GetString("postgres_db"),
-		RedisHost:  v.GetString("redis_host"),
-		RedisPort:  v.GetString("redis_port"),
-	}, nil
+	cfg := &Config{
+		Port:           v.GetString("api_port"),
+		Env:            v.GetString("api_env"),
+		LogLevel:       v.GetString("api_log_level"),
+		DBHost:         v.GetString("postgres_host"),
+		DBPort:         v.GetString("postgres_port"),
+		DBUser:         v.GetString("postgres_user"),
+		DBPassword:     v.GetString("postgres_password"),
+		DBName:         v.GetString("postgres_db"),
+		RedisHost:      v.GetString("redis_host"),
+		RedisPort:      v.GetString("redis_port"),
+		GoogleClientID: v.GetString("google_client_id"),
+		JWTSecret:      v.GetString("jwt_secret"),
+		JWTTTL:         time.Duration(v.GetInt("jwt_ttl_hours")) * time.Hour,
+		WebOrigin:      v.GetString("web_origin"),
+	}
+
+	if cfg.JWTSecret == "" {
+		return nil, errors.New("JWT_SECRET is required")
+	}
+	return cfg, nil
+}
+
+func (c *Config) DSN() string {
+	return "postgres://" + c.DBUser + ":" + c.DBPassword + "@" + c.DBHost + ":" + c.DBPort + "/" + c.DBName + "?sslmode=disable"
+}
+
+func (c *Config) IsProd() bool {
+	return c.Env == "production"
 }

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tokoflow/tokoflow/apps/api/internal/config"
+	"github.com/tokoflow/tokoflow/apps/api/internal/db"
 	"github.com/tokoflow/tokoflow/apps/api/internal/server"
 )
 
@@ -22,7 +23,22 @@ func main() {
 		os.Exit(1)
 	}
 
-	srv := server.New(cfg, logger)
+	if err := db.Migrate(cfg.DSN(), logger); err != nil {
+		slog.Error("migrate failed", "err", err)
+		os.Exit(1)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	pool, err := db.Connect(ctx, cfg.DSN())
+	if err != nil {
+		slog.Error("db connect failed", "err", err)
+		os.Exit(1)
+	}
+	defer pool.Close()
+
+	srv := server.New(cfg, logger, pool)
 
 	go func() {
 		if err := srv.Start(); err != nil {
@@ -37,9 +53,9 @@ func main() {
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("shutdown error", "err", err)
 	}
 	slog.Info("server stopped")

@@ -1,3 +1,0 @@
--- Initial migration placeholder.
--- Schema akan ditambahkan di iterasi berikutnya:
--- sellers, products, orders, payment_credentials, dll.

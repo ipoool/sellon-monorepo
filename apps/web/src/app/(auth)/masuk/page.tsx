@@ -1,10 +1,14 @@
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { redirect } from "next/navigation";
 
-export default function MasukPage() {
+import { Card, CardContent } from "@/components/ui/card";
+import { GoogleSignInButton } from "@/components/auth/google-sign-in-button";
+import { getMe } from "@/lib/server-auth";
+
+export default async function MasukPage() {
+  const me = await getMe();
+  if (me) redirect("/dasbor");
+
   return (
     <div className="flex min-h-svh items-center justify-center px-4 py-16">
       <div className="w-full max-w-md">
@@ -19,28 +23,21 @@ export default function MasukPage() {
 
         <Card>
           <CardContent>
-            <form className="flex flex-col gap-4">
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="email">Email</Label>
-                <Input id="email" type="email" placeholder="kamu@toko.id" />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="password">Kata Sandi</Label>
-                <Input id="password" type="password" placeholder="••••••••" />
-              </div>
-              <Button type="submit" size="lg" className="mt-2">
-                Masuk
-              </Button>
-            </form>
+            <div className="flex flex-col items-center gap-5 py-2">
+              <GoogleSignInButton />
+              <p className="text-center text-xs text-neutral-500">
+                Dengan masuk, kamu menyetujui{" "}
+                <Link
+                  href="/syarat-ketentuan"
+                  className="font-medium text-brand-600 hover:text-brand-700"
+                >
+                  Syarat &amp; Ketentuan
+                </Link>{" "}
+                TokoFlow.
+              </p>
+            </div>
           </CardContent>
         </Card>
-
-        <p className="mt-6 text-center text-sm text-neutral-500">
-          Belum punya akun?{" "}
-          <Link href="/" className="font-medium text-brand-600 hover:text-brand-700">
-            Daftar gratis
-          </Link>
-        </p>
       </div>
     </div>
   );

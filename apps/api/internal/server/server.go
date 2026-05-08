@@ -8,10 +8,13 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
+	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/tokoflow/tokoflow/apps/api/internal/auth"
 	"github.com/tokoflow/tokoflow/apps/api/internal/config"
 	"github.com/tokoflow/tokoflow/apps/api/internal/handler"
 	"github.com/tokoflow/tokoflow/apps/api/internal/middleware"
+	"github.com/tokoflow/tokoflow/apps/api/internal/repository"
 )
 
 type Server struct {
@@ -20,18 +23,34 @@ type Server struct {
 	cfg        *config.Config
 }
 
-func New(cfg *config.Config, logger *slog.Logger) *Server {
-	r := chi.NewRouter()
+func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) *Server {
+	users := repository.NewUserRepo(pool)
+	googleVerifier := auth.NewGoogleVerifier(cfg.GoogleClientID)
+	jwtSvc := auth.NewJWTService(cfg.JWTSecret, cfg.JWTTTL)
 
+	authHandler := handler.NewAuthHandler(users, googleVerifier, jwtSvc, logger, cfg.IsProd())
+	requireAuth := middleware.RequireAuth(jwtSvc)
+
+	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
 	r.Use(chimw.RealIP)
 	r.Use(middleware.Logger(logger))
 	r.Use(middleware.Recover(logger))
-	r.Use(middleware.CORS())
+	r.Use(middleware.CORS(cfg.WebOrigin))
 
 	r.Get("/health", handler.Health)
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/info", handler.Info(cfg))
+
+		r.Route("/auth", func(r chi.Router) {
+			r.Post("/google", authHandler.Google)
+			r.Post("/logout", authHandler.Logout)
+
+			r.Group(func(r chi.Router) {
+				r.Use(requireAuth)
+				r.Get("/me", authHandler.Me)
+			})
+		})
 	})
 
 	return &Server{
