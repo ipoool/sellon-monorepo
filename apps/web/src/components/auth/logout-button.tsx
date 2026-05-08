@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { LogOut, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export function LogoutButton() {
@@ -11,9 +12,11 @@ export function LogoutButton() {
 
   return (
     <Button
-      size="sm"
+      size="icon"
       variant="outline"
       disabled={pending}
+      aria-label="Keluar"
+      title="Keluar"
       onClick={async () => {
         setPending(true);
         try {
@@ -27,7 +30,11 @@ export function LogoutButton() {
         }
       }}
     >
-      {pending ? "Keluar…" : "Keluar"}
+      {pending ? (
+        <Loader2 className="size-4 animate-spin" aria-hidden />
+      ) : (
+        <LogOut className="size-4" aria-hidden />
+      )}
     </Button>
   );
 }
