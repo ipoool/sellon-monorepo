@@ -38,7 +38,11 @@ func main() {
 	}
 	defer pool.Close()
 
-	srv := server.New(cfg, logger, pool)
+	srv, err := server.New(cfg, logger, pool)
+	if err != nil {
+		slog.Error("server init failed", "err", err)
+		os.Exit(1)
+	}
 
 	go func() {
 		if err := srv.Start(); err != nil {

@@ -1,0 +1,10 @@
+DROP TABLE IF EXISTS whatsapp_templates;
+DROP TABLE IF EXISTS order_items;
+DROP TABLE IF EXISTS orders;
+DROP TABLE IF EXISTS customers;
+DROP TABLE IF EXISTS product_variants;
+DROP TABLE IF EXISTS products;
+DROP TABLE IF EXISTS product_categories;
+DROP TABLE IF EXISTS bank_accounts;
+DROP TABLE IF EXISTS payment_gateway_credentials;
+DROP TABLE IF EXISTS stores;

@@ -1,0 +1,248 @@
+package repository
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type Product struct {
+	ID          uuid.UUID
+	StoreID     uuid.UUID
+	CategoryID  *uuid.UUID
+	Name        string
+	Slug        string
+	Description string
+	PriceCents  int64
+	Stock       int
+	WeightG     int
+	LengthCm    int
+	WidthCm     int
+	HeightCm    int
+	Status      string
+	PhotoURLs   []string
+	HasVariants bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+type ProductRepo struct {
+	pool *pgxpool.Pool
+}
+
+func NewProductRepo(pool *pgxpool.Pool) *ProductRepo {
+	return &ProductRepo{pool: pool}
+}
+
+var ErrProductNotFound = errors.New("product not found")
+
+type ListProductsFilter struct {
+	StoreID uuid.UUID
+	Search  string
+	Status  string // "" for all
+	Limit   int
+	Offset  int
+}
+
+func (r *ProductRepo) List(ctx context.Context, f ListProductsFilter) ([]Product, int, error) {
+	if f.Limit <= 0 || f.Limit > 200 {
+		f.Limit = 50
+	}
+	whereClauses := []string{"store_id = $1"}
+	args := []any{f.StoreID}
+	if f.Search != "" {
+		args = append(args, "%"+f.Search+"%")
+		whereClauses = append(whereClauses, "name ILIKE $"+itoa(len(args)))
+	}
+	if f.Status != "" {
+		args = append(args, f.Status)
+		whereClauses = append(whereClauses, "status = $"+itoa(len(args)))
+	}
+	where := strings.Join(whereClauses, " AND ")
+
+	var total int
+	if err := r.pool.QueryRow(ctx,
+		"SELECT COUNT(*) FROM products WHERE "+where, args...,
+	).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	args = append(args, f.Limit, f.Offset)
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, store_id, category_id, name, slug, description, price_cents, stock,
+		       weight_g, length_cm, width_cm, height_cm, status, photo_urls, has_variants,
+		       created_at, updated_at
+		FROM products
+		WHERE `+where+`
+		ORDER BY created_at DESC
+		LIMIT $`+itoa(len(args)-1)+` OFFSET $`+itoa(len(args)),
+		args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var out []Product
+	for rows.Next() {
+		var p Product
+		if err := rows.Scan(
+			&p.ID, &p.StoreID, &p.CategoryID, &p.Name, &p.Slug, &p.Description,
+			&p.PriceCents, &p.Stock, &p.WeightG, &p.LengthCm, &p.WidthCm, &p.HeightCm,
+			&p.Status, &p.PhotoURLs, &p.HasVariants, &p.CreatedAt, &p.UpdatedAt,
+		); err != nil {
+			return nil, 0, err
+		}
+		out = append(out, p)
+	}
+	return out, total, rows.Err()
+}
+
+func (r *ProductRepo) FindByID(ctx context.Context, storeID, id uuid.UUID) (*Product, error) {
+	const q = `
+		SELECT id, store_id, category_id, name, slug, description, price_cents, stock,
+		       weight_g, length_cm, width_cm, height_cm, status, photo_urls, has_variants,
+		       created_at, updated_at
+		FROM products WHERE id = $1 AND store_id = $2
+	`
+	var p Product
+	err := r.pool.QueryRow(ctx, q, id, storeID).Scan(
+		&p.ID, &p.StoreID, &p.CategoryID, &p.Name, &p.Slug, &p.Description,
+		&p.PriceCents, &p.Stock, &p.WeightG, &p.LengthCm, &p.WidthCm, &p.HeightCm,
+		&p.Status, &p.PhotoURLs, &p.HasVariants, &p.CreatedAt, &p.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrProductNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+type SaveProductInput struct {
+	StoreID     uuid.UUID
+	Name        string
+	Slug        string
+	Description string
+	PriceCents  int64
+	Stock       int
+	WeightG     int
+	LengthCm    int
+	WidthCm     int
+	HeightCm    int
+	Status      string
+	PhotoURLs   []string
+}
+
+func (r *ProductRepo) Create(ctx context.Context, in SaveProductInput) (*Product, error) {
+	const q = `
+		INSERT INTO products (store_id, name, slug, description, price_cents, stock,
+		                     weight_g, length_cm, width_cm, height_cm, status, photo_urls)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		RETURNING id, store_id, category_id, name, slug, description, price_cents, stock,
+		          weight_g, length_cm, width_cm, height_cm, status, photo_urls, has_variants,
+		          created_at, updated_at
+	`
+	var p Product
+	err := r.pool.QueryRow(ctx, q,
+		in.StoreID, in.Name, in.Slug, in.Description, in.PriceCents, in.Stock,
+		in.WeightG, in.LengthCm, in.WidthCm, in.HeightCm, in.Status, in.PhotoURLs,
+	).Scan(
+		&p.ID, &p.StoreID, &p.CategoryID, &p.Name, &p.Slug, &p.Description,
+		&p.PriceCents, &p.Stock, &p.WeightG, &p.LengthCm, &p.WidthCm, &p.HeightCm,
+		&p.Status, &p.PhotoURLs, &p.HasVariants, &p.CreatedAt, &p.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+func (r *ProductRepo) Update(ctx context.Context, id uuid.UUID, in SaveProductInput) (*Product, error) {
+	const q = `
+		UPDATE products
+		SET name = $3, slug = $4, description = $5, price_cents = $6, stock = $7,
+		    weight_g = $8, length_cm = $9, width_cm = $10, height_cm = $11,
+		    status = $12, photo_urls = $13, updated_at = now()
+		WHERE id = $1 AND store_id = $2
+		RETURNING id, store_id, category_id, name, slug, description, price_cents, stock,
+		          weight_g, length_cm, width_cm, height_cm, status, photo_urls, has_variants,
+		          created_at, updated_at
+	`
+	var p Product
+	err := r.pool.QueryRow(ctx, q,
+		id, in.StoreID, in.Name, in.Slug, in.Description, in.PriceCents, in.Stock,
+		in.WeightG, in.LengthCm, in.WidthCm, in.HeightCm, in.Status, in.PhotoURLs,
+	).Scan(
+		&p.ID, &p.StoreID, &p.CategoryID, &p.Name, &p.Slug, &p.Description,
+		&p.PriceCents, &p.Stock, &p.WeightG, &p.LengthCm, &p.WidthCm, &p.HeightCm,
+		&p.Status, &p.PhotoURLs, &p.HasVariants, &p.CreatedAt, &p.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrProductNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+func (r *ProductRepo) Delete(ctx context.Context, storeID, id uuid.UUID) error {
+	tag, err := r.pool.Exec(ctx, "DELETE FROM products WHERE id = $1 AND store_id = $2", id, storeID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrProductNotFound
+	}
+	return nil
+}
+
+// CountByStatus returns map of status → count for a store. Used on dasbor home.
+func (r *ProductRepo) CountByStatus(ctx context.Context, storeID uuid.UUID) (map[string]int, error) {
+	rows, err := r.pool.Query(ctx,
+		"SELECT status, COUNT(*) FROM products WHERE store_id = $1 GROUP BY status",
+		storeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var status string
+		var count int
+		if err := rows.Scan(&status, &count); err != nil {
+			return nil, err
+		}
+		out[status] = count
+	}
+	return out, rows.Err()
+}
+
+func itoa(n int) string {
+	// minimal local strconv to avoid extra import noise
+	if n == 0 {
+		return "0"
+	}
+	neg := n < 0
+	if neg {
+		n = -n
+	}
+	buf := [20]byte{}
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	if neg {
+		i--
+		buf[i] = '-'
+	}
+	return string(buf[i:])
+}
