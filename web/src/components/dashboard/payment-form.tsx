@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import {
   Lock,
@@ -39,6 +39,52 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
   const [error, setError] = useState<string | null>(null);
   const [savedFlash, setSavedFlash] = useState(false);
   const [verifyMsg, setVerifyMsg] = useState<string | null>(null);
+
+  // Mode-switch confirmation dialog state.
+  const [pendingMode, setPendingMode] = useState<"sandbox" | "production" | null>(null);
+  const [confirmInput, setConfirmInput] = useState("");
+  const switchDialogRef = useRef<HTMLDialogElement>(null);
+
+  function requestModeSwitch(target: "sandbox" | "production") {
+    const targetIsSandbox = target === "sandbox";
+    if (targetIsSandbox === isSandbox) return; // already on this mode
+    setPendingMode(target);
+    setConfirmInput("");
+  }
+
+  // Open / close native dialog imperatively when pendingMode changes.
+  useEffect(() => {
+    const dialog = switchDialogRef.current;
+    if (!dialog) return;
+    if (pendingMode && !dialog.open) dialog.showModal();
+    if (!pendingMode && dialog.open) dialog.close();
+  }, [pendingMode]);
+
+  // Sync ESC + backdrop click into pendingMode = null
+  useEffect(() => {
+    const dialog = switchDialogRef.current;
+    if (!dialog) return;
+    const onClick = (e: MouseEvent) => {
+      if (e.target === dialog) setPendingMode(null);
+    };
+    const onCancel = () => setPendingMode(null);
+    dialog.addEventListener("click", onClick);
+    dialog.addEventListener("cancel", onCancel);
+    return () => {
+      dialog.removeEventListener("click", onClick);
+      dialog.removeEventListener("cancel", onCancel);
+    };
+  }, []);
+
+  const requiredPhrase = pendingMode === "production" ? "PRODUCTION" : "SANDBOX";
+  const canConfirmSwitch = confirmInput === requiredPhrase;
+
+  function confirmModeSwitch() {
+    if (!pendingMode || !canConfirmSwitch) return;
+    setIsSandbox(pendingMode === "sandbox");
+    setPendingMode(null);
+    setConfirmInput("");
+  }
 
   const isConfigured = initial?.is_configured ?? false;
   const lastStatus = initial?.last_verify_status || "";
@@ -189,7 +235,7 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
               description="Uji coba dengan akun sandbox Midtrans"
               active={isSandbox}
               hasKey={hasSandboxKey}
-              onClick={() => setIsSandbox(true)}
+              onClick={() => requestModeSwitch("sandbox")}
             />
             <ModeOption
               role="tab"
@@ -198,7 +244,7 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
               description="Pembayaran asli dari pembeli"
               active={!isSandbox}
               hasKey={hasProdKey}
-              onClick={() => setIsSandbox(false)}
+              onClick={() => requestModeSwitch("production")}
             />
           </div>
         </Card>
@@ -357,6 +403,116 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
           </p>
         </div>
       </Card>
+
+      {/* Mode-switch confirmation dialog */}
+      <dialog
+        ref={switchDialogRef}
+        aria-labelledby="mode-switch-title"
+        aria-describedby="mode-switch-description"
+        className="rounded-xl border border-neutral-200 bg-white p-0 shadow-elevated backdrop:bg-neutral-900/40 backdrop:backdrop-blur-sm"
+      >
+        <div className="w-[min(94vw,460px)] p-6">
+          <div
+            className={cn(
+              "flex size-10 items-center justify-center rounded-lg",
+              pendingMode === "production"
+                ? "bg-danger/10 text-danger"
+                : "bg-warning/15 text-neutral-800",
+            )}
+          >
+            {pendingMode === "production" ? (
+              <Rocket className="size-5" aria-hidden />
+            ) : (
+              <FlaskConical className="size-5" aria-hidden />
+            )}
+          </div>
+
+          <h2
+            id="mode-switch-title"
+            className="mt-4 font-display text-lg font-semibold text-neutral-900"
+          >
+            {pendingMode === "production"
+              ? "Pindah ke mode Production?"
+              : "Pindah ke mode Sandbox?"}
+          </h2>
+          <p
+            id="mode-switch-description"
+            className="mt-2 text-sm leading-relaxed text-neutral-600"
+          >
+            {pendingMode === "production" ? (
+              <>
+                Mode <strong>Production</strong> akan memproses pembayaran{" "}
+                <strong>asli</strong> dari pembeli. Pastikan kamu sudah:
+                <br />
+                • setup akun Midtrans production yang aktif,
+                <br />
+                • verifikasi rekening tujuan settlement,
+                <br />
+                • tes flow checkout di sandbox terlebih dahulu.
+              </>
+            ) : (
+              <>
+                Mode <strong>Sandbox</strong> hanya untuk uji coba — pembayaran
+                tidak akan diproses sungguhan. Pembeli yang sedang checkout
+                bisa terdampak.
+              </>
+            )}
+          </p>
+
+          <div className="mt-5 rounded-lg border border-neutral-200 bg-neutral-50 p-4">
+            <Label htmlFor="mode-confirm-input">
+              Ketik <span className="font-mono text-brand-700">{requiredPhrase}</span>{" "}
+              untuk konfirmasi
+            </Label>
+            <Input
+              id="mode-confirm-input"
+              autoFocus
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="characters"
+              spellCheck={false}
+              value={confirmInput}
+              onChange={(e) => setConfirmInput(e.target.value)}
+              placeholder={requiredPhrase}
+              className="mt-2 font-mono"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && canConfirmSwitch) {
+                  e.preventDefault();
+                  confirmModeSwitch();
+                }
+              }}
+            />
+            <p className="mt-2 text-xs text-neutral-500">
+              Case-sensitive. Harus persis &ldquo;{requiredPhrase}&rdquo;.
+            </p>
+          </div>
+
+          <div className="mt-6 flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="md"
+              onClick={() => setPendingMode(null)}
+            >
+              Batal
+            </Button>
+            <Button
+              type="button"
+              variant={pendingMode === "production" ? "destructive" : "default"}
+              size="md"
+              disabled={!canConfirmSwitch}
+              onClick={confirmModeSwitch}
+            >
+              {pendingMode === "production" ? (
+                <Rocket className="size-4" aria-hidden />
+              ) : (
+                <FlaskConical className="size-4" aria-hidden />
+              )}
+              Pindah ke {pendingMode === "production" ? "Production" : "Sandbox"}
+            </Button>
+          </div>
+        </div>
+      </dialog>
     </div>
   );
 }
