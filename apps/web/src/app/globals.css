@@ -1,26 +1,88 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* ==========================================================================
+   THEME TOKENS — Edit di sini untuk mengubah seluruh tampilan aplikasi.
+
+   - Warna brand: ubah hue di OKLCH (angka ketiga, 0–360).
+     Contoh hue: 160 (emerald-teal, default), 25 (orange), 250 (blue),
+     0 (red), 280 (purple), 50 (amber), 130 (green).
+   - Warna neutral: biasanya tidak perlu diubah, tapi bisa di-tint
+     hangat/dingin.
+   - Font: ganti --font-sans / --font-display untuk seluruh aplikasi.
+     Pastikan juga update import di src/app/layout.tsx.
+   - Radius & shadow: konsistensi visual — ubah sekali, semua komponen ikut.
+   ========================================================================== */
+
+@theme {
+  /* === BRAND COLOR (ubah hue 160 ke value lain untuk shift seluruh brand) === */
+  --color-brand-50:  oklch(0.97 0.02 160);
+  --color-brand-100: oklch(0.93 0.05 160);
+  --color-brand-200: oklch(0.86 0.09 160);
+  --color-brand-300: oklch(0.76 0.13 160);
+  --color-brand-400: oklch(0.66 0.16 160);
+  --color-brand-500: oklch(0.58 0.17 160);  /* primary */
+  --color-brand-600: oklch(0.50 0.16 160);
+  --color-brand-700: oklch(0.42 0.14 160);
+  --color-brand-800: oklch(0.34 0.11 160);
+  --color-brand-900: oklch(0.27 0.08 160);
+  --color-brand-950: oklch(0.20 0.05 160);
+
+  /* === NEUTRAL (slightly cool gray) === */
+  --color-neutral-0:   oklch(1.00 0 0);
+  --color-neutral-50:  oklch(0.985 0.002 250);
+  --color-neutral-100: oklch(0.97 0.003 250);
+  --color-neutral-200: oklch(0.93 0.005 250);
+  --color-neutral-300: oklch(0.87 0.007 250);
+  --color-neutral-400: oklch(0.71 0.01 250);
+  --color-neutral-500: oklch(0.55 0.012 250);
+  --color-neutral-600: oklch(0.44 0.012 250);
+  --color-neutral-700: oklch(0.36 0.01 250);
+  --color-neutral-800: oklch(0.27 0.008 250);
+  --color-neutral-900: oklch(0.19 0.006 250);
+  --color-neutral-950: oklch(0.13 0.004 250);
+
+  /* === SEMANTIC === */
+  --color-success: oklch(0.65 0.17 145);
+  --color-warning: oklch(0.78 0.15 75);
+  --color-danger:  oklch(0.60 0.20 25);
+  --color-info:    oklch(0.65 0.14 230);
+
+  /* === FONTS ===
+     Font family loaded via next/font in src/app/layout.tsx.
+     Variable name HARUS match dengan yang di layout.tsx. */
+  --font-sans: var(--font-plus-jakarta-sans), system-ui, -apple-system, sans-serif;
+  --font-display: var(--font-plus-jakarta-sans), system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  /* === RADIUS === */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+  --radius-2xl: 1.5rem;
+
+  /* === SHADOWS === */
+  --shadow-soft: 0 1px 2px 0 rgb(0 0 0 / 0.04);
+  --shadow-card: 0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.06);
+  --shadow-elevated: 0 10px 25px -5px rgb(0 0 0 / 0.08), 0 4px 10px -3px rgb(0 0 0 / 0.04);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* === BASE STYLES === */
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
   }
-}
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  body {
+    background-color: var(--color-neutral-50);
+    color: var(--color-neutral-900);
+    font-family: var(--font-sans);
+  }
+
+  h1, h2, h3, h4 {
+    font-family: var(--font-display);
+    letter-spacing: -0.015em;
+  }
 }
