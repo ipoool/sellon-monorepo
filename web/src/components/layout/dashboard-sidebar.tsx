@@ -91,14 +91,14 @@ export function DashboardSidebar({ me, open, onClose }: Props) {
       <dialog
         ref={dialogRef}
         aria-label="Menu navigasi"
-        className="m-0 h-full max-h-none w-72 max-w-[85vw] bg-white p-0 shadow-popout backdrop:bg-neutral-900/40 backdrop:backdrop-blur-sm lg:hidden"
-        style={{ marginLeft: 0, marginRight: "auto" }}
+        className="fixed inset-y-0 left-0 m-0 h-svh max-h-none w-72 max-w-[85vw] border-r border-neutral-200 bg-white p-0 shadow-popout backdrop:bg-neutral-900/40 backdrop:backdrop-blur-sm lg:hidden"
       >
-        <div className="flex h-full flex-col">
+        <div className="relative flex h-full flex-col">
           <button
+            type="button"
             onClick={onClose}
             aria-label="Tutup menu"
-            className="absolute right-3 top-3 rounded-md p-1.5 text-neutral-500 transition-colors hover:bg-neutral-100"
+            className="absolute right-3 top-3 z-10 flex size-8 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900"
           >
             <X className="size-5" aria-hidden />
           </button>
@@ -112,16 +112,14 @@ export function DashboardSidebar({ me, open, onClose }: Props) {
 function SidebarContent({ me, pathname }: { me: Me; pathname: string }) {
   return (
     <>
-      <div className="flex h-16 items-center border-b border-neutral-200 px-5">
+      <div className="flex h-16 items-center justify-between gap-3 border-b border-neutral-200 px-5">
         <Link
           href="/"
           className="font-display text-lg font-semibold tracking-tight text-neutral-900"
         >
           SellOn
         </Link>
-        <Badge variant="success" className="ml-auto">
-          Aktif
-        </Badge>
+        <Badge variant="success">Aktif</Badge>
       </div>
 
       <nav className="flex flex-1 flex-col gap-6 overflow-y-auto p-3">
