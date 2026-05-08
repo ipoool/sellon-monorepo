@@ -6,6 +6,8 @@ import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import { formatRupiah, formatDateID } from "@/lib/format";
@@ -62,23 +64,22 @@ export default async function ProdukListPage({
       }
     >
       {/* Filter bar */}
-      <form className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center">
-        <input
-          name="q"
-          defaultValue={q}
-          placeholder="Cari nama produk…"
-          className="flex-1 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm placeholder:text-neutral-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
-        />
-        <select
-          name="status"
-          defaultValue={status}
-          className="rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
-        >
-          <option value="">Semua status</option>
-          <option value="active">Aktif</option>
-          <option value="inactive">Nonaktif</option>
-          <option value="sold_out">Stok habis</option>
-        </select>
+      <form className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="flex-1">
+          <Input
+            name="q"
+            defaultValue={q}
+            placeholder="Cari nama produk…"
+          />
+        </div>
+        <div className="sm:w-44">
+          <Select name="status" defaultValue={status}>
+            <option value="">Semua status</option>
+            <option value="active">Aktif</option>
+            <option value="inactive">Nonaktif</option>
+            <option value="sold_out">Stok habis</option>
+          </Select>
+        </div>
         <Button type="submit" size="md" variant="outline">
           Filter
         </Button>

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
+import { Select } from "@/components/ui/select";
 import type { Product } from "@/lib/types";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -171,16 +172,15 @@ export function ProdukForm({ initial }: Props) {
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="status">Status</Label>
-            <select
+            <Select
               id="status"
               name="status"
               defaultValue={initial?.status ?? "active"}
-              className="h-10 rounded-lg border border-neutral-200 bg-white px-3 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
             >
               <option value="active">Aktif</option>
               <option value="inactive">Nonaktif</option>
               <option value="sold_out">Stok habis</option>
-            </select>
+            </Select>
           </div>
         </div>
       </Card>

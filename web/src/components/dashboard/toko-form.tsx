@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Select } from "@/components/ui/select";
 import type { Store } from "@/lib/types";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -125,17 +126,16 @@ export function TokoForm({ initial }: { initial: Store | null }) {
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="category">Kategori Usaha</Label>
-            <select
+            <Select
               id="category"
               name="category"
               defaultValue={initial?.category ?? ""}
-              className="h-10 rounded-lg border border-neutral-200 bg-white px-3 text-sm text-neutral-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
             >
               <option value="">— Pilih kategori —</option>
               {categories.map((c) => (
                 <option key={c} value={c}>{c}</option>
               ))}
-            </select>
+            </Select>
           </div>
           <div className="flex flex-col gap-1.5 sm:col-span-2">
             <Label htmlFor="description">Deskripsi Toko</Label>
