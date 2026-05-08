@@ -1,0 +1,126 @@
+"use client";
+
+import { useState, type ReactNode } from "react";
+import { Menu, Bell, Search } from "lucide-react";
+
+import { DashboardSidebar } from "@/components/layout/dashboard-sidebar";
+import { Avatar } from "@/components/ui/avatar";
+import { cn } from "@/lib/utils";
+import type { Me } from "@/lib/auth-types";
+
+type Props = {
+  me: Me;
+  pageTitle: string;
+  pageSubtitle?: string;
+  actions?: ReactNode;
+  children: ReactNode;
+};
+
+export function DashboardShell({
+  me,
+  pageTitle,
+  pageSubtitle,
+  actions,
+  children,
+}: Props) {
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  return (
+    <div className="min-h-svh bg-neutral-50">
+      <DashboardSidebar
+        me={me}
+        open={mobileOpen}
+        onClose={() => setMobileOpen(false)}
+      />
+
+      <div className={cn("lg:pl-60")}>
+        <header className="sticky top-0 z-20 border-b border-neutral-200 bg-white/85 backdrop-blur">
+          <div className="flex h-16 items-center gap-3 px-4 sm:px-6 lg:px-8">
+            <button
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              className="rounded-md p-2 text-neutral-700 transition-colors hover:bg-neutral-100 lg:hidden"
+              aria-label="Buka menu"
+            >
+              <Menu className="size-5" aria-hidden />
+            </button>
+
+            <div className="min-w-0 flex-1">
+              <h1 className="font-display text-lg font-semibold tracking-tight text-neutral-900">
+                {pageTitle}
+              </h1>
+              {pageSubtitle && (
+                <p className="truncate text-xs text-neutral-500">
+                  {pageSubtitle}
+                </p>
+              )}
+            </div>
+
+            <div className="hidden md:block md:w-72">
+              <label htmlFor="topbar-search" className="sr-only">
+                Cari
+              </label>
+              <div className="relative">
+                <Search
+                  className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-neutral-400"
+                  aria-hidden
+                />
+                <input
+                  id="topbar-search"
+                  type="search"
+                  placeholder="Cari produk, pesanan, pelanggan…"
+                  className="w-full rounded-lg border border-neutral-200 bg-neutral-50 py-2 pl-9 pr-3 text-sm placeholder:text-neutral-400 focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+                />
+              </div>
+            </div>
+
+            <button
+              type="button"
+              className="relative rounded-md p-2 text-neutral-600 transition-colors hover:bg-neutral-100"
+              aria-label="Notifikasi"
+              title="Notifikasi"
+            >
+              <Bell className="size-5" aria-hidden />
+              <span
+                className="absolute right-1.5 top-1.5 size-2 rounded-full bg-danger ring-2 ring-white"
+                aria-hidden
+              />
+            </button>
+
+            <div className="lg:hidden">
+              <Avatar src={me.picture_url} name={me.name || me.email} />
+            </div>
+          </div>
+        </header>
+
+        <main className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+          <div className="mx-auto max-w-7xl">
+            {/* Page header (desktop only — mobile uses topbar title) */}
+            <div className="hidden items-end justify-between gap-4 pb-6 lg:flex">
+              <div>
+                <h2 className="font-display text-2xl font-semibold tracking-tight text-neutral-900">
+                  {pageTitle}
+                </h2>
+                {pageSubtitle && (
+                  <p className="mt-1 text-sm text-neutral-600">{pageSubtitle}</p>
+                )}
+              </div>
+              {actions && (
+                <div className="flex items-center gap-2">{actions}</div>
+              )}
+            </div>
+
+            {/* Mobile actions */}
+            {actions && (
+              <div className="mb-4 flex items-center gap-2 lg:hidden">
+                {actions}
+              </div>
+            )}
+
+            {children}
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+}
