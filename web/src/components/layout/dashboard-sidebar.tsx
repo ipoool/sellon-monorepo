@@ -31,14 +31,14 @@ type NavItem = {
 
 const primaryNav: NavItem[] = [
   { label: "Dasbor", href: "/dasbor", icon: LayoutDashboard },
-  { label: "Pesanan", href: "/pesanan", icon: ShoppingBag, badge: "3", disabled: true },
-  { label: "Produk", href: "/produk", icon: Package, disabled: true },
-  { label: "Pelanggan", href: "/pelanggan", icon: Users, disabled: true },
-  { label: "Promo", href: "/promo", icon: Megaphone, disabled: true },
+  { label: "Pesanan", href: "/dasbor/pesanan", icon: ShoppingBag },
+  { label: "Produk", href: "/dasbor/produk", icon: Package },
+  { label: "Pelanggan", href: "/dasbor/pelanggan", icon: Users },
+  { label: "Promo", href: "/dasbor/promo", icon: Megaphone, disabled: true },
 ];
 
 const secondaryNav: NavItem[] = [
-  { label: "Pengaturan", href: "/pengaturan", icon: Settings, disabled: true },
+  { label: "Pengaturan", href: "/dasbor/pengaturan", icon: Settings },
   { label: "Bantuan", href: "/bantuan", icon: HelpCircle },
 ];
 
@@ -161,7 +161,10 @@ function NavGroup({
       </p>
       <ul className="flex flex-col gap-0.5">
         {items.map((item) => {
-          const active = pathname === item.href;
+          // /dasbor only matches exactly; nested routes match by prefix.
+          const active =
+            pathname === item.href ||
+            (item.href !== "/dasbor" && pathname.startsWith(item.href + "/"));
           const Icon = item.icon;
 
           if (item.disabled) {
