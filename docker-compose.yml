@@ -1,0 +1,66 @@
+services:
+  api:
+    build:
+      context: ./apps/api
+      target: dev
+    container_name: tokoflow-api
+    ports:
+      - "${API_PORT:-8080}:8080"
+    volumes:
+      - ./apps/api:/app
+      - go-modules:/go/pkg/mod
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./apps/web
+      target: dev
+    container_name: tokoflow-web
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./apps/web:/app
+      - /app/node_modules
+      - /app/.next
+    env_file: .env
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: tokoflow-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tokoflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tokoflow}
+      POSTGRES_DB: ${POSTGRES_DB:-tokoflow}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tokoflow}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: tokoflow-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  redis-data:
+  go-modules:
