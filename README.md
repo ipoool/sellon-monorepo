@@ -7,7 +7,7 @@ TokoFlow memakai model **facilitator**: setiap seller pakai akun Midtrans/Xendit
 ## Prerequisites
 
 - Docker & Docker Compose v2
-- Go 1.23+ (untuk dev di luar Docker, opsional)
+- Go 1.25+ (untuk dev di luar Docker, opsional — Docker image sudah include)
 - Node 20+ dan pnpm (via `corepack enable pnpm`, opsional jika dev di luar Docker)
 
 ## Quickstart
