@@ -300,14 +300,12 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
                 Server Key {isSandbox ? "Sandbox" : "Production"}
                 {!activeHasStoredKey && <span className="ml-1 text-danger">*</span>}
               </Label>
-              <div className="relative">
-                <span
+              <div className="flex h-10 items-center gap-2 rounded-lg border border-neutral-200 bg-white px-3 transition-colors focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-500/30">
+                <Lock
+                  className="size-4 shrink-0 text-neutral-400"
                   aria-hidden
-                  className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-neutral-400"
-                >
-                  <Lock className="size-4" />
-                </span>
-                <Input
+                />
+                <input
                   id="server_key"
                   name="server_key"
                   type="password"
@@ -317,7 +315,7 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
                       ? activeMaskedKey || "•••••••• tersimpan"
                       : activePlaceholder
                   }
-                  className="pl-9 font-mono text-xs"
+                  className="h-full flex-1 bg-transparent font-mono text-xs text-neutral-900 placeholder:text-neutral-400 focus:outline-none"
                 />
               </div>
               {activeHasStoredKey && (
@@ -370,7 +368,7 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
                     initial?.enabled_methods?.includes(m.id) ??
                     (m.id === "qris" || m.id === "bank_transfer")
                   }
-                  className="size-4 rounded border-neutral-300 text-brand-500 focus:ring-brand-500/30"
+                  className="size-4 rounded border-neutral-300 accent-brand-500 focus:ring-brand-500/30"
                 />
                 <span className="font-medium text-neutral-900">{m.label}</span>
               </label>

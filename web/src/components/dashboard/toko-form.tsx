@@ -229,7 +229,7 @@ export function TokoForm({ initial }: { initial: Store | null }) {
                 type="checkbox"
                 name="is_open"
                 defaultChecked={initial?.is_open ?? true}
-                className="size-4 rounded border-neutral-300 text-brand-500 focus:ring-brand-500/30"
+                className="size-4 rounded border-neutral-300 accent-brand-500 focus:ring-brand-500/30"
               />
               <Badge variant="success">Toko buka</Badge>
             </label>
