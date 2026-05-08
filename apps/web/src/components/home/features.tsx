@@ -8,8 +8,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import { Section } from "@/components/layout/section";
 import { Container } from "@/components/layout/container";
-import { Card } from "@/components/ui/card";
 
 type Feature = {
   icon: LucideIcon;
@@ -58,10 +58,11 @@ const features: Feature[] = [
 
 export function Features() {
   return (
-    <section id="fitur" className="scroll-mt-20 py-20 lg:py-24">
+    <Section id="fitur">
       <Container>
         <div className="mx-auto max-w-2xl text-center">
-          <h2 className="font-display text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
+          <p className="text-sm font-medium text-brand-600">Fitur</p>
+          <h2 className="mt-2 font-display text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
             Semua yang UMKM butuhkan untuk jualan online
           </h2>
           <p className="mt-4 text-lg text-neutral-600">
@@ -69,20 +70,23 @@ export function Features() {
           </p>
         </div>
 
-        <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-14 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {features.map(({ icon: Icon, title, description }) => (
-            <Card key={title}>
-              <div className="flex size-10 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
+            <div
+              key={title}
+              className="group rounded-xl border border-neutral-200 bg-white p-6 shadow-card transition-all hover:-translate-y-0.5 hover:shadow-elevated"
+            >
+              <div className="flex size-10 items-center justify-center rounded-lg bg-brand-50 text-brand-600 transition-colors group-hover:bg-brand-100">
                 <Icon className="size-5" strokeWidth={2} aria-hidden />
               </div>
-              <h3 className="mt-4 font-semibold text-neutral-900">{title}</h3>
+              <h3 className="mt-5 font-semibold text-neutral-900">{title}</h3>
               <p className="mt-2 text-sm leading-relaxed text-neutral-600">
                 {description}
               </p>
-            </Card>
+            </div>
           ))}
         </div>
       </Container>
-    </section>
+    </Section>
   );
 }
