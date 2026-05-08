@@ -34,6 +34,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	waTemplates := repository.NewWATemplateRepo(pool)
 	bankAccounts := repository.NewBankAccountRepo(pool)
 	categories := repository.NewCategoryRepo(pool)
+	variants := repository.NewVariantRepo(pool)
 
 	googleVerifier := auth.NewGoogleVerifier(cfg.GoogleClientID)
 	jwtSvc := auth.NewJWTService(cfg.JWTSecret, cfg.JWTTTL)
@@ -46,10 +47,10 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 
 	authHandler := handler.NewAuthHandler(users, googleVerifier, jwtSvc, logger, cfg.IsProd())
 	storeHandler := handler.NewStoreHandler(stores, logger)
-	productHandler := handler.NewProductHandler(products, stores, logger)
+	productHandler := handler.NewProductHandler(products, variants, stores, logger)
 	orderHandler := handler.NewOrderHandler(orders, stores, gateways, encryptor, midtransClient, logger)
 	customerHandler := handler.NewCustomerHandler(customers, stores, logger)
-	paymentHandler := handler.NewPaymentHandler(gateways, stores, encryptor, logger, cfg.WebhookBaseURL)
+	paymentHandler := handler.NewPaymentHandler(gateways, stores, encryptor, midtransClient, logger, cfg.WebhookBaseURL)
 	dashHandler := handler.NewDashboardHandler(stores, products, orders, customers, logger)
 	storefrontHandler := handler.NewStorefrontHandler(stores, products, orders, bankAccounts, categories, logger)
 	waTemplateHandler := handler.NewWATemplateHandler(waTemplates, stores, logger)

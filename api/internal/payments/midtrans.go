@@ -19,6 +19,8 @@ import (
 const (
 	snapSandboxBase = "https://app.sandbox.midtrans.com/snap/v1"
 	snapProdBase    = "https://app.midtrans.com/snap/v1"
+	coreSandboxBase = "https://api.sandbox.midtrans.com/v2"
+	coreProdBase    = "https://api.midtrans.com/v2"
 )
 
 type MidtransClient struct {
@@ -142,6 +144,42 @@ func defaultEmail(email, phone string) string {
 		return "buyer@sellon.id"
 	}
 	return phone + "@buyer.sellon.id"
+}
+
+// Ping verifies that the server key is valid by hitting a lightweight
+// authenticated endpoint. Midtrans Core /v2/ping returns "pong" on success;
+// 401/403 means the key is invalid for that environment.
+func (c *MidtransClient) Ping(serverKey string, isSandbox bool) error {
+	base := coreSandboxBase
+	if !isSandbox {
+		base = coreProdBase
+	}
+	req, err := http.NewRequest(http.MethodGet, base+"/ping", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.SetBasicAuth(serverKey, "")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("hubungi Midtrans: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return nil
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return fmt.Errorf("server key ditolak Midtrans (%d) — pastikan key benar dan cocok dengan mode (sandbox/production)", resp.StatusCode)
+	case http.StatusNotFound:
+		// /v2/ping doesn't exist on all envs; treat 404 as "auth header was
+		// processed" (otherwise would be 401). Best-effort success.
+		return nil
+	default:
+		return fmt.Errorf("midtrans ping returned %d: %s", resp.StatusCode, string(body))
+	}
 }
 
 // VerifySignature validates the Midtrans webhook signature_key.

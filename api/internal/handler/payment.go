@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/sellon/sellon/api/internal/auth"
+	"github.com/sellon/sellon/api/internal/payments"
 	"github.com/sellon/sellon/api/internal/pkg/response"
 	"github.com/sellon/sellon/api/internal/repository"
 )
@@ -16,12 +17,23 @@ type PaymentHandler struct {
 	gateways       *repository.PaymentRepo
 	stores         *repository.StoreRepo
 	encryptor      *auth.AESEncryptor
+	midtrans       *payments.MidtransClient
 	logger         *slog.Logger
 	webhookBaseURL string
 }
 
-func NewPaymentHandler(gateways *repository.PaymentRepo, stores *repository.StoreRepo, enc *auth.AESEncryptor, logger *slog.Logger, webhookBaseURL string) *PaymentHandler {
-	return &PaymentHandler{gateways: gateways, stores: stores, encryptor: enc, logger: logger, webhookBaseURL: webhookBaseURL}
+func NewPaymentHandler(
+	gateways *repository.PaymentRepo,
+	stores *repository.StoreRepo,
+	enc *auth.AESEncryptor,
+	midtrans *payments.MidtransClient,
+	logger *slog.Logger,
+	webhookBaseURL string,
+) *PaymentHandler {
+	return &PaymentHandler{
+		gateways: gateways, stores: stores, encryptor: enc,
+		midtrans: midtrans, logger: logger, webhookBaseURL: webhookBaseURL,
+	}
 }
 
 type gatewayDTO struct {
@@ -190,7 +202,10 @@ func (h *PaymentHandler) Save(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-// POST /api/v1/payments/midtrans/verify — stub
+// POST /api/v1/payments/midtrans/verify
+//
+// Calls Midtrans Core /v2/ping with the seller's decrypted server key for the
+// active env. Treats 200 (and 404) as success; 401/403 as invalid key.
 func (h *PaymentHandler) Verify(w http.ResponseWriter, r *http.Request) {
 	store, err := h.storeFor(r)
 	if err != nil {
@@ -202,25 +217,41 @@ func (h *PaymentHandler) Verify(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusBadRequest, "gateway belum dikonfigurasi")
 		return
 	}
-	// Pick the key that matches current mode.
-	hasKey := (g.IsSandbox && len(g.ServerKeySandboxEncrypted) > 0) ||
-		(!g.IsSandbox && len(g.ServerKeyProdEncrypted) > 0)
-	if !hasKey {
+	var encryptedKey []byte
+	if g.IsSandbox {
+		encryptedKey = g.ServerKeySandboxEncrypted
+	} else {
+		encryptedKey = g.ServerKeyProdEncrypted
+	}
+	if len(encryptedKey) == 0 {
 		response.Error(w, http.StatusBadRequest,
 			"Server Key untuk mode aktif belum diisi")
+		return
+	}
+	keyBytes, err := h.encryptor.Decrypt(encryptedKey)
+	if err != nil {
+		h.logger.Error("decrypt server key", "err", err)
+		response.Error(w, http.StatusInternalServerError, "gagal decrypt key")
+		return
+	}
+
+	envLabel := "sandbox"
+	if !g.IsSandbox {
+		envLabel = "production"
+	}
+
+	if err := h.midtrans.Ping(string(keyBytes), g.IsSandbox); err != nil {
+		_ = h.gateways.MarkVerified(r.Context(), store.ID, "midtrans", "failed")
+		response.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := h.gateways.MarkVerified(r.Context(), store.ID, "midtrans", "ok"); err != nil {
 		response.Error(w, http.StatusInternalServerError, "gagal update status")
 		return
 	}
-	envLabel := "sandbox"
-	if !g.IsSandbox {
-		envLabel = "production"
-	}
 	response.JSON(w, http.StatusOK, map[string]any{
 		"ok":      true,
-		"message": "Koneksi simulasi sukses untuk mode " + envLabel + " (stub).",
+		"message": "Koneksi Midtrans " + envLabel + " berhasil diverifikasi.",
 	})
 }
 

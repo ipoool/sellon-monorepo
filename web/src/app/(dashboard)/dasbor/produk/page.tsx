@@ -153,7 +153,16 @@ export default async function ProdukListPage({
                   <td className="px-5 py-3 font-medium text-neutral-900">
                     {formatRupiah(p.price_cents)}
                   </td>
-                  <td className="px-5 py-3 text-neutral-700">{p.stock}</td>
+                  <td className="px-5 py-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-neutral-700">{p.stock}</span>
+                      {p.low_stock_threshold > 0 &&
+                        p.stock <= p.low_stock_threshold &&
+                        p.stock > 0 && (
+                          <Badge variant="warning">Stok rendah</Badge>
+                        )}
+                    </div>
+                  </td>
                   <td className="px-5 py-3">
                     <Badge variant={statusBadge[p.status].variant}>
                       {statusBadge[p.status].label}

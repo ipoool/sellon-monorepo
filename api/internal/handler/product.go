@@ -18,43 +18,64 @@ import (
 
 type ProductHandler struct {
 	products *repository.ProductRepo
+	variants *repository.VariantRepo
 	stores   *repository.StoreRepo
 	logger   *slog.Logger
 }
 
-func NewProductHandler(products *repository.ProductRepo, stores *repository.StoreRepo, logger *slog.Logger) *ProductHandler {
-	return &ProductHandler{products: products, stores: stores, logger: logger}
+func NewProductHandler(products *repository.ProductRepo, variants *repository.VariantRepo, stores *repository.StoreRepo, logger *slog.Logger) *ProductHandler {
+	return &ProductHandler{products: products, variants: variants, stores: stores, logger: logger}
+}
+
+type variantDTO struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	SKU        string `json:"sku"`
+	PriceCents int64  `json:"price_cents"`
+	Stock      int    `json:"stock"`
+	SortOrder  int    `json:"sort_order"`
 }
 
 type productDTO struct {
-	ID          string   `json:"id"`
-	CategoryID  string   `json:"category_id"`
-	Name        string   `json:"name"`
-	Slug        string   `json:"slug"`
-	Description string   `json:"description"`
-	PriceCents  int64    `json:"price_cents"`
-	Stock       int      `json:"stock"`
-	WeightG     int      `json:"weight_g"`
-	LengthCm    int      `json:"length_cm"`
-	WidthCm     int      `json:"width_cm"`
-	HeightCm    int      `json:"height_cm"`
-	Status      string   `json:"status"`
-	PhotoURLs   []string `json:"photo_urls"`
-	HasVariants bool     `json:"has_variants"`
-	CreatedAt   string   `json:"created_at"`
+	ID                string       `json:"id"`
+	CategoryID        string       `json:"category_id"`
+	Name              string       `json:"name"`
+	Slug              string       `json:"slug"`
+	Description       string       `json:"description"`
+	PriceCents        int64        `json:"price_cents"`
+	Stock             int          `json:"stock"`
+	LowStockThreshold int          `json:"low_stock_threshold"`
+	WeightG           int          `json:"weight_g"`
+	LengthCm          int          `json:"length_cm"`
+	WidthCm           int          `json:"width_cm"`
+	HeightCm          int          `json:"height_cm"`
+	Status            string       `json:"status"`
+	PhotoURLs         []string     `json:"photo_urls"`
+	HasVariants       bool         `json:"has_variants"`
+	Variants          []variantDTO `json:"variants"`
+	CreatedAt         string       `json:"created_at"`
 }
 
-func toProductDTO(p *repository.Product) productDTO {
+func toProductDTO(p *repository.Product, variants []repository.Variant) productDTO {
 	categoryID := ""
 	if p.CategoryID != nil {
 		categoryID = p.CategoryID.String()
+	}
+	vDTOs := make([]variantDTO, 0, len(variants))
+	for _, v := range variants {
+		vDTOs = append(vDTOs, variantDTO{
+			ID: v.ID.String(), Name: v.Name, SKU: v.SKU,
+			PriceCents: v.PriceCents, Stock: v.Stock, SortOrder: v.SortOrder,
+		})
 	}
 	return productDTO{
 		ID: p.ID.String(), CategoryID: categoryID,
 		Name: p.Name, Slug: p.Slug, Description: p.Description,
 		PriceCents: p.PriceCents, Stock: p.Stock,
+		LowStockThreshold: p.LowStockThreshold,
 		WeightG: p.WeightG, LengthCm: p.LengthCm, WidthCm: p.WidthCm, HeightCm: p.HeightCm,
 		Status: p.Status, PhotoURLs: p.PhotoURLs, HasVariants: p.HasVariants,
+		Variants:  vDTOs,
 		CreatedAt: p.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 }
@@ -92,7 +113,9 @@ func (h *ProductHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]productDTO, 0, len(items))
 	for i := range items {
-		out = append(out, toProductDTO(&items[i]))
+		// List view doesn't fetch variants for each row (N+1 avoidance);
+		// callers needing variants use GET /products/{id}.
+		out = append(out, toProductDTO(&items[i], nil))
 	}
 	response.JSON(w, http.StatusOK, map[string]any{
 		"products": out, "total": total,
@@ -120,22 +143,33 @@ func (h *ProductHandler) Get(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	response.JSON(w, http.StatusOK, map[string]any{"product": toProductDTO(p)})
+	variants, _ := h.variants.ListByProduct(r.Context(), p.ID)
+	response.JSON(w, http.StatusOK, map[string]any{"product": toProductDTO(p, variants)})
+}
+
+type variantInput struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	SKU        string `json:"sku"`
+	PriceCents int64  `json:"price_cents"`
+	Stock      int    `json:"stock"`
 }
 
 type productInput struct {
-	CategoryID  string   `json:"category_id"`
-	Name        string   `json:"name"`
-	Slug        string   `json:"slug"`
-	Description string   `json:"description"`
-	PriceCents  int64    `json:"price_cents"`
-	Stock       int      `json:"stock"`
-	WeightG     int      `json:"weight_g"`
-	LengthCm    int      `json:"length_cm"`
-	WidthCm     int      `json:"width_cm"`
-	HeightCm    int      `json:"height_cm"`
-	Status      string   `json:"status"`
-	PhotoURLs   []string `json:"photo_urls"`
+	CategoryID        string         `json:"category_id"`
+	Name              string         `json:"name"`
+	Slug              string         `json:"slug"`
+	Description       string         `json:"description"`
+	PriceCents        int64          `json:"price_cents"`
+	Stock             int            `json:"stock"`
+	LowStockThreshold int            `json:"low_stock_threshold"`
+	WeightG           int            `json:"weight_g"`
+	LengthCm          int            `json:"length_cm"`
+	WidthCm           int            `json:"width_cm"`
+	HeightCm          int            `json:"height_cm"`
+	Status            string         `json:"status"`
+	PhotoURLs         []string       `json:"photo_urls"`
+	Variants          []variantInput `json:"variants"`
 }
 
 func (in productInput) sanitize() (repository.SaveProductInput, error) {
@@ -173,10 +207,15 @@ func (in productInput) sanitize() (repository.SaveProductInput, error) {
 		categoryID = &parsed
 	}
 
+	if in.LowStockThreshold < 0 {
+		in.LowStockThreshold = 0
+	}
+
 	return repository.SaveProductInput{
 		CategoryID: categoryID,
 		Name: in.Name, Slug: in.Slug, Description: in.Description,
 		PriceCents: in.PriceCents, Stock: in.Stock,
+		LowStockThreshold: in.LowStockThreshold,
 		WeightG: in.WeightG, LengthCm: in.LengthCm, WidthCm: in.WidthCm, HeightCm: in.HeightCm,
 		Status: in.Status, PhotoURLs: in.PhotoURLs,
 	}, nil
@@ -207,7 +246,16 @@ func (h *ProductHandler) Create(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, "gagal simpan (slug mungkin duplikat)")
 		return
 	}
-	response.JSON(w, http.StatusCreated, map[string]any{"product": toProductDTO(p)})
+	if err := h.syncVariants(r, p, in.Variants); err != nil {
+		h.logger.Error("sync variants on create", "err", err)
+	}
+	variants, _ := h.variants.ListByProduct(r.Context(), p.ID)
+	// Re-fetch product to pick up has_variants flag mutation
+	p2, _ := h.products.FindByID(r.Context(), store.ID, p.ID)
+	if p2 != nil {
+		p = p2
+	}
+	response.JSON(w, http.StatusCreated, map[string]any{"product": toProductDTO(p, variants)})
 }
 
 // PUT /api/v1/products/{id}
@@ -244,7 +292,32 @@ func (h *ProductHandler) Update(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, "gagal update")
 		return
 	}
-	response.JSON(w, http.StatusOK, map[string]any{"product": toProductDTO(p)})
+	if err := h.syncVariants(r, p, in.Variants); err != nil {
+		h.logger.Error("sync variants on update", "err", err)
+	}
+	variants, _ := h.variants.ListByProduct(r.Context(), p.ID)
+	p2, _ := h.products.FindByID(r.Context(), store.ID, p.ID)
+	if p2 != nil {
+		p = p2
+	}
+	response.JSON(w, http.StatusOK, map[string]any{"product": toProductDTO(p, variants)})
+}
+
+// syncVariants runs ReplaceForProduct with sanitized inputs. nil/empty
+// variants array clears any existing variants and sets has_variants=false.
+func (h *ProductHandler) syncVariants(r *http.Request, p *repository.Product, inputs []variantInput) error {
+	clean := make([]repository.VariantInput, 0, len(inputs))
+	for i, in := range inputs {
+		name := strings.TrimSpace(in.Name)
+		if name == "" {
+			continue
+		}
+		clean = append(clean, repository.VariantInput{
+			ID: in.ID, Name: name, SKU: strings.TrimSpace(in.SKU),
+			PriceCents: in.PriceCents, Stock: in.Stock, SortOrder: i,
+		})
+	}
+	return h.variants.ReplaceForProduct(r.Context(), p.ID, clean)
 }
 
 // DELETE /api/v1/products/{id}

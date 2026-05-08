@@ -33,6 +33,15 @@ export type Category = {
   product_count: number;
 };
 
+export type Variant = {
+  id: string;
+  name: string;
+  sku: string;
+  price_cents: number;
+  stock: number;
+  sort_order: number;
+};
+
 export type Product = {
   id: string;
   category_id: string;
@@ -41,6 +50,7 @@ export type Product = {
   description: string;
   price_cents: number;
   stock: number;
+  low_stock_threshold: number;
   weight_g: number;
   length_cm: number;
   width_cm: number;
@@ -48,6 +58,7 @@ export type Product = {
   status: "active" | "inactive" | "sold_out";
   photo_urls: string[];
   has_variants: boolean;
+  variants?: Variant[];
   created_at: string;
 };
 

@@ -2,14 +2,23 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Trash2, Save, ArrowLeft, Plus, X, Image as ImageIcon } from "lucide-react";
+import { Trash2, Save, ArrowLeft, Plus, X, Image as ImageIcon, Layers } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
-import type { Category, Product } from "@/lib/types";
+import { Badge } from "@/components/ui/badge";
+import type { Category, Product, Variant } from "@/lib/types";
+
+type VariantDraft = {
+  id: string; // empty for new
+  name: string;
+  sku: string;
+  price_cents: number;
+  stock: number;
+};
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
@@ -27,6 +36,18 @@ export function ProdukForm({ initial }: Props) {
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [variants, setVariants] = useState<VariantDraft[]>(() =>
+    (initial?.variants ?? []).map((v: Variant) => ({
+      id: v.id,
+      name: v.name,
+      sku: v.sku,
+      price_cents: v.price_cents,
+      stock: v.stock,
+    })),
+  );
+  const [hasVariants, setHasVariants] = useState<boolean>(
+    (initial?.variants?.length ?? 0) > 0,
+  );
 
   useEffect(() => {
     void (async () => {
@@ -65,6 +86,9 @@ export function ProdukForm({ initial }: Props) {
     setError(null);
 
     const fd = new FormData(e.currentTarget);
+    const cleanVariants = hasVariants
+      ? variants.filter((v) => v.name.trim().length > 0)
+      : [];
     const body = {
       category_id: String(fd.get("category_id") ?? ""),
       name: String(fd.get("name") ?? ""),
@@ -72,12 +96,14 @@ export function ProdukForm({ initial }: Props) {
       description: String(fd.get("description") ?? ""),
       price_cents: Math.round(Number(fd.get("price") ?? 0)) * 100,
       stock: Math.max(0, Number(fd.get("stock") ?? 0)),
+      low_stock_threshold: Math.max(0, Number(fd.get("low_stock_threshold") ?? 0)),
       weight_g: Math.max(0, Number(fd.get("weight_g") ?? 0)),
       length_cm: Math.max(0, Number(fd.get("length_cm") ?? 0)),
       width_cm: Math.max(0, Number(fd.get("width_cm") ?? 0)),
       height_cm: Math.max(0, Number(fd.get("height_cm") ?? 0)),
       status: String(fd.get("status") ?? "active"),
       photo_urls: photoUrls,
+      variants: cleanVariants,
     };
 
     try {
@@ -189,7 +215,7 @@ export function ProdukForm({ initial }: Props) {
         <div className="mb-4">
           <h2 className="font-semibold text-neutral-900">Harga & Stok</h2>
         </div>
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="price">Harga (Rp) *</Label>
             <Input
@@ -213,6 +239,20 @@ export function ProdukForm({ initial }: Props) {
               min={0}
               defaultValue={initial?.stock ?? 0}
             />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="low_stock_threshold">Alert Stok Rendah</Label>
+            <Input
+              id="low_stock_threshold"
+              name="low_stock_threshold"
+              type="number"
+              min={0}
+              defaultValue={initial?.low_stock_threshold ?? 0}
+              placeholder="0 = matikan"
+            />
+            <p className="text-xs text-neutral-500">
+              Tampilkan badge &ldquo;stok rendah&rdquo; saat stok ≤ angka ini.
+            </p>
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="status">Status</Label>
@@ -299,6 +339,144 @@ export function ProdukForm({ initial }: Props) {
             Tambah
           </Button>
         </div>
+      </Card>
+
+      <Card>
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <h2 className="flex items-center gap-2 font-semibold text-neutral-900">
+              <Layers className="size-4 text-neutral-500" aria-hidden />
+              Varian Produk
+            </h2>
+            <p className="mt-0.5 text-sm text-neutral-500">
+              Untuk produk dengan beberapa pilihan (ukuran, warna, dll). Tiap
+              varian punya harga + stok sendiri.
+            </p>
+          </div>
+          <label className="flex cursor-pointer items-center gap-3 text-sm">
+            <input
+              type="checkbox"
+              checked={hasVariants}
+              onChange={(e) => {
+                setHasVariants(e.target.checked);
+                if (e.target.checked && variants.length === 0) {
+                  setVariants([
+                    { id: "", name: "", sku: "", price_cents: 0, stock: 0 },
+                  ]);
+                }
+              }}
+              className="size-4 rounded border-neutral-300 accent-brand-500 focus:ring-brand-500/30"
+            />
+            <span className="font-medium text-neutral-900">Pakai varian</span>
+          </label>
+        </div>
+
+        {hasVariants && (
+          <div className="flex flex-col gap-3">
+            {variants.length > 0 && (
+              <div className="grid grid-cols-12 gap-2 px-2 text-xs font-medium uppercase tracking-wider text-neutral-500">
+                <span className="col-span-4">Nama Varian</span>
+                <span className="col-span-3">SKU</span>
+                <span className="col-span-2">Harga (Rp)</span>
+                <span className="col-span-2">Stok</span>
+                <span className="col-span-1"></span>
+              </div>
+            )}
+            {variants.map((v, i) => (
+              <div
+                key={i}
+                className="grid grid-cols-12 items-start gap-2 rounded-lg border border-neutral-200 bg-neutral-50 p-2"
+              >
+                <Input
+                  className="col-span-4"
+                  placeholder="Mis. Ukuran S, Warna Merah"
+                  value={v.name}
+                  onChange={(e) =>
+                    setVariants((arr) =>
+                      arr.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)),
+                    )
+                  }
+                />
+                <Input
+                  className="col-span-3 font-mono text-xs"
+                  placeholder="SKU-001"
+                  value={v.sku}
+                  onChange={(e) =>
+                    setVariants((arr) =>
+                      arr.map((x, j) => (j === i ? { ...x, sku: e.target.value } : x)),
+                    )
+                  }
+                />
+                <Input
+                  className="col-span-2"
+                  type="number"
+                  min={0}
+                  value={v.price_cents > 0 ? Math.round(v.price_cents / 100) : ""}
+                  placeholder="0"
+                  onChange={(e) =>
+                    setVariants((arr) =>
+                      arr.map((x, j) =>
+                        j === i
+                          ? {
+                              ...x,
+                              price_cents: Math.max(0, Number(e.target.value)) * 100,
+                            }
+                          : x,
+                      ),
+                    )
+                  }
+                />
+                <Input
+                  className="col-span-2"
+                  type="number"
+                  min={0}
+                  value={v.stock}
+                  onChange={(e) =>
+                    setVariants((arr) =>
+                      arr.map((x, j) =>
+                        j === i ? { ...x, stock: Math.max(0, Number(e.target.value)) } : x,
+                      ),
+                    )
+                  }
+                />
+                <button
+                  type="button"
+                  className="col-span-1 flex size-10 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-danger/10 hover:text-danger"
+                  onClick={() =>
+                    setVariants((arr) => arr.filter((_, j) => j !== i))
+                  }
+                  aria-label="Hapus varian"
+                >
+                  <X className="size-4" aria-hidden />
+                </button>
+              </div>
+            ))}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                setVariants((arr) => [
+                  ...arr,
+                  { id: "", name: "", sku: "", price_cents: 0, stock: 0 },
+                ])
+              }
+              className="self-start"
+            >
+              <Plus className="size-4" aria-hidden />
+              Tambah Varian
+            </Button>
+            <p className="text-xs text-neutral-500">
+              Saat varian aktif, harga + stok di atas digantikan oleh tiap varian
+              ini. Pembeli akan pilih varian saat checkout.
+            </p>
+            {initial?.has_variants && variants.length === 0 && (
+              <Badge variant="warning">
+                Centang &ldquo;Pakai varian&rdquo; akan di-uncheck dan semua varian akan dihapus saat simpan.
+              </Badge>
+            )}
+          </div>
+        )}
       </Card>
 
       <Card>

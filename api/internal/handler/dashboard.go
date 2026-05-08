@@ -55,6 +55,9 @@ func (h *DashboardHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	if statusCounts, err := h.products.CountByStatus(r.Context(), store.ID); err == nil {
 		out.ProductsActive = statusCounts["active"]
 	}
+	if lowStock, err := h.products.CountLowStock(r.Context(), store.ID); err == nil {
+		out.ProductsLowStock = lowStock
+	}
 	if customerCount, err := h.customers.CountByStore(r.Context(), store.ID); err == nil {
 		out.CustomersTotal = customerCount
 	}

@@ -12,23 +12,24 @@ import (
 )
 
 type Product struct {
-	ID          uuid.UUID
-	StoreID     uuid.UUID
-	CategoryID  *uuid.UUID
-	Name        string
-	Slug        string
-	Description string
-	PriceCents  int64
-	Stock       int
-	WeightG     int
-	LengthCm    int
-	WidthCm     int
-	HeightCm    int
-	Status      string
-	PhotoURLs   []string
-	HasVariants bool
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID                uuid.UUID
+	StoreID           uuid.UUID
+	CategoryID        *uuid.UUID
+	Name              string
+	Slug              string
+	Description       string
+	PriceCents        int64
+	Stock             int
+	LowStockThreshold int
+	WeightG           int
+	LengthCm          int
+	WidthCm           int
+	HeightCm          int
+	Status            string
+	PhotoURLs         []string
+	HasVariants       bool
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 type ProductRepo struct {
@@ -40,6 +41,19 @@ func NewProductRepo(pool *pgxpool.Pool) *ProductRepo {
 }
 
 var ErrProductNotFound = errors.New("product not found")
+
+const productColumns = `id, store_id, category_id, name, slug, description, price_cents, stock,
+	low_stock_threshold, weight_g, length_cm, width_cm, height_cm,
+	status, photo_urls, has_variants, created_at, updated_at`
+
+func scanProduct(row pgx.Row, p *Product) error {
+	return row.Scan(
+		&p.ID, &p.StoreID, &p.CategoryID, &p.Name, &p.Slug, &p.Description,
+		&p.PriceCents, &p.Stock, &p.LowStockThreshold,
+		&p.WeightG, &p.LengthCm, &p.WidthCm, &p.HeightCm,
+		&p.Status, &p.PhotoURLs, &p.HasVariants, &p.CreatedAt, &p.UpdatedAt,
+	)
+}
 
 type ListProductsFilter struct {
 	StoreID uuid.UUID
@@ -74,9 +88,7 @@ func (r *ProductRepo) List(ctx context.Context, f ListProductsFilter) ([]Product
 
 	args = append(args, f.Limit, f.Offset)
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, store_id, category_id, name, slug, description, price_cents, stock,
-		       weight_g, length_cm, width_cm, height_cm, status, photo_urls, has_variants,
-		       created_at, updated_at
+		SELECT `+productColumns+`
 		FROM products
 		WHERE `+where+`
 		ORDER BY created_at DESC
@@ -90,11 +102,7 @@ func (r *ProductRepo) List(ctx context.Context, f ListProductsFilter) ([]Product
 	var out []Product
 	for rows.Next() {
 		var p Product
-		if err := rows.Scan(
-			&p.ID, &p.StoreID, &p.CategoryID, &p.Name, &p.Slug, &p.Description,
-			&p.PriceCents, &p.Stock, &p.WeightG, &p.LengthCm, &p.WidthCm, &p.HeightCm,
-			&p.Status, &p.PhotoURLs, &p.HasVariants, &p.CreatedAt, &p.UpdatedAt,
-		); err != nil {
+		if err := scanProduct(rows, &p); err != nil {
 			return nil, 0, err
 		}
 		out = append(out, p)
@@ -105,9 +113,7 @@ func (r *ProductRepo) List(ctx context.Context, f ListProductsFilter) ([]Product
 // ListActiveByStore returns active products for storefront display (public).
 func (r *ProductRepo) ListActiveByStore(ctx context.Context, storeID uuid.UUID) ([]Product, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, store_id, category_id, name, slug, description, price_cents, stock,
-		       weight_g, length_cm, width_cm, height_cm, status, photo_urls, has_variants,
-		       created_at, updated_at
+		SELECT `+productColumns+`
 		FROM products
 		WHERE store_id = $1 AND status = 'active'
 		ORDER BY created_at DESC
@@ -120,11 +126,7 @@ func (r *ProductRepo) ListActiveByStore(ctx context.Context, storeID uuid.UUID) 
 	var out []Product
 	for rows.Next() {
 		var p Product
-		if err := rows.Scan(
-			&p.ID, &p.StoreID, &p.CategoryID, &p.Name, &p.Slug, &p.Description,
-			&p.PriceCents, &p.Stock, &p.WeightG, &p.LengthCm, &p.WidthCm, &p.HeightCm,
-			&p.Status, &p.PhotoURLs, &p.HasVariants, &p.CreatedAt, &p.UpdatedAt,
-		); err != nil {
+		if err := scanProduct(rows, &p); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
@@ -132,116 +134,84 @@ func (r *ProductRepo) ListActiveByStore(ctx context.Context, storeID uuid.UUID) 
 	return out, rows.Err()
 }
 
-// FindBySlug looks up a product within a store by its slug.
 func (r *ProductRepo) FindBySlug(ctx context.Context, storeID uuid.UUID, slug string) (*Product, error) {
-	const q = `
-		SELECT id, store_id, category_id, name, slug, description, price_cents, stock,
-		       weight_g, length_cm, width_cm, height_cm, status, photo_urls, has_variants,
-		       created_at, updated_at
-		FROM products WHERE store_id = $1 AND slug = $2
-	`
+	q := `SELECT ` + productColumns + ` FROM products WHERE store_id = $1 AND slug = $2`
 	var p Product
-	err := r.pool.QueryRow(ctx, q, storeID, slug).Scan(
-		&p.ID, &p.StoreID, &p.CategoryID, &p.Name, &p.Slug, &p.Description,
-		&p.PriceCents, &p.Stock, &p.WeightG, &p.LengthCm, &p.WidthCm, &p.HeightCm,
-		&p.Status, &p.PhotoURLs, &p.HasVariants, &p.CreatedAt, &p.UpdatedAt,
-	)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrProductNotFound
-	}
-	if err != nil {
+	if err := scanProduct(r.pool.QueryRow(ctx, q, storeID, slug), &p); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrProductNotFound
+		}
 		return nil, err
 	}
 	return &p, nil
 }
 
 func (r *ProductRepo) FindByID(ctx context.Context, storeID, id uuid.UUID) (*Product, error) {
-	const q = `
-		SELECT id, store_id, category_id, name, slug, description, price_cents, stock,
-		       weight_g, length_cm, width_cm, height_cm, status, photo_urls, has_variants,
-		       created_at, updated_at
-		FROM products WHERE id = $1 AND store_id = $2
-	`
+	q := `SELECT ` + productColumns + ` FROM products WHERE id = $1 AND store_id = $2`
 	var p Product
-	err := r.pool.QueryRow(ctx, q, id, storeID).Scan(
-		&p.ID, &p.StoreID, &p.CategoryID, &p.Name, &p.Slug, &p.Description,
-		&p.PriceCents, &p.Stock, &p.WeightG, &p.LengthCm, &p.WidthCm, &p.HeightCm,
-		&p.Status, &p.PhotoURLs, &p.HasVariants, &p.CreatedAt, &p.UpdatedAt,
-	)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrProductNotFound
-	}
-	if err != nil {
+	if err := scanProduct(r.pool.QueryRow(ctx, q, id, storeID), &p); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrProductNotFound
+		}
 		return nil, err
 	}
 	return &p, nil
 }
 
 type SaveProductInput struct {
-	StoreID     uuid.UUID
-	CategoryID  *uuid.UUID
-	Name        string
-	Slug        string
-	Description string
-	PriceCents  int64
-	Stock       int
-	WeightG     int
-	LengthCm    int
-	WidthCm     int
-	HeightCm    int
-	Status      string
-	PhotoURLs   []string
+	StoreID           uuid.UUID
+	CategoryID        *uuid.UUID
+	Name              string
+	Slug              string
+	Description       string
+	PriceCents        int64
+	Stock             int
+	LowStockThreshold int
+	WeightG           int
+	LengthCm          int
+	WidthCm           int
+	HeightCm          int
+	Status            string
+	PhotoURLs         []string
 }
 
 func (r *ProductRepo) Create(ctx context.Context, in SaveProductInput) (*Product, error) {
-	const q = `
+	q := `
 		INSERT INTO products (store_id, category_id, name, slug, description, price_cents, stock,
+		                     low_stock_threshold,
 		                     weight_g, length_cm, width_cm, height_cm, status, photo_urls)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-		RETURNING id, store_id, category_id, name, slug, description, price_cents, stock,
-		          weight_g, length_cm, width_cm, height_cm, status, photo_urls, has_variants,
-		          created_at, updated_at
-	`
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+		RETURNING ` + productColumns
 	var p Product
-	err := r.pool.QueryRow(ctx, q,
+	if err := scanProduct(r.pool.QueryRow(ctx, q,
 		in.StoreID, in.CategoryID, in.Name, in.Slug, in.Description, in.PriceCents, in.Stock,
+		in.LowStockThreshold,
 		in.WeightG, in.LengthCm, in.WidthCm, in.HeightCm, in.Status, in.PhotoURLs,
-	).Scan(
-		&p.ID, &p.StoreID, &p.CategoryID, &p.Name, &p.Slug, &p.Description,
-		&p.PriceCents, &p.Stock, &p.WeightG, &p.LengthCm, &p.WidthCm, &p.HeightCm,
-		&p.Status, &p.PhotoURLs, &p.HasVariants, &p.CreatedAt, &p.UpdatedAt,
-	)
-	if err != nil {
+	), &p); err != nil {
 		return nil, err
 	}
 	return &p, nil
 }
 
 func (r *ProductRepo) Update(ctx context.Context, id uuid.UUID, in SaveProductInput) (*Product, error) {
-	const q = `
+	q := `
 		UPDATE products
 		SET category_id = $3,
 		    name = $4, slug = $5, description = $6, price_cents = $7, stock = $8,
-		    weight_g = $9, length_cm = $10, width_cm = $11, height_cm = $12,
-		    status = $13, photo_urls = $14, updated_at = now()
+		    low_stock_threshold = $9,
+		    weight_g = $10, length_cm = $11, width_cm = $12, height_cm = $13,
+		    status = $14, photo_urls = $15, updated_at = now()
 		WHERE id = $1 AND store_id = $2
-		RETURNING id, store_id, category_id, name, slug, description, price_cents, stock,
-		          weight_g, length_cm, width_cm, height_cm, status, photo_urls, has_variants,
-		          created_at, updated_at
-	`
+		RETURNING ` + productColumns
 	var p Product
-	err := r.pool.QueryRow(ctx, q,
+	if err := scanProduct(r.pool.QueryRow(ctx, q,
 		id, in.StoreID, in.CategoryID, in.Name, in.Slug, in.Description, in.PriceCents, in.Stock,
+		in.LowStockThreshold,
 		in.WeightG, in.LengthCm, in.WidthCm, in.HeightCm, in.Status, in.PhotoURLs,
-	).Scan(
-		&p.ID, &p.StoreID, &p.CategoryID, &p.Name, &p.Slug, &p.Description,
-		&p.PriceCents, &p.Stock, &p.WeightG, &p.LengthCm, &p.WidthCm, &p.HeightCm,
-		&p.Status, &p.PhotoURLs, &p.HasVariants, &p.CreatedAt, &p.UpdatedAt,
-	)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrProductNotFound
-	}
-	if err != nil {
+	), &p); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrProductNotFound
+		}
 		return nil, err
 	}
 	return &p, nil
@@ -279,8 +249,21 @@ func (r *ProductRepo) CountByStatus(ctx context.Context, storeID uuid.UUID) (map
 	return out, rows.Err()
 }
 
+// CountLowStock returns the number of active products whose stock has dropped
+// to or below their per-product threshold (0 = alert disabled).
+func (r *ProductRepo) CountLowStock(ctx context.Context, storeID uuid.UUID) (int, error) {
+	var n int
+	err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM products
+		WHERE store_id = $1
+		  AND status = 'active'
+		  AND low_stock_threshold > 0
+		  AND stock <= low_stock_threshold
+	`, storeID).Scan(&n)
+	return n, err
+}
+
 func itoa(n int) string {
-	// minimal local strconv to avoid extra import noise
 	if n == 0 {
 		return "0"
 	}

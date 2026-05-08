@@ -9,6 +9,7 @@ import {
   CreditCard,
   StickyNote,
   Package,
+  Printer,
 } from "lucide-react";
 
 import { DashboardShell } from "@/components/layout/dashboard-shell";
@@ -71,13 +72,20 @@ export default async function OrderDetailPage({
       pageTitle={`Pesanan ${order.order_number}`}
       pageSubtitle={`Dibuat ${formatDateTimeID(order.created_at)} WIB`}
     >
-      <div className="mb-4">
+      <div className="mb-4 flex items-center justify-between gap-3">
         <Link
           href="/dasbor/pesanan"
           className="inline-flex items-center gap-1.5 text-sm font-medium text-neutral-600 hover:text-neutral-900"
         >
           <ArrowLeft className="size-4" aria-hidden />
           Kembali ke daftar pesanan
+        </Link>
+        <Link
+          href={`/dasbor/pesanan/${order.id}/cetak`}
+          className="inline-flex items-center gap-1.5 rounded-md border border-neutral-200 bg-white px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
+        >
+          <Printer className="size-4" aria-hidden />
+          Cetak Nota
         </Link>
       </div>
 
