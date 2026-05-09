@@ -16,6 +16,7 @@ import (
 	"github.com/sellon/sellon/api/internal/pkg/response"
 	"github.com/sellon/sellon/api/internal/repository"
 	"github.com/sellon/sellon/api/internal/shipping"
+	"github.com/sellon/sellon/api/internal/shipping/rajaongkir"
 )
 
 type StorefrontHandler struct {
@@ -29,6 +30,7 @@ type StorefrontHandler struct {
 	gateways   *repository.PaymentRepo
 	subs       *repository.SubscriptionRepo
 	broker     *events.Broker
+	rajaongkir *rajaongkir.Client
 	logger     *slog.Logger
 }
 
@@ -38,12 +40,13 @@ func NewStorefrontHandler(
 	pr *repository.PromoRepo, gw *repository.PaymentRepo,
 	subs *repository.SubscriptionRepo,
 	broker *events.Broker,
+	rk *rajaongkir.Client,
 	logger *slog.Logger,
 ) *StorefrontHandler {
 	return &StorefrontHandler{
 		stores: s, products: p, variants: v, orders: o, banks: b,
 		categories: c, promos: pr, gateways: gw, subs: subs,
-		broker: broker, logger: logger,
+		broker: broker, rajaongkir: rk, logger: logger,
 	}
 }
 
@@ -621,8 +624,9 @@ type shippingQuoteItem struct {
 }
 
 type shippingQuoteReq struct {
-	City  string              `json:"city"`
-	Items []shippingQuoteItem `json:"items"`
+	City   string              `json:"city"`
+	CityID string              `json:"city_id"` // RajaOngkir destination city_id
+	Items  []shippingQuoteItem `json:"items"`
 }
 
 // POST /api/v1/storefront/{slug}/shipping/quote
@@ -674,7 +678,61 @@ func (h *StorefrontHandler) ShippingQuote(w http.ResponseWriter, r *http.Request
 	if originCity == "" {
 		originCity = store.City
 	}
-	options := shipping.QuoteOptions(req.City, originCity, totalWeightG)
+
+	var options []shipping.Option
+
+	// Try RajaOngkir first when:
+	//  * client is configured (api key present)
+	//  * seller has set their origin city_id in Pengaturan Pengiriman
+	//  * buyer's request has city_id (not just free-text city)
+	if h.rajaongkir != nil && h.rajaongkir.IsConfigured() &&
+		store.ShippingOriginCityID != "" && req.CityID != "" {
+		// Allowed couriers: intersection of seller whitelist and what
+		// RajaOngkir starter supports (jne/tiki/pos). When the seller has
+		// no whitelist, query all three.
+		want := []string{"jne", "tiki", "pos"}
+		if len(store.EnabledCouriers) > 0 {
+			allowed := map[string]bool{}
+			for _, c := range store.EnabledCouriers {
+				allowed[strings.ToLower(c)] = true
+			}
+			filtered := want[:0]
+			for _, c := range want {
+				if allowed[c] {
+					filtered = append(filtered, c)
+				}
+			}
+			want = filtered
+		}
+		for _, code := range want {
+			res, err := h.rajaongkir.Cost(r.Context(), rajaongkir.CostRequest{
+				Origin:      store.ShippingOriginCityID,
+				Destination: req.CityID,
+				WeightG:     totalWeightG,
+				Courier:     code,
+			})
+			if err != nil {
+				h.logger.Warn("rajaongkir cost", "err", err, "courier", code)
+				continue
+			}
+			for _, opt := range res {
+				options = append(options, shipping.Option{
+					Courier:   opt.CourierName,
+					Code:      opt.CourierCode,
+					Service:   opt.Service,
+					PriceRpah: opt.PriceRpah,
+					ETA:       opt.ETA + " hari",
+					Zone:      "rajaongkir",
+				})
+			}
+		}
+	}
+
+	// Fallback to the built-in zone-based table if RajaOngkir didn't return
+	// usable rows (no API key, no city IDs, or upstream error).
+	if len(options) == 0 {
+		options = shipping.QuoteOptions(req.City, originCity, totalWeightG)
+	}
 
 	// Filter to seller-enabled couriers (empty whitelist = all allowed).
 	if len(store.EnabledCouriers) > 0 {

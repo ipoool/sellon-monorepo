@@ -17,6 +17,7 @@ import (
 	"github.com/sellon/sellon/api/internal/middleware"
 	"github.com/sellon/sellon/api/internal/payments"
 	"github.com/sellon/sellon/api/internal/repository"
+	"github.com/sellon/sellon/api/internal/shipping/rajaongkir"
 	"github.com/sellon/sellon/api/internal/storage"
 )
 
@@ -52,6 +53,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	midtransClient := payments.NewMidtransClient()
 	storageClient := storage.NewSupabaseClient(cfg.SupabaseURL, cfg.SupabaseServiceKey, cfg.SupabaseBucket)
 	broker := events.NewBroker()
+	rajaOngkir := rajaongkir.New(cfg.RajaOngkirAPIKey, cfg.RajaOngkirTier)
 
 	authHandler := handler.NewAuthHandler(users, memberships, googleVerifier, jwtSvc, logger, cfg.IsProd())
 	storeHandler := handler.NewStoreHandler(stores, logger)
@@ -61,8 +63,9 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	customerHandler := handler.NewCustomerHandler(customers, orders, stores, logger)
 	paymentHandler := handler.NewPaymentHandler(gateways, stores, encryptor, midtransClient, logger, cfg.WebhookBaseURL)
 	dashHandler := handler.NewDashboardHandler(stores, products, orders, customers, logger)
-	storefrontHandler := handler.NewStorefrontHandler(stores, products, variants, orders, bankAccounts, categories, promos, gateways, subscriptions, broker, logger)
+	storefrontHandler := handler.NewStorefrontHandler(stores, products, variants, orders, bankAccounts, categories, promos, gateways, subscriptions, broker, rajaOngkir, logger)
 	orderStreamHandler := handler.NewOrderStreamHandler(stores, broker, logger)
+	citiesHandler := handler.NewCitiesHandler(rajaOngkir, logger)
 	waTemplateHandler := handler.NewWATemplateHandler(waTemplates, stores, logger)
 	webhookHandler := handler.NewWebhookHandler(gateways, orders, encryptor, logger)
 	bankAccountHandler := handler.NewBankAccountHandler(bankAccounts, stores, logger)
@@ -88,6 +91,9 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/info", handler.Info(cfg))
+		// City autocomplete — public so both buyer checkout and seller
+		// settings can reach it.
+		r.Get("/cities/search", citiesHandler.Search)
 
 		// Public storefront (no auth)
 		r.Route("/storefront/{slug}", func(r chi.Router) {

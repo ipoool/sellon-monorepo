@@ -37,6 +37,11 @@ type Config struct {
 	SupabaseURL        string
 	SupabaseServiceKey string
 	SupabaseBucket     string
+
+	// RajaOngkir — live ongkir integration. Optional; without it the
+	// shipping handler falls back to the built-in zone-based table.
+	RajaOngkirAPIKey string
+	RajaOngkirTier   string // "starter" | "basic" | "pro"; defaults to starter
 }
 
 func Load() (*Config, error) {
@@ -51,6 +56,7 @@ func Load() (*Config, error) {
 	v.SetDefault("web_origin", "http://localhost:3000")
 	v.SetDefault("webhook_base_url", "http://localhost:8080")
 	v.SetDefault("supabase_bucket", "products")
+	v.SetDefault("rajaongkir_tier", "starter")
 
 	cfg := &Config{
 		Port:           v.GetString("api_port"),
@@ -71,6 +77,8 @@ func Load() (*Config, error) {
 		SupabaseURL:        strings.TrimRight(v.GetString("supabase_url"), "/"),
 		SupabaseServiceKey: v.GetString("supabase_service_key"),
 		SupabaseBucket:     v.GetString("supabase_bucket"),
+		RajaOngkirAPIKey:   v.GetString("rajaongkir_api_key"),
+		RajaOngkirTier:     v.GetString("rajaongkir_tier"),
 	}
 
 	if cfg.JWTSecret == "" {

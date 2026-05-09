@@ -18,6 +18,8 @@ export type Store = {
   open_hours: OpenHours;
   is_open: boolean;
   shipping_origin_city?: string;
+  shipping_origin_city_id?: string;
+  shipping_origin_city_name?: string;
   enabled_couriers?: string[];
   free_shipping_threshold_cents?: number;
   theme_hue?: number;

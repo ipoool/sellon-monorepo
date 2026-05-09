@@ -38,6 +38,8 @@ type storeDTO struct {
 	OpenHours                  json.RawMessage `json:"open_hours"`
 	IsOpen                     bool            `json:"is_open"`
 	ShippingOriginCity         string          `json:"shipping_origin_city"`
+	ShippingOriginCityID       string          `json:"shipping_origin_city_id"`
+	ShippingOriginCityName     string          `json:"shipping_origin_city_name"`
 	EnabledCouriers            []string        `json:"enabled_couriers"`
 	FreeShippingThresholdCents int64           `json:"free_shipping_threshold_cents"`
 	ThemeHue                   int             `json:"theme_hue"`
@@ -62,6 +64,8 @@ func toStoreDTO(s *repository.Store) storeDTO {
 		WhatsAppNumber: s.WhatsAppNumber, Instagram: s.Instagram, TikTok: s.TikTok,
 		OpenHours: openHours, IsOpen: s.IsOpen,
 		ShippingOriginCity:         s.ShippingOriginCity,
+		ShippingOriginCityID:       s.ShippingOriginCityID,
+		ShippingOriginCityName:     s.ShippingOriginCityName,
 		EnabledCouriers:            couriers,
 		FreeShippingThresholdCents: s.FreeShippingThresholdCents,
 		ThemeHue:                   s.ThemeHue,
@@ -227,6 +231,8 @@ func (h *StoreHandler) UpdateStorefront(w http.ResponseWriter, r *http.Request) 
 
 type updateShippingReq struct {
 	ShippingOriginCity         string   `json:"shipping_origin_city"`
+	ShippingOriginCityID       string   `json:"shipping_origin_city_id"`
+	ShippingOriginCityName     string   `json:"shipping_origin_city_name"`
 	EnabledCouriers            []string `json:"enabled_couriers"`
 	FreeShippingThresholdCents int64    `json:"free_shipping_threshold_cents"`
 }
@@ -253,10 +259,13 @@ func (h *StoreHandler) UpdateShipping(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusBadRequest, "minimum belanja tidak boleh negatif")
 		return
 	}
-	// Sanitize: drop empty / unknown courier codes.
+	// Sanitize: drop empty / unknown courier codes. RajaOngkir starter
+	// supports jne/tiki/pos; the built-in zone fallback supports six more
+	// — accept the union.
 	allowed := map[string]bool{
-		"jne": true, "jnt": true, "sicepat": true,
-		"anteraja": true, "gosend": true, "grabexpress": true,
+		"jne": true, "tiki": true, "pos": true,
+		"jnt": true, "sicepat": true, "anteraja": true,
+		"gosend": true, "grabexpress": true,
 	}
 	clean := make([]string, 0, len(req.EnabledCouriers))
 	seen := map[string]bool{}
@@ -271,6 +280,8 @@ func (h *StoreHandler) UpdateShipping(w http.ResponseWriter, r *http.Request) {
 
 	store, err := h.stores.UpdateShipping(r.Context(), existing.ID, repository.UpdateShippingInput{
 		ShippingOriginCity:         strings.TrimSpace(req.ShippingOriginCity),
+		ShippingOriginCityID:       strings.TrimSpace(req.ShippingOriginCityID),
+		ShippingOriginCityName:     strings.TrimSpace(req.ShippingOriginCityName),
 		EnabledCouriers:            clean,
 		FreeShippingThresholdCents: req.FreeShippingThresholdCents,
 	})

@@ -27,6 +27,8 @@ type Store struct {
 	OpenHours                  []byte // raw JSONB
 	IsOpen                     bool
 	ShippingOriginCity         string
+	ShippingOriginCityID       string
+	ShippingOriginCityName     string
 	EnabledCouriers            []string
 	FreeShippingThresholdCents int64
 	ThemeHue                   int
@@ -49,7 +51,8 @@ var ErrStoreNotFound = errors.New("store not found")
 
 const storeColumns = `id, owner_id, slug, name, description, logo_url, banner_url, tagline,
 	category, city, whatsapp_number, instagram, tiktok, open_hours, is_open,
-	shipping_origin_city, enabled_couriers, free_shipping_threshold_cents,
+	shipping_origin_city, shipping_origin_city_id, shipping_origin_city_name,
+	enabled_couriers, free_shipping_threshold_cents,
 	theme_hue, show_hours_public, show_social_public, footer_text,
 	created_at, updated_at`
 
@@ -57,7 +60,8 @@ const storeColumns = `id, owner_id, slug, name, description, logo_url, banner_ur
 const qualifiedStoreColumns = `s.id, s.owner_id, s.slug, s.name, s.description,
 	s.logo_url, s.banner_url, s.tagline, s.category, s.city,
 	s.whatsapp_number, s.instagram, s.tiktok, s.open_hours, s.is_open,
-	s.shipping_origin_city, s.enabled_couriers, s.free_shipping_threshold_cents,
+	s.shipping_origin_city, s.shipping_origin_city_id, s.shipping_origin_city_name,
+	s.enabled_couriers, s.free_shipping_threshold_cents,
 	s.theme_hue, s.show_hours_public, s.show_social_public, s.footer_text,
 	s.created_at, s.updated_at`
 
@@ -67,7 +71,8 @@ func scanStore(row pgx.Row, s *Store) error {
 		&s.BannerURL, &s.Tagline,
 		&s.Category, &s.City, &s.WhatsAppNumber, &s.Instagram, &s.TikTok,
 		&s.OpenHours, &s.IsOpen,
-		&s.ShippingOriginCity, &s.EnabledCouriers, &s.FreeShippingThresholdCents,
+		&s.ShippingOriginCity, &s.ShippingOriginCityID, &s.ShippingOriginCityName,
+		&s.EnabledCouriers, &s.FreeShippingThresholdCents,
 		&s.ThemeHue, &s.ShowHoursPublic, &s.ShowSocialPublic, &s.FooterText,
 		&s.CreatedAt, &s.UpdatedAt,
 	)
@@ -185,6 +190,8 @@ func (r *StoreRepo) UpdateStorefront(ctx context.Context, id uuid.UUID, in Updat
 
 type UpdateShippingInput struct {
 	ShippingOriginCity         string
+	ShippingOriginCityID       string
+	ShippingOriginCityName     string
 	EnabledCouriers            []string
 	FreeShippingThresholdCents int64
 }
@@ -196,14 +203,17 @@ func (r *StoreRepo) UpdateShipping(ctx context.Context, id uuid.UUID, in UpdateS
 	q := `
 		UPDATE stores
 		SET shipping_origin_city = $2,
-		    enabled_couriers = $3,
-		    free_shipping_threshold_cents = $4,
+		    shipping_origin_city_id = $3,
+		    shipping_origin_city_name = $4,
+		    enabled_couriers = $5,
+		    free_shipping_threshold_cents = $6,
 		    updated_at = now()
 		WHERE id = $1
 		RETURNING ` + storeColumns
 	var s Store
 	if err := scanStore(r.pool.QueryRow(ctx, q, id,
-		in.ShippingOriginCity, in.EnabledCouriers, in.FreeShippingThresholdCents,
+		in.ShippingOriginCity, in.ShippingOriginCityID, in.ShippingOriginCityName,
+		in.EnabledCouriers, in.FreeShippingThresholdCents,
 	), &s); err != nil {
 		return nil, err
 	}
