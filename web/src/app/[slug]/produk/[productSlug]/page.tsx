@@ -6,6 +6,7 @@ import { ArrowLeft, Package } from "lucide-react";
 import { Container } from "@/components/layout/container";
 import { Badge } from "@/components/ui/badge";
 import { CheckoutForm } from "@/components/storefront/checkout-form";
+import { BuyerShareButton } from "@/components/storefront/buyer-share-button";
 import { formatRupiah } from "@/lib/format";
 
 const apiBase =
@@ -148,15 +149,26 @@ export default async function ProductDetailPage({
                     ? `Mulai ${formatRupiah(minPrice)}`
                     : formatRupiah(minPrice)}
                 </p>
-                <div className="mt-2 flex items-center gap-2">
-                  {totalStock > 0 ? (
-                    <Badge variant="success">Stok {totalStock}</Badge>
-                  ) : (
-                    <Badge variant="warning">Stok habis</Badge>
-                  )}
-                  {product.has_variants && (
-                    <Badge variant="brand">{variants.length} varian</Badge>
-                  )}
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {totalStock > 0 ? (
+                      <Badge variant="success">Stok {totalStock}</Badge>
+                    ) : (
+                      <Badge variant="warning">Stok habis</Badge>
+                    )}
+                    {product.has_variants && (
+                      <Badge variant="brand">{variants.length} varian</Badge>
+                    )}
+                  </div>
+                  <BuyerShareButton
+                    productName={product.name}
+                    storeName={store.name}
+                    priceLabel={
+                      product.has_variants && variants.length > 1
+                        ? `mulai ${formatRupiah(minPrice)}`
+                        : formatRupiah(minPrice)
+                    }
+                  />
                 </div>
 
                 {product.description && (
