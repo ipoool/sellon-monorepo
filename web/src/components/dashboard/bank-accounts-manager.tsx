@@ -1,12 +1,17 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
-import { Plus, Edit2, Trash2, Check, Star, QrCode } from "lucide-react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useState,
+} from "react";
+import { Plus, Trash2, Star, QrCode } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { ImageUploadInput } from "@/components/dashboard/image-upload-input";
 import type { BankAccount } from "@/lib/types";
 
@@ -17,294 +22,323 @@ const popularBanks = [
   "Permata", "Danamon", "OCBC", "DBS", "Maybank", "Lainnya",
 ];
 
-type EditState = { mode: "new" } | { mode: "edit"; account: BankAccount } | null;
+// One row of the inline editor. `id` is set for rows that came from the
+// server; absent for unsaved drafts. `_deleted` marks server rows the user
+// removed (kept in state so flush() knows to DELETE them).
+type Draft = {
+  key: string;
+  id?: string;
+  bank_name: string;
+  holder_name: string;
+  account_no: string;
+  qris_url: string;
+  is_primary: boolean;
+  _initial?: BankAccount;
+  _deleted?: boolean;
+};
 
-export function BankAccountsManager() {
-  const [accounts, setAccounts] = useState<BankAccount[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [editing, setEditing] = useState<EditState>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [qrisUrl, setQrisUrl] = useState("");
+function emptyDraft(isFirst: boolean): Draft {
+  return {
+    key: `tmp-${Math.random().toString(36).slice(2, 10)}`,
+    bank_name: "",
+    holder_name: "",
+    account_no: "",
+    qris_url: "",
+    is_primary: isFirst,
+  };
+}
 
-  async function refresh() {
-    try {
-      const res = await fetch(`${apiBase}/api/v1/bank-accounts`, {
-        credentials: "include",
-      });
-      if (!res.ok) return;
-      const data = (await res.json()) as { accounts: BankAccount[] };
-      setAccounts(data.accounts ?? []);
-    } finally {
-      setLoading(false);
-    }
-  }
+function fromServer(a: BankAccount): Draft {
+  return {
+    key: a.id,
+    id: a.id,
+    bank_name: a.bank_name,
+    holder_name: a.holder_name,
+    account_no: a.account_no,
+    qris_url: a.qris_url,
+    is_primary: a.is_primary,
+    _initial: a,
+  };
+}
 
-  useEffect(() => {
-    void refresh();
-  }, []);
-
-  // Seed the QRIS upload state when the form opens for new/edit so the
-  // controlled <ImageUploadInput> shows the existing image.
-  useEffect(() => {
-    if (!editing) {
-      setQrisUrl("");
-      return;
-    }
-    setQrisUrl(editing.mode === "edit" ? editing.account.qris_url : "");
-  }, [editing]);
-
-  async function onSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    if (!editing) return;
-    setBusy(true);
-    setError(null);
-
-    const fd = new FormData(e.currentTarget);
-    const body = {
-      bank_name: String(fd.get("bank_name") ?? "").trim(),
-      holder_name: String(fd.get("holder_name") ?? "").trim(),
-      account_no: String(fd.get("account_no") ?? "").trim(),
-      is_primary: fd.get("is_primary") === "on",
-      qris_url: qrisUrl.trim(),
-    };
-
-    try {
-      const isEditing = editing.mode === "edit";
-      const url = isEditing
-        ? `${apiBase}/api/v1/bank-accounts/${editing.account.id}`
-        : `${apiBase}/api/v1/bank-accounts`;
-      const res = await fetch(url, {
-        method: isEditing ? "PUT" : "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-      setEditing(null);
-      await refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal menyimpan");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function onDelete(account: BankAccount) {
-    if (!confirm(`Hapus rekening ${account.bank_name} - ${account.account_no}?`)) return;
-    setBusy(true);
-    try {
-      const res = await fetch(`${apiBase}/api/v1/bank-accounts/${account.id}`, {
-        method: "DELETE",
-        credentials: "include",
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      await refresh();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Gagal hapus");
-    } finally {
-      setBusy(false);
-    }
-  }
-
+function isDirty(d: Draft): boolean {
+  if (!d._initial) return true; // new
   return (
-    <section className="border-t border-neutral-200 pt-5">
-      <div className="mb-4 flex items-start justify-between gap-3">
-        <div>
-          <h3 className="font-semibold text-neutral-900">
-            Rekening Manual & QRIS Statis
-          </h3>
-          <p className="mt-0.5 text-sm text-neutral-600">
-            Untuk pembeli yang transfer manual atau scan QRIS dari foto. Cocok
-            untuk free tier yang belum pakai Midtrans.
-          </p>
-        </div>
-        {!editing && (
-          <Button
-            type="button"
-            size="sm"
-            onClick={() => setEditing({ mode: "new" })}
-          >
+    d.bank_name !== d._initial.bank_name ||
+    d.holder_name !== d._initial.holder_name ||
+    d.account_no !== d._initial.account_no ||
+    d.qris_url !== d._initial.qris_url ||
+    d.is_primary !== d._initial.is_primary
+  );
+}
+
+export type BankAccountsManagerHandle = {
+  flush: () => Promise<void>;
+};
+
+// Imperative-handle pattern lets the parent PaymentForm trigger a sync
+// from its own submit handler — the user only sees one Simpan button for
+// the whole Pembayaran page.
+export const BankAccountsManager = forwardRef<BankAccountsManagerHandle>(
+  function BankAccountsManager(_props, ref) {
+    const [drafts, setDrafts] = useState<Draft[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    async function refresh() {
+      try {
+        const res = await fetch(`${apiBase}/api/v1/bank-accounts`, {
+          credentials: "include",
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as { accounts: BankAccount[] };
+        setDrafts((data.accounts ?? []).map(fromServer));
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    useEffect(() => {
+      void refresh();
+    }, []);
+
+    function update(idx: number, patch: Partial<Draft>) {
+      setDrafts((prev) => {
+        const next = [...prev];
+        next[idx] = { ...next[idx], ...patch };
+        // If is_primary toggled on, demote others.
+        if (patch.is_primary === true) {
+          for (let i = 0; i < next.length; i++) {
+            if (i !== idx) next[i] = { ...next[i], is_primary: false };
+          }
+        }
+        return next;
+      });
+    }
+
+    function remove(idx: number) {
+      setDrafts((prev) => {
+        const d = prev[idx];
+        if (!d) return prev;
+        // For server rows, keep but mark deleted so flush() can DELETE
+        // them. For unsaved drafts, drop in place.
+        if (!d.id) return prev.filter((_, i) => i !== idx);
+        const next = [...prev];
+        next[idx] = { ...d, _deleted: true };
+        return next;
+      });
+    }
+
+    function add() {
+      setDrafts((prev) => {
+        const visible = prev.filter((d) => !d._deleted);
+        return [...prev, emptyDraft(visible.length === 0)];
+      });
+    }
+
+    useImperativeHandle(ref, () => ({
+      async flush() {
+        const ops: Promise<Response>[] = [];
+        for (const d of drafts) {
+          if (d._deleted && d.id) {
+            ops.push(
+              fetch(`${apiBase}/api/v1/bank-accounts/${d.id}`, {
+                method: "DELETE",
+                credentials: "include",
+              }),
+            );
+            continue;
+          }
+          if (d._deleted) continue;
+          // Skip blank unsaved drafts.
+          if (!d.id) {
+            const blank =
+              !d.bank_name.trim() &&
+              !d.account_no.trim() &&
+              !d.qris_url.trim();
+            if (blank) continue;
+          }
+          if (!isDirty(d)) continue;
+          const body = {
+            bank_name: d.bank_name.trim(),
+            holder_name: d.holder_name.trim(),
+            account_no: d.account_no.trim(),
+            qris_url: d.qris_url.trim(),
+            is_primary: d.is_primary,
+          };
+          if (d.id) {
+            ops.push(
+              fetch(`${apiBase}/api/v1/bank-accounts/${d.id}`, {
+                method: "PUT",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+              }),
+            );
+          } else {
+            ops.push(
+              fetch(`${apiBase}/api/v1/bank-accounts`, {
+                method: "POST",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+              }),
+            );
+          }
+        }
+        const responses = await Promise.all(ops);
+        for (const r of responses) {
+          if (!r.ok) {
+            const data = await r.json().catch(() => ({}));
+            throw new Error(data.error || `HTTP ${r.status}`);
+          }
+        }
+        await refresh();
+      },
+    }));
+
+    const visibleDrafts = drafts
+      .map((d, i) => ({ d, i }))
+      .filter(({ d }) => !d._deleted);
+
+    return (
+      <section className="border-t border-neutral-200 pt-5">
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <h3 className="font-semibold text-neutral-900">
+              Rekening Manual & QRIS Statis
+            </h3>
+            <p className="mt-0.5 text-sm text-neutral-600">
+              Untuk pembeli yang transfer manual atau scan QRIS dari foto.
+              Cocok untuk free tier yang belum pakai Midtrans.
+            </p>
+          </div>
+          <Button type="button" size="sm" variant="outline" onClick={add}>
             <Plus className="size-4" aria-hidden />
             Tambah
           </Button>
-        )}
-      </div>
+        </div>
 
-      {/* Existing accounts */}
-      {!editing && (
-        <>
-          {loading ? (
-            <p className="text-sm text-neutral-500">Memuat…</p>
-          ) : accounts.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-neutral-200 bg-neutral-50 px-4 py-8 text-center">
-              <p className="text-sm text-neutral-600">
-                Belum ada rekening manual. Tambah minimal satu untuk pembeli
-                yang ingin transfer manual.
-              </p>
-            </div>
-          ) : (
-            <ul className="flex flex-col gap-2">
-              {accounts.map((a) => (
-                <li
-                  key={a.id}
-                  className="flex flex-col gap-3 rounded-lg border border-neutral-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between"
-                >
-                  <div className="flex items-start gap-3">
-                    {a.qris_url ? (
-                      <div className="flex size-12 items-center justify-center overflow-hidden rounded-lg border border-neutral-200 bg-white">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={a.qris_url}
-                          alt="QRIS"
-                          className="size-full object-cover"
-                        />
-                      </div>
-                    ) : (
-                      <div className="flex size-12 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
-                        <QrCode className="size-5" aria-hidden />
-                      </div>
+        {loading ? (
+          <p className="text-sm text-neutral-500">Memuat…</p>
+        ) : visibleDrafts.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-neutral-200 bg-neutral-50 px-4 py-8 text-center">
+            <p className="text-sm text-neutral-600">
+              Belum ada rekening manual. Tambah minimal satu untuk pembeli
+              yang ingin transfer manual.
+            </p>
+          </div>
+        ) : (
+          <ul className="flex flex-col gap-3">
+            {visibleDrafts.map(({ d, i }) => (
+              <li
+                key={d.key}
+                className="rounded-lg border border-neutral-200 bg-white p-4"
+              >
+                <div className="mb-3 flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <QrCode
+                      className="size-4 text-neutral-400"
+                      aria-hidden
+                    />
+                    <p className="font-medium text-neutral-900">
+                      {d.bank_name || "Rekening / QRIS baru"}
+                    </p>
+                    {d.is_primary && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700">
+                        <Star className="size-3" aria-hidden />
+                        Utama
+                      </span>
                     )}
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <p className="font-semibold text-neutral-900">
-                          {a.bank_name || "QRIS Statis"}
-                        </p>
-                        {a.is_primary && (
-                          <Badge variant="brand">
-                            <Star className="size-3" aria-hidden />
-                            Utama
-                          </Badge>
-                        )}
-                      </div>
-                      {a.account_no && (
-                        <p className="font-mono text-xs text-neutral-700">
-                          {a.account_no} — a.n. {a.holder_name}
-                        </p>
-                      )}
-                      {a.qris_url && !a.account_no && (
-                        <p className="text-xs text-neutral-500 break-all">
-                          QRIS: {a.qris_url}
-                        </p>
-                      )}
-                    </div>
                   </div>
-                  <div className="flex gap-1">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setEditing({ mode: "edit", account: a })}
-                      disabled={busy}
-                    >
-                      <Edit2 className="size-3.5" aria-hidden />
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => onDelete(a)}
-                      disabled={busy}
-                      className="text-danger hover:bg-danger/10"
-                    >
-                      <Trash2 className="size-3.5" aria-hidden />
-                    </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => remove(i)}
+                    className="text-danger hover:bg-danger/10"
+                    aria-label="Hapus rekening"
+                  >
+                    <Trash2 className="size-3.5" aria-hidden />
+                  </Button>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor={`bank_name_${d.key}`}>Nama Bank</Label>
+                    <input
+                      id={`bank_name_${d.key}`}
+                      list={`bank-list-${d.key}`}
+                      value={d.bank_name}
+                      onChange={(e) =>
+                        update(i, { bank_name: e.target.value })
+                      }
+                      placeholder="BCA, Mandiri, dll. (kosongkan kalau hanya QRIS)"
+                      className="h-10 w-full rounded-lg border border-neutral-200 bg-white px-3 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+                    />
+                    <datalist id={`bank-list-${d.key}`}>
+                      {popularBanks.map((b) => (
+                        <option key={b} value={b} />
+                      ))}
+                    </datalist>
                   </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </>
-      )}
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor={`account_no_${d.key}`}>No. Rekening</Label>
+                    <Input
+                      id={`account_no_${d.key}`}
+                      value={d.account_no}
+                      onChange={(e) =>
+                        update(i, { account_no: e.target.value })
+                      }
+                      placeholder="1234567890"
+                      className="font-mono"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5 sm:col-span-2">
+                    <Label htmlFor={`holder_name_${d.key}`}>
+                      Nama Pemilik Rekening
+                    </Label>
+                    <Input
+                      id={`holder_name_${d.key}`}
+                      value={d.holder_name}
+                      onChange={(e) =>
+                        update(i, { holder_name: e.target.value })
+                      }
+                      placeholder="Sesuai buku tabungan"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5 sm:col-span-2">
+                    <Label>Gambar QRIS Statis (opsional)</Label>
+                    <ImageUploadInput
+                      value={d.qris_url}
+                      onChange={(url) => update(i, { qris_url: url })}
+                      kind="qris"
+                      shape="square"
+                    />
+                  </div>
+                </div>
 
-      {/* Add/edit form */}
-      {editing && (
-        <form onSubmit={onSubmit} className="flex flex-col gap-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="bank_name">Nama Bank</Label>
-              <input
-                id="bank_name"
-                name="bank_name"
-                list="bank-list"
-                defaultValue={editing.mode === "edit" ? editing.account.bank_name : ""}
-                placeholder="BCA, Mandiri, dll. (kosongkan kalau hanya QRIS)"
-                className="h-10 w-full rounded-lg border border-neutral-200 bg-white px-3 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
-              />
-              <datalist id="bank-list">
-                {popularBanks.map((b) => (
-                  <option key={b} value={b} />
-                ))}
-              </datalist>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="account_no">No. Rekening</Label>
-              <Input
-                id="account_no"
-                name="account_no"
-                defaultValue={editing.mode === "edit" ? editing.account.account_no : ""}
-                placeholder="1234567890"
-                className="font-mono"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5 sm:col-span-2">
-              <Label htmlFor="holder_name">Nama Pemilik Rekening</Label>
-              <Input
-                id="holder_name"
-                name="holder_name"
-                defaultValue={editing.mode === "edit" ? editing.account.holder_name : ""}
-                placeholder="Sesuai buku tabungan"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5 sm:col-span-2">
-              <Label>Gambar QRIS Statis (opsional)</Label>
-              <ImageUploadInput
-                value={qrisUrl}
-                onChange={setQrisUrl}
-                kind="qris"
-                shape="square"
-              />
-              <p className="text-xs text-neutral-500">
-                Upload screenshot/foto QR-nya. Pembeli akan scan QR ini saat
-                checkout.
-              </p>
-            </div>
-          </div>
-          <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-sm">
-            <input
-              type="checkbox"
-              name="is_primary"
-              defaultChecked={editing.mode === "edit" ? editing.account.is_primary : accounts.length === 0}
-              className="size-4 rounded border-neutral-300 accent-brand-500 focus:ring-brand-500/30"
-            />
-            <div>
-              <p className="font-medium text-neutral-900">Jadikan rekening utama</p>
-              <p className="text-xs text-neutral-600">
-                Yang ditampilkan paling atas di halaman pembayaran buyer.
-              </p>
-            </div>
-          </label>
-
-          {error && <p className="text-sm font-medium text-danger">{error}</p>}
-
-          <div className="flex justify-end gap-2">
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              onClick={() => setEditing(null)}
-              disabled={busy}
-            >
-              Batal
-            </Button>
-            <Button type="submit" size="sm" disabled={busy}>
-              <Check className="size-4" aria-hidden />
-              {busy ? "Menyimpan…" : "Simpan"}
-            </Button>
-          </div>
-        </form>
-      )}
-    </section>
-  );
-}
+                <label className="mt-3 flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2.5 text-sm">
+                  <div>
+                    <p className="font-medium text-neutral-900">
+                      Jadikan rekening utama
+                    </p>
+                    <p className="text-xs text-neutral-600">
+                      Yang ditampilkan paling atas di halaman pembayaran buyer.
+                    </p>
+                  </div>
+                  <Switch
+                    size="sm"
+                    checked={d.is_primary}
+                    onChange={(e) =>
+                      update(i, { is_primary: e.target.checked })
+                    }
+                  />
+                </label>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    );
+  },
+);

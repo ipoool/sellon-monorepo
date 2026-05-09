@@ -22,6 +22,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import {
+  BankAccountsManager,
+  type BankAccountsManagerHandle,
+} from "@/components/dashboard/bank-accounts-manager";
 import { cn } from "@/lib/utils";
 import type { GatewayInfo } from "@/lib/types";
 
@@ -53,6 +57,7 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
   const [pendingMode, setPendingMode] = useState<"sandbox" | "production" | null>(null);
   const [confirmInput, setConfirmInput] = useState("");
   const [pendingPayload, setPendingPayload] = useState<Record<string, unknown> | null>(null);
+  const banksRef = useRef<BankAccountsManagerHandle>(null);
   const switchDialogRef = useRef<HTMLDialogElement>(null);
 
   // Open / close native dialog imperatively.
@@ -158,6 +163,11 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      // Flush any bank-account drafts AFTER the Midtrans save so the user's
+      // single Simpan covers everything on the Pembayaran page.
+      if (banksRef.current) {
+        await banksRef.current.flush();
+      }
       setSavedFlash(true);
       router.refresh();
     } catch (err) {
@@ -428,6 +438,8 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
               </label>
             ))}
           </div>
+
+          <BankAccountsManager ref={banksRef} />
         </Card>
 
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
