@@ -36,6 +36,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	categories := repository.NewCategoryRepo(pool)
 	variants := repository.NewVariantRepo(pool)
 	promos := repository.NewPromoRepo(pool)
+	reports := repository.NewReportsRepo(pool)
 
 	googleVerifier := auth.NewGoogleVerifier(cfg.GoogleClientID)
 	jwtSvc := auth.NewJWTService(cfg.JWTSecret, cfg.JWTTTL)
@@ -59,6 +60,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	bankAccountHandler := handler.NewBankAccountHandler(bankAccounts, stores, logger)
 	categoryHandler := handler.NewCategoryHandler(categories, stores, logger)
 	promoHandler := handler.NewPromoHandler(promos, stores, logger)
+	reportsHandler := handler.NewReportsHandler(stores, reports, logger)
 
 	requireAuth := middleware.RequireAuth(jwtSvc)
 
@@ -167,6 +169,10 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 				r.Get("/{id}", promoHandler.Get)
 				r.Put("/{id}", promoHandler.Update)
 				r.Delete("/{id}", promoHandler.Delete)
+			})
+
+			r.Route("/reports", func(r chi.Router) {
+				r.Get("/overview", reportsHandler.Overview)
 			})
 		})
 	})

@@ -9,6 +9,7 @@ import {
   Package,
   Users,
   Megaphone,
+  BarChart3,
   Settings,
   HelpCircle,
   X,
@@ -35,6 +36,7 @@ const primaryNav: NavItem[] = [
   { label: "Produk", href: "/dasbor/produk", icon: Package },
   { label: "Pelanggan", href: "/dasbor/pelanggan", icon: Users },
   { label: "Promo", href: "/dasbor/promo", icon: Megaphone },
+  { label: "Laporan", href: "/dasbor/laporan", icon: BarChart3 },
 ];
 
 const secondaryNav: NavItem[] = [
