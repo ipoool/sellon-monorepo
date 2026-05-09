@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link2, Check, Send } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -19,10 +19,15 @@ export function ShareProductButton({
 }: Props) {
   const [copied, setCopied] = useState(false);
 
-  const url =
-    typeof window !== "undefined"
-      ? `${window.location.origin}/${storeSlug}/produk/${productSlug}`
-      : `/${storeSlug}/produk/${productSlug}`;
+  // Render the absolute URL only after mount so server-side HTML matches
+  // the first client render (avoids hydration mismatch). Default to the
+  // relative path which both server and client agree on.
+  const relative = `/${storeSlug}/produk/${productSlug}`;
+  const [url, setUrl] = useState(relative);
+
+  useEffect(() => {
+    setUrl(`${window.location.origin}${relative}`);
+  }, [relative]);
 
   async function copy() {
     try {

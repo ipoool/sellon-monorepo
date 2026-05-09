@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Share2, Copy, Check } from "lucide-react";
 
 type Props = {
@@ -11,15 +11,16 @@ type Props = {
 
 export function BuyerShareButton({ productName, storeName, priceLabel }: Props) {
   const [copied, setCopied] = useState(false);
+  // URL is empty during SSR + first client render so the markup matches;
+  // we hydrate it from window.location.href post-mount. While empty, the
+  // WA share link still works as a no-text link.
+  const [url, setUrl] = useState("");
 
-  // Resolved at click time so SSR and CSR don't disagree.
-  function currentURL(): string {
-    if (typeof window === "undefined") return "";
-    return window.location.href;
-  }
+  useEffect(() => {
+    setUrl(window.location.href);
+  }, []);
 
   async function copy() {
-    const url = currentURL();
     if (!url) return;
     try {
       await navigator.clipboard.writeText(url);
@@ -34,11 +35,12 @@ export function BuyerShareButton({ productName, storeName, priceLabel }: Props) 
   const waText = encodeURIComponent(
     `Lihat ${productName} di ${storeName} — ${priceLabel}\n\n`,
   );
+  const waHref = `https://wa.me/?text=${waText}${url ? encodeURIComponent(url) : ""}`;
 
   return (
     <div className="inline-flex items-center gap-1.5">
       <a
-        href={`https://wa.me/?text=${waText}${typeof window !== "undefined" ? encodeURIComponent(window.location.href) : ""}`}
+        href={waHref}
         target="_blank"
         rel="noopener noreferrer"
         className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 text-sm font-medium text-neutral-700 transition-colors hover:border-success/40 hover:bg-success/5 hover:text-success"
@@ -50,7 +52,8 @@ export function BuyerShareButton({ productName, storeName, priceLabel }: Props) 
       <button
         type="button"
         onClick={copy}
-        className="inline-flex size-9 items-center justify-center rounded-lg border border-neutral-200 bg-white text-neutral-500 transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-brand-700"
+        disabled={!url}
+        className="inline-flex size-9 items-center justify-center rounded-lg border border-neutral-200 bg-white text-neutral-500 transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-brand-700 disabled:opacity-50"
         title={copied ? "Tersalin!" : "Salin link produk"}
         aria-label="Salin link produk"
       >
