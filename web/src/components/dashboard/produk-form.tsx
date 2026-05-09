@@ -37,6 +37,7 @@ export function ProdukForm({ initial }: Props) {
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [categoryId, setCategoryId] = useState<string>(initial?.category_id ?? "");
   const [variants, setVariants] = useState<VariantDraft[]>(() =>
     (initial?.variants ?? []).map((v: Variant) => ({
       id: v.id,
@@ -79,7 +80,7 @@ export function ProdukForm({ initial }: Props) {
       ? variants.filter((v) => v.name.trim().length > 0)
       : [];
     const body = {
-      category_id: String(fd.get("category_id") ?? ""),
+      category_id: categoryId,
       name: String(fd.get("name") ?? ""),
       slug: String(fd.get("slug") ?? ""),
       description: String(fd.get("description") ?? ""),
@@ -164,8 +165,8 @@ export function ProdukForm({ initial }: Props) {
             <Label htmlFor="category_id">Kategori</Label>
             <Select
               id="category_id"
-              name="category_id"
-              defaultValue={initial?.category_id ?? ""}
+              value={categoryId}
+              onChange={(e) => setCategoryId(e.target.value)}
             >
               <option value="">— Tanpa kategori —</option>
               {categories.map((c) => (
@@ -337,8 +338,8 @@ export function ProdukForm({ initial }: Props) {
             </p>
           </div>
           <label className="flex cursor-pointer items-center gap-3 text-sm">
-            <input
-              type="checkbox"
+            <span className="font-medium text-neutral-900">Pakai varian</span>
+            <Switch
               checked={hasVariants}
               onChange={(e) => {
                 setHasVariants(e.target.checked);
@@ -348,9 +349,7 @@ export function ProdukForm({ initial }: Props) {
                   ]);
                 }
               }}
-              className="size-4 rounded border-neutral-300 accent-brand-500 focus:ring-brand-500/30"
             />
-            <span className="font-medium text-neutral-900">Pakai varian</span>
           </label>
         </div>
 
