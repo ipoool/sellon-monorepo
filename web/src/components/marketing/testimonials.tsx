@@ -15,6 +15,9 @@ type Testimonial = {
   city: string;
   stat: string;
   category: string;
+  // 1-5; halves allowed (e.g., 4.5). We render integer fills + a half star
+  // when needed so ratings don't all feel like a uniform 5/5.
+  rating: number;
 };
 
 const testimonials: Testimonial[] = [
@@ -26,6 +29,7 @@ const testimonials: Testimonial[] = [
     city: "Yogyakarta",
     stat: "Pesanan jadi rapi",
     category: "Makanan rumahan",
+    rating: 5,
   },
   {
     quote:
@@ -35,6 +39,7 @@ const testimonials: Testimonial[] = [
     city: "Bandung",
     stat: "Lebih hemat waktu",
     category: "Fashion",
+    rating: 4,
   },
   {
     quote:
@@ -44,6 +49,7 @@ const testimonials: Testimonial[] = [
     city: "Surabaya",
     stat: "Tanpa potongan transaksi",
     category: "Kecantikan",
+    rating: 5,
   },
   {
     quote:
@@ -53,6 +59,7 @@ const testimonials: Testimonial[] = [
     city: "Jakarta",
     stat: "200 produk, 1 sore",
     category: "Aksesoris",
+    rating: 4.5,
   },
   {
     quote:
@@ -62,6 +69,7 @@ const testimonials: Testimonial[] = [
     city: "Denpasar",
     stat: "Mudah buat semua umur",
     category: "Kerajinan tangan",
+    rating: 5,
   },
   {
     quote:
@@ -71,8 +79,43 @@ const testimonials: Testimonial[] = [
     city: "Semarang",
     stat: "Setup-nya gampang",
     category: "Multi-brand",
+    rating: 4,
   },
 ];
+
+function StarRating({ value }: { value: number }) {
+  // Render 5 star "slots" — each is an empty outline overlaid by a clipped
+  // filled star whose width matches the rating. Half stars work via the
+  // 0.5 fractional fill on the relevant slot.
+  const clamped = Math.max(0, Math.min(5, value));
+  return (
+    <div
+      className="inline-flex items-center gap-0.5"
+      aria-label={`Rating ${clamped} dari 5`}
+    >
+      {Array.from({ length: 5 }).map((_, i) => {
+        const slotFill = Math.max(0, Math.min(1, clamped - i));
+        return (
+          <span key={i} className="relative inline-block size-4">
+            <Star
+              className="absolute inset-0 size-4 text-neutral-300"
+              aria-hidden
+            />
+            {slotFill > 0 && (
+              <span
+                className="absolute inset-y-0 left-0 overflow-hidden"
+                style={{ width: `${slotFill * 100}%` }}
+                aria-hidden
+              >
+                <Star className="size-4 fill-warning text-warning" aria-hidden />
+              </span>
+            )}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
 
 export function Testimonials() {
   const trackRef = useRef<HTMLUListElement>(null);
@@ -142,18 +185,7 @@ export function Testimonials() {
                 className="flex w-full shrink-0 snap-start flex-col gap-5 rounded-2xl border border-neutral-200 bg-white p-7 shadow-card sm:w-[calc(50%-0.625rem)] lg:w-[calc(33.333%-0.834rem)]"
               >
                 <div className="flex items-center justify-between gap-3">
-                  <div
-                    className="flex items-center gap-0.5 text-warning"
-                    aria-label="Rating 5 dari 5"
-                  >
-                    {Array.from({ length: 5 }).map((_, i) => (
-                      <Star
-                        key={i}
-                        className="size-4 fill-current"
-                        aria-hidden
-                      />
-                    ))}
-                  </div>
+                  <StarRating value={t.rating} />
                   <Quote
                     className="size-7 shrink-0 text-brand-100"
                     aria-hidden
