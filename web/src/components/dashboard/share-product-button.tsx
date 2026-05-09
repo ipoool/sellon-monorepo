@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Copy, Check, Send } from "lucide-react";
+import { Link2, Check, Send } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -50,7 +50,7 @@ export function ShareProductButton({
         {copied ? (
           <Check className="size-3.5 text-success" aria-hidden />
         ) : (
-          <Copy className="size-3.5" aria-hidden />
+          <Link2 className="size-3.5" aria-hidden />
         )}
       </button>
       <a

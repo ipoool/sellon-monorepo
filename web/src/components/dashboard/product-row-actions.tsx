@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
-  Copy,
+  CopyPlus,
   Edit2,
   Trash2,
   Loader2,
@@ -110,7 +110,7 @@ export function ProductRowActions({ productId, productName }: Props) {
           {duplicating ? (
             <Loader2 className="size-4 animate-spin" aria-hidden />
           ) : (
-            <Copy className="size-4" aria-hidden />
+            <CopyPlus className="size-4" aria-hidden />
           )}
         </button>
         <Link
