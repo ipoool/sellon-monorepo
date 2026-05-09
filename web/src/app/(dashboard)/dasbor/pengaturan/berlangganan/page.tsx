@@ -12,6 +12,7 @@ export const metadata = { title: "Berlangganan — SellOn" };
 const planLabel: Record<Subscription["plan"], string> = {
   free: "Gratis",
   pro: "Pro",
+  bisnis: "Bisnis",
 };
 
 const statusBadge: Record<
@@ -44,10 +45,13 @@ export default async function BerlanggananPage() {
     current_period_end: null,
     cancelled_at: null,
     days_remaining: 0,
-    pro_price_cents: 49_000_00,
+    pro_price_cents: 99_000_00,
+    bisnis_price_cents: 299_000_00,
   };
   const invoices = data?.invoices ?? [];
-  const isPro = sub.plan === "pro" && sub.status !== "expired";
+  const isPaid =
+    (sub.plan === "pro" || sub.plan === "bisnis") &&
+    sub.status !== "expired";
 
   return (
     <div className="flex flex-col gap-5">
@@ -64,7 +68,7 @@ export default async function BerlanggananPage() {
               </Badge>
             </div>
             <div className="mt-3 flex items-baseline gap-2">
-              {isPro && (
+              {isPaid && (
                 <Crown className="size-5 text-warning" aria-hidden />
               )}
               <p className="font-display text-3xl font-semibold text-neutral-900">
@@ -72,7 +76,7 @@ export default async function BerlanggananPage() {
               </p>
             </div>
 
-            {isPro && sub.current_period_end && (
+            {isPaid && sub.current_period_end && (
               <div className="mt-3 flex items-center gap-1.5 text-sm text-neutral-600">
                 <Calendar className="size-4" aria-hidden />
                 <span>
@@ -92,7 +96,7 @@ export default async function BerlanggananPage() {
               </div>
             )}
 
-            {!isPro && (
+            {!isPaid && (
               <p className="mt-3 text-sm text-neutral-600">
                 Anda di tier Gratis. Upgrade ke Pro untuk membuka semua fitur
                 tanpa batasan.
@@ -107,10 +111,10 @@ export default async function BerlanggananPage() {
       </Card>
 
       {/* Plan comparison */}
-      {!isPro && (
+      {!isPaid && (
         <Card>
           <h2 className="font-semibold text-neutral-900">Apa yang dapat Pro?</h2>
-          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <div className="mt-4 grid gap-4 lg:grid-cols-3">
             <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-4">
               <div className="flex items-center gap-2">
                 <h3 className="font-semibold text-neutral-900">Gratis</h3>
@@ -154,6 +158,35 @@ export default async function BerlanggananPage() {
                   "5 staf admin",
                   "Integrasi kurir",
                   "Laporan lengkap",
+                ].map((b) => (
+                  <li key={b} className="flex items-center gap-1.5">
+                    <Check
+                      className="size-3.5 text-brand-600"
+                      aria-hidden
+                    />
+                    {b}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="rounded-lg border border-neutral-200 bg-white p-4">
+              <div className="flex items-center gap-2">
+                <h3 className="font-semibold text-neutral-900">Bisnis</h3>
+                <Badge variant="outline">Untuk scale</Badge>
+              </div>
+              <p className="mt-1 font-display text-xl font-semibold text-neutral-900">
+                {formatRupiah(sub.bisnis_price_cents)}
+                <span className="text-sm font-normal text-neutral-600">
+                  /bulan
+                </span>
+              </p>
+              <ul className="mt-3 flex flex-col gap-1.5 text-sm text-neutral-700">
+                {[
+                  "Semua fitur Pro",
+                  "Multi-cabang",
+                  "Staf tanpa batas",
+                  "API & webhook",
+                  "Priority support",
                 ].map((b) => (
                   <li key={b} className="flex items-center gap-1.5">
                     <Check

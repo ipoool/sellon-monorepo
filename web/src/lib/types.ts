@@ -182,13 +182,14 @@ export type Promo = {
 };
 
 export type Subscription = {
-  plan: "free" | "pro";
+  plan: "free" | "pro" | "bisnis";
   status: "active" | "cancelled" | "expired";
   current_period_start: string | null;
   current_period_end: string | null;
   cancelled_at: string | null;
   days_remaining: number;
   pro_price_cents: number;
+  bisnis_price_cents: number;
 };
 
 export type SubscriptionInvoice = {

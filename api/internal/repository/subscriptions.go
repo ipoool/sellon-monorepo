@@ -67,9 +67,11 @@ func (r *SubscriptionRepo) GetOrCreate(ctx context.Context, storeID uuid.UUID) (
 	`, storeID)
 	s, err := scanSubscription(row)
 	if err == nil {
-		// Lazy expiry: if pro plan period ended without renewal, transition
-		// to expired. Caller sees the up-to-date state without a cron job.
-		if s.Plan == "pro" && s.CurrentPeriodEnd != nil &&
+		// Lazy expiry: if a paid plan's period ended without renewal,
+		// transition to expired. Caller sees the up-to-date state without
+		// a cron job.
+		if (s.Plan == "pro" || s.Plan == "bisnis") &&
+			s.CurrentPeriodEnd != nil &&
 			s.CurrentPeriodEnd.Before(time.Now()) && s.Status != "expired" {
 			_, _ = r.pool.Exec(ctx, `
 				UPDATE subscriptions
@@ -91,12 +93,15 @@ func (r *SubscriptionRepo) GetOrCreate(ctx context.Context, storeID uuid.UUID) (
 	return scanSubscription(row)
 }
 
-// Upgrade marks the subscription as pro and extends the period by `months`
-// from the later of (now, current_period_end). If an invoice is supplied,
-// it's recorded as paid in the same transaction.
-func (r *SubscriptionRepo) Upgrade(ctx context.Context, storeID uuid.UUID, months int, amountCents int64, notes string) (*Subscription, error) {
+// Upgrade switches the subscription to the given plan ('pro' or 'bisnis')
+// and extends the period by `months` from the later of (now, current_period_end).
+// If an invoice is supplied, it's recorded as paid in the same transaction.
+func (r *SubscriptionRepo) Upgrade(ctx context.Context, storeID uuid.UUID, plan string, months int, amountCents int64, notes string) (*Subscription, error) {
 	if months <= 0 {
 		months = 1
+	}
+	if plan != "pro" && plan != "bisnis" {
+		plan = "pro"
 	}
 
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
@@ -115,7 +120,7 @@ func (r *SubscriptionRepo) Upgrade(ctx context.Context, storeID uuid.UUID, month
 	// Compute new period end: max(now, current_period_end) + months.
 	row := tx.QueryRow(ctx, `
 		UPDATE subscriptions
-		SET plan = 'pro',
+		SET plan = $3,
 		    status = 'active',
 		    current_period_start = COALESCE(current_period_start, now()),
 		    current_period_end = GREATEST(
@@ -125,7 +130,7 @@ func (r *SubscriptionRepo) Upgrade(ctx context.Context, storeID uuid.UUID, month
 		    cancelled_at = NULL,
 		    updated_at = now()
 		WHERE store_id = $1
-		RETURNING `+subscriptionCols, storeID, months)
+		RETURNING `+subscriptionCols, storeID, months, plan)
 	s, err := scanSubscription(row)
 	if err != nil {
 		return nil, err

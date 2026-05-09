@@ -23,10 +23,24 @@ func NewSubscriptionHandler(subs *repository.SubscriptionRepo, stores *repositor
 	return &SubscriptionHandler{subs: subs, stores: stores, logger: logger}
 }
 
-// Pricing source-of-truth lives here for now. When automated billing
-// arrives, move this into the DB so plan changes don't require a deploy.
-// Must match the Pro tier on the landing page (web/src/components/home/pricing.tsx).
-const proPriceCentsPerMonth = 99_000_00 // Rp 99.000 per month (= "Rp 99rb")
+// Pricing source-of-truth. Must match landing page tiers
+// (web/src/components/home/pricing.tsx). Move to DB once admin tooling
+// for plan management exists.
+const (
+	proPriceCentsPerMonth    = 99_000_00  // Rp 99.000 per month  (= "Rp 99rb")
+	bisnisPriceCentsPerMonth = 299_000_00 // Rp 299.000 per month (= "Rp 299rb")
+)
+
+func priceForPlan(plan string) int64 {
+	switch plan {
+	case "pro":
+		return proPriceCentsPerMonth
+	case "bisnis":
+		return bisnisPriceCentsPerMonth
+	default:
+		return 0
+	}
+}
 
 type subscriptionDTO struct {
 	Plan               string  `json:"plan"`
@@ -36,6 +50,7 @@ type subscriptionDTO struct {
 	CancelledAt        *string `json:"cancelled_at"`
 	DaysRemaining      int     `json:"days_remaining"`
 	ProPriceCents      int64   `json:"pro_price_cents"`
+	BisnisPriceCents   int64   `json:"bisnis_price_cents"`
 }
 
 type invoiceDTO struct {
@@ -52,7 +67,8 @@ type invoiceDTO struct {
 func toSubDTO(s *repository.Subscription) subscriptionDTO {
 	out := subscriptionDTO{
 		Plan: s.Plan, Status: s.Status,
-		ProPriceCents: proPriceCentsPerMonth,
+		ProPriceCents:    proPriceCentsPerMonth,
+		BisnisPriceCents: bisnisPriceCentsPerMonth,
 	}
 	formatPtr := func(t *time.Time) *string {
 		if t == nil {
@@ -104,7 +120,8 @@ func (h *SubscriptionHandler) Get(w http.ResponseWriter, r *http.Request) {
 		response.JSON(w, http.StatusOK, map[string]any{
 			"subscription": subscriptionDTO{
 				Plan: "free", Status: "active",
-				ProPriceCents: proPriceCentsPerMonth,
+				ProPriceCents:    proPriceCentsPerMonth,
+				BisnisPriceCents: bisnisPriceCentsPerMonth,
 			},
 			"invoices": []invoiceDTO{},
 		})
@@ -132,6 +149,8 @@ func (h *SubscriptionHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 type requestUpgradeReq struct {
+	// "pro" or "bisnis". Defaults to "pro" if missing/invalid.
+	Tier   string `json:"tier"`
 	Months int    `json:"months"`
 	Notes  string `json:"notes"`
 }
@@ -156,19 +175,28 @@ func (h *SubscriptionHandler) RequestUpgrade(w http.ResponseWriter, r *http.Requ
 	if months <= 0 || months > 12 {
 		months = 1
 	}
+	tier := strings.ToLower(strings.TrimSpace(req.Tier))
+	if tier != "pro" && tier != "bisnis" {
+		tier = "pro"
+	}
 	sub, err := h.subs.GetOrCreate(r.Context(), store.ID)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	amount := proPriceCentsPerMonth * int64(months)
-	if err := h.subs.CreatePendingInvoice(r.Context(), store.ID, sub.ID, amount, strings.TrimSpace(req.Notes)); err != nil {
+	amount := priceForPlan(tier) * int64(months)
+	notes := strings.TrimSpace(req.Notes)
+	if notes == "" {
+		notes = "Upgrade " + tier + " " + strings.ToUpper(tier[:1]) + " bulan"
+	}
+	if err := h.subs.CreatePendingInvoice(r.Context(), store.ID, sub.ID, amount, notes); err != nil {
 		h.logger.Error("create pending invoice", "err", err)
 		response.Error(w, http.StatusInternalServerError, "gagal mencatat permintaan upgrade")
 		return
 	}
 	response.JSON(w, http.StatusCreated, map[string]any{
 		"ok":           true,
+		"tier":         tier,
 		"amount_cents": amount,
 		"months":       months,
 	})

@@ -20,9 +20,11 @@ import type { Subscription } from "@/lib/types";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
-// Hard-coded for MVP — in production this should be a tenant-configured
-// support number. Used both as a copy/share helper and the WA deep-link.
-const SUPPORT_WA = "6281234567890";
+// Hard-coded for MVP — in production these should be tenant-configured.
+const SUPPORT_WA = "6281291006534"; // 0812 9100 6534
+const PAYMENT_BANK = "BCA";
+const PAYMENT_ACCOUNT_NO = "2040144776";
+const PAYMENT_ACCOUNT_NAME = "Asep Saepulloh";
 
 type Props = {
   subscription: Subscription;
@@ -32,6 +34,9 @@ export function BerlanggananActions({ subscription }: Props) {
   const router = useRouter();
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [showCancel, setShowCancel] = useState(false);
+  const [tier, setTier] = useState<"pro" | "bisnis">(
+    subscription.plan === "bisnis" ? "bisnis" : "pro",
+  );
   const [months, setMonths] = useState(1);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -77,7 +82,28 @@ export function BerlanggananActions({ subscription }: Props) {
     };
   }, []);
 
-  const totalCents = subscription.pro_price_cents * months;
+  const tierPriceCents =
+    tier === "bisnis"
+      ? subscription.bisnis_price_cents
+      : subscription.pro_price_cents;
+  const totalCents = tierPriceCents * months;
+  const tierLabel = tier === "bisnis" ? "Bisnis" : "Pro";
+  const tierFeatures =
+    tier === "bisnis"
+      ? [
+          "Semua fitur Pro",
+          "Multi-cabang",
+          "Staf tanpa batas",
+          "API & webhook",
+          "Priority support",
+        ]
+      : [
+          "Produk tanpa batas",
+          "Otomasi WhatsApp",
+          "5 staf admin",
+          "Integrasi kurir",
+          "Laporan lengkap",
+        ];
 
   async function requestUpgrade() {
     setBusy(true);
@@ -91,8 +117,9 @@ export function BerlanggananActions({ subscription }: Props) {
           credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            tier,
             months,
-            notes: `Permintaan upgrade ${months} bulan dari halaman Pengaturan.`,
+            notes: `Permintaan upgrade ke ${tierLabel} ${months} bulan dari halaman Pengaturan.`,
           }),
         },
       );
@@ -216,30 +243,61 @@ export function BerlanggananActions({ subscription }: Props) {
 
         <div className="flex flex-col gap-4 p-5">
           <p className="text-sm text-neutral-700">
-            Pro membuka semua fitur tanpa batasan dan menghapus watermark
-            SellOn dari halaman toko publik.
+            Buka semua fitur tanpa batasan. Pilih tier yang sesuai skala
+            tokomu.
           </p>
 
-          <div className="rounded-lg border border-brand-200 bg-brand-50/50 p-4">
-            <div className="flex items-baseline justify-between">
-              <span className="text-xs font-medium uppercase tracking-wider text-brand-700">
-                Tier Pro
-              </span>
-              <span className="font-display text-2xl font-semibold text-neutral-900">
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setTier("pro")}
+              className={
+                "rounded-lg border-2 p-3 text-left transition-colors " +
+                (tier === "pro"
+                  ? "border-brand-500 bg-brand-50/50"
+                  : "border-neutral-200 bg-white hover:border-neutral-300")
+              }
+            >
+              <p className="text-sm font-semibold text-neutral-900">Pro</p>
+              <p className="mt-1 font-display text-base font-semibold text-neutral-900">
                 {formatRupiah(subscription.pro_price_cents)}
-                <span className="text-sm font-normal text-neutral-600">
+                <span className="text-xs font-normal text-neutral-600">
                   /bulan
                 </span>
-              </span>
-            </div>
-            <ul className="mt-3 flex flex-col gap-1.5 text-xs text-neutral-700">
-              {[
-                "Produk tanpa batas",
-                "Otomasi WhatsApp",
-                "5 staf admin",
-                "Integrasi kurir",
-                "Laporan lengkap",
-              ].map((b) => (
+              </p>
+              <p className="mt-1 text-xs text-neutral-500">
+                Untuk toko yang sudah punya pelanggan tetap.
+              </p>
+            </button>
+            <button
+              type="button"
+              onClick={() => setTier("bisnis")}
+              className={
+                "rounded-lg border-2 p-3 text-left transition-colors " +
+                (tier === "bisnis"
+                  ? "border-brand-500 bg-brand-50/50"
+                  : "border-neutral-200 bg-white hover:border-neutral-300")
+              }
+            >
+              <p className="text-sm font-semibold text-neutral-900">Bisnis</p>
+              <p className="mt-1 font-display text-base font-semibold text-neutral-900">
+                {formatRupiah(subscription.bisnis_price_cents)}
+                <span className="text-xs font-normal text-neutral-600">
+                  /bulan
+                </span>
+              </p>
+              <p className="mt-1 text-xs text-neutral-500">
+                Multi-cabang, API, priority support.
+              </p>
+            </button>
+          </div>
+
+          <div className="rounded-lg border border-brand-200 bg-brand-50/50 p-3">
+            <p className="text-xs font-medium uppercase tracking-wider text-brand-700">
+              Yang termasuk di tier {tierLabel}
+            </p>
+            <ul className="mt-2 grid gap-1.5 text-xs text-neutral-700 sm:grid-cols-2">
+              {tierFeatures.map((b) => (
                 <li key={b} className="flex items-center gap-1.5">
                   <Check className="size-3.5 text-brand-600" aria-hidden />
                   {b}
@@ -267,10 +325,14 @@ export function BerlanggananActions({ subscription }: Props) {
 
           <div className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-neutral-800">
             <p className="font-semibold">Cara bayar (manual untuk sekarang):</p>
-            <ol className="mt-1.5 list-decimal pl-5">
+            <ol className="mt-1.5 list-decimal space-y-1 pl-5">
               <li>
-                Transfer ke <strong>BCA 1234567890 a/n SellOn</strong> sebesar{" "}
-                {formatRupiah(totalCents)}.
+                Transfer sebesar <strong>{formatRupiah(totalCents)}</strong> ke:
+                <div className="mt-1 rounded-md border border-warning/30 bg-white px-2.5 py-2 font-mono text-[11px] leading-snug">
+                  {PAYMENT_BANK} <strong>{PAYMENT_ACCOUNT_NO}</strong>
+                  <br />
+                  a/n {PAYMENT_ACCOUNT_NAME}
+                </div>
               </li>
               <li>
                 Kirim bukti transfer ke{" "}
@@ -280,7 +342,7 @@ export function BerlanggananActions({ subscription }: Props) {
                   rel="noopener noreferrer"
                   className="font-medium text-success hover:underline"
                 >
-                  WhatsApp tim SellOn
+                  WhatsApp 0812-9100-6534
                 </a>
                 .
               </li>
@@ -304,7 +366,7 @@ export function BerlanggananActions({ subscription }: Props) {
         <div className="flex items-center justify-end gap-2 border-t border-neutral-200 bg-neutral-50 px-5 py-3">
           <a
             href={`https://wa.me/${SUPPORT_WA}?text=${encodeURIComponent(
-              `Halo SellOn, saya mau upgrade Pro ${months} bulan (${formatRupiah(totalCents)}).`,
+              `Halo SellOn, saya mau upgrade ${tierLabel} ${months} bulan (${formatRupiah(totalCents)}).`,
             )}`}
             target="_blank"
             rel="noopener noreferrer"
