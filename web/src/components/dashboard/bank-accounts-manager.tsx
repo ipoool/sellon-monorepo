@@ -201,7 +201,7 @@ export const BankAccountsManager = forwardRef<BankAccountsManagerHandle>(
       .filter(({ d }) => !d._deleted);
 
     return (
-      <section className="border-t border-neutral-200 pt-5">
+      <section className="mt-6 border-t border-neutral-200 pt-6">
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
             <h3 className="font-semibold text-neutral-900">
@@ -228,19 +228,19 @@ export const BankAccountsManager = forwardRef<BankAccountsManagerHandle>(
             </p>
           </div>
         ) : (
-          <ul className="flex flex-col gap-3">
+          <ul className="flex flex-col gap-4">
             {visibleDrafts.map(({ d, i }) => (
               <li
                 key={d.key}
-                className="rounded-lg border border-neutral-200 bg-white p-4"
+                className="rounded-lg bg-neutral-50/60 p-4"
               >
-                <div className="mb-3 flex items-start justify-between gap-3">
+                <div className="mb-4 flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
                     <QrCode
                       className="size-4 text-neutral-400"
                       aria-hidden
                     />
-                    <p className="font-medium text-neutral-900">
+                    <p className="text-sm font-medium text-neutral-900">
                       {d.bank_name || "Rekening / QRIS baru"}
                     </p>
                     {d.is_primary && (
@@ -250,19 +250,18 @@ export const BankAccountsManager = forwardRef<BankAccountsManagerHandle>(
                       </span>
                     )}
                   </div>
-                  <Button
+                  <button
                     type="button"
-                    size="sm"
-                    variant="ghost"
                     onClick={() => remove(i)}
-                    className="text-danger hover:bg-danger/10"
+                    className="inline-flex size-8 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-danger/10 hover:text-danger"
                     aria-label="Hapus rekening"
+                    title="Hapus"
                   >
-                    <Trash2 className="size-3.5" aria-hidden />
-                  </Button>
+                    <Trash2 className="size-4" aria-hidden />
+                  </button>
                 </div>
 
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-4 sm:grid-cols-2">
                   <div className="flex flex-col gap-1.5">
                     <Label htmlFor={`bank_name_${d.key}`}>Nama Bank</Label>
                     <input
@@ -272,7 +271,7 @@ export const BankAccountsManager = forwardRef<BankAccountsManagerHandle>(
                       onChange={(e) =>
                         update(i, { bank_name: e.target.value })
                       }
-                      placeholder="BCA, Mandiri, dll. (kosongkan kalau hanya QRIS)"
+                      placeholder="BCA, Mandiri, dll."
                       className="h-10 w-full rounded-lg border border-neutral-200 bg-white px-3 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
                     />
                     <datalist id={`bank-list-${d.key}`}>
@@ -280,6 +279,9 @@ export const BankAccountsManager = forwardRef<BankAccountsManagerHandle>(
                         <option key={b} value={b} />
                       ))}
                     </datalist>
+                    <p className="text-xs text-neutral-500">
+                      Kosongkan kalau hanya pakai QRIS.
+                    </p>
                   </div>
                   <div className="flex flex-col gap-1.5">
                     <Label htmlFor={`account_no_${d.key}`}>No. Rekening</Label>
@@ -306,18 +308,24 @@ export const BankAccountsManager = forwardRef<BankAccountsManagerHandle>(
                       placeholder="Sesuai buku tabungan"
                     />
                   </div>
-                  <div className="flex flex-col gap-1.5 sm:col-span-2">
+                  <div className="flex flex-col gap-2 sm:col-span-2">
                     <Label>Gambar QRIS Statis (opsional)</Label>
-                    <ImageUploadInput
-                      value={d.qris_url}
-                      onChange={(url) => update(i, { qris_url: url })}
-                      kind="qris"
-                      shape="square"
-                    />
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+                      <ImageUploadInput
+                        value={d.qris_url}
+                        onChange={(url) => update(i, { qris_url: url })}
+                        kind="qris"
+                        shape="square"
+                      />
+                      <p className="max-w-sm text-xs text-neutral-500 sm:pt-1">
+                        Upload screenshot / foto QR-nya. Pembeli akan scan QR
+                        ini saat checkout. PNG/JPG, maks 5 MB.
+                      </p>
+                    </div>
                   </div>
                 </div>
 
-                <label className="mt-3 flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2.5 text-sm">
+                <label className="mt-4 flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-neutral-200 bg-white px-3 py-2.5 text-sm">
                   <div>
                     <p className="font-medium text-neutral-900">
                       Jadikan rekening utama
