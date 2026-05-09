@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 
+import { OrderNotifier } from "@/components/dashboard/order-notifier";
 import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import type { Store } from "@/lib/types";
@@ -18,5 +19,10 @@ export default async function DashboardLayout({
   const data = await serverApi<{ store: Store | null }>("/api/v1/store");
   if (!data?.store) redirect("/setup");
 
-  return <>{children}</>;
+  return (
+    <>
+      <OrderNotifier />
+      {children}
+    </>
+  );
 }

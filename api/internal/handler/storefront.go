@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/sellon/sellon/api/internal/events"
 	"github.com/sellon/sellon/api/internal/pkg/response"
 	"github.com/sellon/sellon/api/internal/repository"
 	"github.com/sellon/sellon/api/internal/shipping"
@@ -27,6 +28,7 @@ type StorefrontHandler struct {
 	promos     *repository.PromoRepo
 	gateways   *repository.PaymentRepo
 	subs       *repository.SubscriptionRepo
+	broker     *events.Broker
 	logger     *slog.Logger
 }
 
@@ -35,11 +37,13 @@ func NewStorefrontHandler(
 	o *repository.OrderRepo, b *repository.BankAccountRepo, c *repository.CategoryRepo,
 	pr *repository.PromoRepo, gw *repository.PaymentRepo,
 	subs *repository.SubscriptionRepo,
+	broker *events.Broker,
 	logger *slog.Logger,
 ) *StorefrontHandler {
 	return &StorefrontHandler{
 		stores: s, products: p, variants: v, orders: o, banks: b,
-		categories: c, promos: pr, gateways: gw, subs: subs, logger: logger,
+		categories: c, promos: pr, gateways: gw, subs: subs,
+		broker: broker, logger: logger,
 	}
 }
 
@@ -461,6 +465,21 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 		if err := h.promos.IncrementUsage(r.Context(), *promoID); err != nil {
 			h.logger.Error("increment promo usage", "err", err, "promo_id", promoID.String())
 		}
+	}
+
+	// Push to dashboard SSE subscribers so the seller sees the order
+	// without refreshing.
+	if h.broker != nil {
+		h.broker.Publish(store.ID, events.Event{
+			Type: "order.created",
+			Payload: map[string]any{
+				"order_id":      order.ID.String(),
+				"order_number":  order.OrderNumber,
+				"customer_name": order.CustomerName,
+				"total_cents":   order.TotalCents,
+				"created_at":    order.CreatedAt.Format(time.RFC3339),
+			},
+		})
 	}
 
 	response.JSON(w, http.StatusCreated, map[string]any{

@@ -12,6 +12,7 @@ import (
 
 	"github.com/sellon/sellon/api/internal/auth"
 	"github.com/sellon/sellon/api/internal/config"
+	"github.com/sellon/sellon/api/internal/events"
 	"github.com/sellon/sellon/api/internal/handler"
 	"github.com/sellon/sellon/api/internal/middleware"
 	"github.com/sellon/sellon/api/internal/payments"
@@ -50,6 +51,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 
 	midtransClient := payments.NewMidtransClient()
 	storageClient := storage.NewSupabaseClient(cfg.SupabaseURL, cfg.SupabaseServiceKey, cfg.SupabaseBucket)
+	broker := events.NewBroker()
 
 	authHandler := handler.NewAuthHandler(users, memberships, googleVerifier, jwtSvc, logger, cfg.IsProd())
 	storeHandler := handler.NewStoreHandler(stores, logger)
@@ -59,7 +61,8 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	customerHandler := handler.NewCustomerHandler(customers, orders, stores, logger)
 	paymentHandler := handler.NewPaymentHandler(gateways, stores, encryptor, midtransClient, logger, cfg.WebhookBaseURL)
 	dashHandler := handler.NewDashboardHandler(stores, products, orders, customers, logger)
-	storefrontHandler := handler.NewStorefrontHandler(stores, products, variants, orders, bankAccounts, categories, promos, gateways, subscriptions, logger)
+	storefrontHandler := handler.NewStorefrontHandler(stores, products, variants, orders, bankAccounts, categories, promos, gateways, subscriptions, broker, logger)
+	orderStreamHandler := handler.NewOrderStreamHandler(stores, broker, logger)
 	waTemplateHandler := handler.NewWATemplateHandler(waTemplates, stores, logger)
 	webhookHandler := handler.NewWebhookHandler(gateways, orders, encryptor, logger)
 	bankAccountHandler := handler.NewBankAccountHandler(bankAccounts, stores, logger)
@@ -136,6 +139,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 			r.Route("/orders", func(r chi.Router) {
 				r.Get("/", orderHandler.List)
 				r.Get("/export", orderHandler.Export)
+				r.Get("/stream", orderStreamHandler.Stream)
 				r.Get("/{id}", orderHandler.Get)
 				r.Patch("/{id}/status", orderHandler.UpdateStatus)
 				r.Patch("/{id}/notes", orderHandler.UpdateNotes)
