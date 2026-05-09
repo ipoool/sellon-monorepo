@@ -7,7 +7,6 @@ import {
   ShoppingCart,
   CreditCard,
   Settings,
-  Headphones,
   ArrowRight,
   Mail,
   MessageCircle,
@@ -38,7 +37,6 @@ const iconBySlug: Record<HelpCategorySlug, LucideIcon> = {
   pesanan: ShoppingCart,
   pembayaran: CreditCard,
   "akun-pengaturan": Settings,
-  berlangganan: Headphones,
 };
 
 export default async function BantuanPage() {

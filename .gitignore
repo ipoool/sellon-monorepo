@@ -48,3 +48,4 @@ docker-data/
 # === Coverage ===
 coverage/
 *.lcov
+.gstack/

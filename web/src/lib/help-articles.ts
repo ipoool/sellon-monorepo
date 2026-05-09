@@ -26,8 +26,7 @@ export type HelpCategorySlug =
   | "produk-katalog"
   | "pesanan"
   | "pembayaran"
-  | "akun-pengaturan"
-  | "berlangganan";
+  | "akun-pengaturan";
 
 export type HelpCategory = {
   slug: HelpCategorySlug;
@@ -40,7 +39,6 @@ export const helpCategories: HelpCategory[] = [
   { slug: "pesanan", title: "Pesanan" },
   { slug: "pembayaran", title: "Pembayaran" },
   { slug: "akun-pengaturan", title: "Akun & Pengaturan" },
-  { slug: "berlangganan", title: "Berlangganan" },
 ];
 
 export const helpArticles: HelpArticle[] = [
@@ -751,117 +749,6 @@ export const helpArticles: HelpArticle[] = [
     ],
   },
 
-  // === BERLANGGANAN ===
-  {
-    slug: "upgrade-gratis-ke-pro",
-    category: "berlangganan",
-    title: "Upgrade dari Gratis ke Pro",
-    excerpt:
-      "Upgrade kapan saja dari halaman Harga atau Pengaturan → Berlangganan.",
-    readingTime: "2 menit",
-    body: [
-      {
-        type: "p",
-        text:
-          "SellOn punya tier Gratis (terbatas) dan Pro (semua fitur). Upgrade tidak butuh data tambahan — pembayaran lewat metode yang sama dengan toko Anda (kartu kredit / e-wallet).",
-      },
-      { type: "h2", text: "Cara upgrade" },
-      {
-        type: "ol",
-        items: [
-          "Buka /#harga atau Dasbor → Pengaturan → Berlangganan.",
-          "Pilih tier Pro → klik 'Upgrade'.",
-          "Selesaikan pembayaran. Tier aktif segera setelah pembayaran sukses.",
-        ],
-      },
-      {
-        type: "callout",
-        tone: "info",
-        text:
-          "Tidak ada potongan transaksi tambahan dari SellOn — biaya hanya bulanan tetap. Anda tetap pakai akun Midtrans Anda sendiri untuk processing.",
-      },
-    ],
-  },
-  {
-    slug: "membatalkan-langganan",
-    category: "berlangganan",
-    title: "Membatalkan langganan",
-    excerpt:
-      "Cancel kapan saja di Pengaturan → Berlangganan. Akses tetap aktif sampai akhir periode.",
-    readingTime: "2 menit",
-    body: [
-      {
-        type: "p",
-        text:
-          "Membatalkan tidak menghapus akun — Anda akan turun ke tier Gratis di akhir periode pembayaran berikutnya.",
-      },
-      { type: "h2", text: "Cara cancel" },
-      {
-        type: "ol",
-        items: [
-          "Pengaturan → Berlangganan → Tier Pro Aktif.",
-          "Klik 'Batalkan langganan'. Konfirmasi dialog.",
-          "Akses Pro tetap aktif sampai tanggal renewal terakhir.",
-          "Setelah expired, akun masuk mode read-only (lihat artikel terkait).",
-        ],
-      },
-    ],
-  },
-  {
-    slug: "faktur-dan-riwayat-pembayaran",
-    category: "berlangganan",
-    title: "Faktur dan riwayat pembayaran",
-    excerpt:
-      "Download invoice PDF dari Pengaturan → Berlangganan → Riwayat.",
-    readingTime: "1 menit",
-    body: [
-      {
-        type: "p",
-        text:
-          "Setiap pembayaran langganan menghasilkan invoice yang bisa di-download sebagai PDF. Berguna untuk reimbursement atau pembukuan.",
-      },
-      { type: "h2", text: "Cara akses" },
-      {
-        type: "ol",
-        items: [
-          "Pengaturan → Berlangganan → tab 'Riwayat Pembayaran'.",
-          "List semua transaksi langganan dengan tanggal, nominal, dan metode bayar.",
-          "Klik 'Download invoice' di setiap baris untuk file PDF.",
-        ],
-      },
-    ],
-  },
-  {
-    slug: "mode-read-only-setelah-berhenti",
-    category: "berlangganan",
-    title: "Mode read-only setelah berhenti",
-    excerpt:
-      "Setelah langganan expired, akun masih bisa diakses untuk export data, tapi tidak bisa terima pesanan baru.",
-    readingTime: "2 menit",
-    body: [
-      {
-        type: "p",
-        text:
-          "SellOn tidak menghapus data Anda saat langganan habis. Akun masuk mode 'read-only' selama 90 hari, di mana Anda masih bisa: login, export pelanggan/pesanan ke CSV, dan re-aktifkan langganan.",
-      },
-      { type: "h2", text: "Yang non-aktif" },
-      {
-        type: "ul",
-        items: [
-          "Halaman publik toko: tampil 'Toko sedang tutup'.",
-          "Tombol terima pesanan: dimatikan.",
-          "Tambah/edit produk: dikunci.",
-          "Pengaturan: read-only kecuali Berlangganan.",
-        ],
-      },
-      {
-        type: "callout",
-        tone: "warning",
-        text:
-          "Setelah 90 hari mode read-only, kami akan kirim email peringatan. Bila tidak ada respon, data dihapus permanen sesuai kebijakan privasi.",
-      },
-    ],
-  },
 ];
 
 export function articleBySlug(slug: string): HelpArticle | null {
