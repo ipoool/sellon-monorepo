@@ -64,6 +64,12 @@ const columnSpec: { name: string; required: boolean; description: string }[] = [
     required: false,
     description: "URL gambar (https://...). Maks 5 foto per produk.",
   },
+  {
+    name: "Varian",
+    required: false,
+    description:
+      "Format: 'Nama:Harga:Stok[:SKU]' tiap entri, dipisah ';'. Contoh: 'S:85000:5;M:85000:10;L:90000:8:KP-L'.",
+  },
 ];
 
 export function BulkUploadForm() {

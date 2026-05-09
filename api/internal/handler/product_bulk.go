@@ -37,6 +37,7 @@ var bulkColumns = []string{
 	"Foto URL 3",   // 12
 	"Foto URL 4",   // 13
 	"Foto URL 5",   // 14
+	"Varian",       // 15  — "Nama:Harga:Stok[:SKU]" entries, dipisah ';' (kosongkan kalau tidak pakai)
 }
 
 // GET /api/v1/products/bulk/template — generates XLSX template
@@ -72,6 +73,7 @@ func (h *ProductHandler) BulkTemplate(w http.ResponseWriter, r *http.Request) {
 			"Keripik singkong renyah dengan bumbu cabai pilihan. Tahan 30 hari.",
 			35000, 50, "active", 500, 25, 18, 5,
 			"https://example.com/keripik-1.jpg", "", "", "", "",
+			"", // tanpa varian
 		},
 		{
 			"Sambal Bawang Goreng",
@@ -79,6 +81,15 @@ func (h *ProductHandler) BulkTemplate(w http.ResponseWriter, r *http.Request) {
 			"Sambal bawang khas warung, level 3.",
 			28000, 30, "active", 250, 12, 8, 8,
 			"", "", "", "", "",
+			"", // tanpa varian
+		},
+		{
+			"Kaos Polos Premium",
+			"kaos-polos-premium",
+			"Kaos cotton combed 30s. Pilih ukuran sesuai bodymu.",
+			85000, 0, "active", 200, 30, 25, 2,
+			"https://example.com/kaos.jpg", "", "", "", "",
+			"S:85000:5;M:85000:10;L:90000:8:KP-L;XL:95000:3",
 		},
 	}
 	for r, row := range examples {
@@ -97,6 +108,9 @@ func (h *ProductHandler) BulkTemplate(w http.ResponseWriter, r *http.Request) {
 		colName, _ := excelize.ColumnNumberToName(i)
 		_ = f.SetColWidth(bulkSheetName, colName, colName, 38)
 	}
+	// Varian column — wider so the "Nama:Harga:Stok" entries don't overflow.
+	varianCol, _ := excelize.ColumnNumberToName(len(bulkColumns))
+	_ = f.SetColWidth(bulkSheetName, varianCol, varianCol, 55)
 
 	// Sheet 2: instructions
 	_, _ = f.NewSheet(bulkInstructionName)
@@ -126,6 +140,7 @@ func (h *ProductHandler) BulkTemplate(w http.ResponseWriter, r *http.Request) {
 		{"Status", "active | inactive | sold_out. Default: active."},
 		{"Berat, Dimensi", "Optional. Angka dalam gram dan cm. Dipakai hitung ongkir."},
 		{"Foto URL 1–5", "Optional. URL gambar (https://...). Maks 5 foto. Upload langsung akan tersedia setelah integrasi storage."},
+		{"Varian", "Optional. Format: 'Nama:Harga:Stok[:SKU]' tiap entri, dipisah ';'. Contoh: 'S:85000:5;M:85000:10;L:90000:8:KP-L'. Saat ada varian, kolom Harga/Stok parent jadi default — pembeli akan pilih varian saat checkout."},
 		{"", ""},
 		{"3. Setelah Upload", ""},
 		{"", "• Sistem validasi setiap baris."},
@@ -244,7 +259,7 @@ func (h *ProductHandler) BulkUpload(w http.ResponseWriter, r *http.Request) {
 	for i, row := range dataRows {
 		excelRow := i + 2 // +2 because header is row 1 and arrays are 0-indexed
 
-		input, validationErr := parseBulkRow(row)
+		input, variantInputs, validationErr := parseBulkRow(row)
 		if validationErr != nil {
 			result.Failed++
 			result.Errors = append(result.Errors, bulkRowError{
@@ -265,7 +280,8 @@ func (h *ProductHandler) BulkUpload(w http.ResponseWriter, r *http.Request) {
 		seenSlugs[input.Slug] = excelRow
 
 		input.StoreID = store.ID
-		if _, err := h.products.Create(r.Context(), input); err != nil {
+		created, err := h.products.Create(r.Context(), input)
+		if err != nil {
 			result.Failed++
 			msg := "gagal simpan ke database"
 			if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "unique constraint") {
@@ -275,6 +291,21 @@ func (h *ProductHandler) BulkUpload(w http.ResponseWriter, r *http.Request) {
 				Row: excelRow, Field: "URL Slug", Message: msg,
 			})
 			continue
+		}
+
+		// Sync variants if the row supplied any. ReplaceForProduct also flips
+		// products.has_variants for us. Failure here is reported but doesn't
+		// retroactively delete the parent — the seller can re-edit via the UI.
+		if len(variantInputs) > 0 {
+			if err := h.variants.ReplaceForProduct(r.Context(), created.ID, variantInputs); err != nil {
+				h.logger.Error("bulk variants sync", "err", err, "product", created.ID.String())
+				result.Errors = append(result.Errors, bulkRowError{
+					Row: excelRow, Field: "Varian",
+					Message: "produk tersimpan tapi varian gagal disinkronkan: " + err.Error(),
+				})
+				// Count as succeeded (parent saved); don't increment Failed —
+				// seller already has a draft product to fix.
+			}
 		}
 		result.Succeeded++
 	}
@@ -289,7 +320,7 @@ type bulkValidationErr struct {
 
 func (e *bulkValidationErr) Error() string { return e.msg }
 
-func parseBulkRow(row []string) (repository.SaveProductInput, *bulkValidationErr) {
+func parseBulkRow(row []string) (repository.SaveProductInput, []repository.VariantInput, *bulkValidationErr) {
 	// Pad row to expected length
 	for len(row) < len(bulkColumns) {
 		row = append(row, "")
@@ -297,10 +328,10 @@ func parseBulkRow(row []string) (repository.SaveProductInput, *bulkValidationErr
 
 	name := strings.TrimSpace(row[0])
 	if name == "" {
-		return repository.SaveProductInput{}, &bulkValidationErr{"Nama Produk", "nama produk wajib diisi"}
+		return repository.SaveProductInput{}, nil, &bulkValidationErr{"Nama Produk", "nama produk wajib diisi"}
 	}
 	if len(name) > 200 {
-		return repository.SaveProductInput{}, &bulkValidationErr{"Nama Produk", "nama maksimal 200 karakter"}
+		return repository.SaveProductInput{}, nil, &bulkValidationErr{"Nama Produk", "nama maksimal 200 karakter"}
 	}
 
 	slug := strings.TrimSpace(row[1])
@@ -310,25 +341,25 @@ func parseBulkRow(row []string) (repository.SaveProductInput, *bulkValidationErr
 		slug = sanitizeSlug(slug)
 	}
 	if slug == "" {
-		return repository.SaveProductInput{}, &bulkValidationErr{"URL Slug", "tidak bisa generate slug dari nama"}
+		return repository.SaveProductInput{}, nil, &bulkValidationErr{"URL Slug", "tidak bisa generate slug dari nama"}
 	}
 
 	priceStr := cleanNumber(row[3])
 	if priceStr == "" {
-		return repository.SaveProductInput{}, &bulkValidationErr{"Harga (Rp)", "harga wajib diisi"}
+		return repository.SaveProductInput{}, nil, &bulkValidationErr{"Harga (Rp)", "harga wajib diisi"}
 	}
 	priceRupiah, err := strconv.ParseFloat(priceStr, 64)
 	if err != nil || priceRupiah < 0 {
-		return repository.SaveProductInput{}, &bulkValidationErr{"Harga (Rp)", "harga harus angka non-negatif"}
+		return repository.SaveProductInput{}, nil, &bulkValidationErr{"Harga (Rp)", "harga harus angka non-negatif"}
 	}
 
 	stockStr := cleanNumber(row[4])
 	if stockStr == "" {
-		return repository.SaveProductInput{}, &bulkValidationErr{"Stok", "stok wajib diisi"}
+		return repository.SaveProductInput{}, nil, &bulkValidationErr{"Stok", "stok wajib diisi"}
 	}
 	stock, err := strconv.Atoi(stockStr)
 	if err != nil || stock < 0 {
-		return repository.SaveProductInput{}, &bulkValidationErr{"Stok", "stok harus bilangan bulat ≥ 0"}
+		return repository.SaveProductInput{}, nil, &bulkValidationErr{"Stok", "stok harus bilangan bulat ≥ 0"}
 	}
 
 	status := strings.TrimSpace(strings.ToLower(row[5]))
@@ -336,7 +367,7 @@ func parseBulkRow(row []string) (repository.SaveProductInput, *bulkValidationErr
 		status = "active"
 	}
 	if status != "active" && status != "inactive" && status != "sold_out" {
-		return repository.SaveProductInput{}, &bulkValidationErr{"Status", "status harus active, inactive, atau sold_out"}
+		return repository.SaveProductInput{}, nil, &bulkValidationErr{"Status", "status harus active, inactive, atau sold_out"}
 	}
 
 	weightG, _ := strconv.Atoi(cleanNumber(row[6]))
@@ -351,6 +382,11 @@ func parseBulkRow(row []string) (repository.SaveProductInput, *bulkValidationErr
 		}
 	}
 
+	variants, vErr := parseVariantsCell(row[15])
+	if vErr != nil {
+		return repository.SaveProductInput{}, nil, vErr
+	}
+
 	return repository.SaveProductInput{
 		Name:        name,
 		Slug:        slug,
@@ -363,7 +399,65 @@ func parseBulkRow(row []string) (repository.SaveProductInput, *bulkValidationErr
 		HeightCm:    heightCm,
 		Status:      status,
 		PhotoURLs:   photos,
-	}, nil
+	}, variants, nil
+}
+
+// parseVariantsCell turns "S:85000:5;M:85000:10;L:90000:8:KP-L" into
+// VariantInput rows. Empty/blank cell returns nil (no variants).
+func parseVariantsCell(raw string) ([]repository.VariantInput, *bulkValidationErr) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	entries := strings.Split(raw, ";")
+	out := make([]repository.VariantInput, 0, len(entries))
+	seen := map[string]bool{}
+	for idx, e := range entries {
+		e = strings.TrimSpace(e)
+		if e == "" {
+			continue
+		}
+		parts := strings.Split(e, ":")
+		if len(parts) < 3 {
+			return nil, &bulkValidationErr{"Varian",
+				fmt.Sprintf("entri %d ('%s') harus minimal 'Nama:Harga:Stok'", idx+1, e)}
+		}
+		vname := strings.TrimSpace(parts[0])
+		if vname == "" {
+			return nil, &bulkValidationErr{"Varian",
+				fmt.Sprintf("entri %d: nama varian kosong", idx+1)}
+		}
+		if seen[strings.ToLower(vname)] {
+			return nil, &bulkValidationErr{"Varian",
+				fmt.Sprintf("nama varian '%s' duplikat", vname)}
+		}
+		seen[strings.ToLower(vname)] = true
+
+		priceStr := cleanNumber(parts[1])
+		priceRp, err := strconv.ParseFloat(priceStr, 64)
+		if err != nil || priceRp < 0 {
+			return nil, &bulkValidationErr{"Varian",
+				fmt.Sprintf("entri '%s': harga harus angka non-negatif", vname)}
+		}
+		stockStr := cleanNumber(parts[2])
+		stk, err := strconv.Atoi(stockStr)
+		if err != nil || stk < 0 {
+			return nil, &bulkValidationErr{"Varian",
+				fmt.Sprintf("entri '%s': stok harus bilangan bulat ≥ 0", vname)}
+		}
+		sku := ""
+		if len(parts) >= 4 {
+			sku = strings.TrimSpace(parts[3])
+		}
+		out = append(out, repository.VariantInput{
+			Name:       vname,
+			SKU:        sku,
+			PriceCents: int64(priceRp * 100),
+			Stock:      stk,
+			SortOrder:  idx,
+		})
+	}
+	return out, nil
 }
 
 // cleanNumber strips common Indonesian formatting (Rp, dots, commas, spaces).
