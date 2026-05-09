@@ -51,8 +51,10 @@ export function CategoriesManager() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      // Closing `adding` unmounts the form, so calling .reset() after this
+      // line crashes ("Cannot read properties of null"). Unmount alone is
+      // enough to clear the field; next open re-mounts a fresh form.
       setAdding(false);
-      e.currentTarget.reset();
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Gagal");
