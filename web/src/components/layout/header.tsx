@@ -1,8 +1,8 @@
 import Link from "next/link";
+import { LayoutDashboard } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Container } from "@/components/layout/container";
 import { Avatar } from "@/components/ui/avatar";
-import { LogoutButton } from "@/components/auth/logout-button";
 import type { Me } from "@/lib/auth-types";
 
 type HeaderProps = {
@@ -56,9 +56,24 @@ export function Header({ me, variant = "marketing" }: HeaderProps) {
             )}
 
             {me ? (
-              <div className="flex items-center gap-3">
-                <UserChip me={me} />
-                <LogoutButton />
+              <div className="flex items-center gap-2">
+                <Link href="/dasbor">
+                  <Button size="sm">
+                    <LayoutDashboard className="size-4" aria-hidden />
+                    Buka Dasbor
+                  </Button>
+                </Link>
+                <Link
+                  href="/dasbor"
+                  className="hidden items-center sm:inline-flex"
+                  aria-label={`Masuk ke dasbor sebagai ${me.name || me.email}`}
+                >
+                  <Avatar
+                    src={me.picture_url}
+                    name={me.name || me.email}
+                    size="sm"
+                  />
+                </Link>
               </div>
             ) : (
               <div className="flex items-center gap-2">
@@ -79,13 +94,3 @@ export function Header({ me, variant = "marketing" }: HeaderProps) {
   );
 }
 
-function UserChip({ me }: { me: Me }) {
-  return (
-    <div className="flex items-center gap-2">
-      <Avatar src={me.picture_url} name={me.name || me.email} />
-      <span className="hidden text-sm font-medium text-neutral-700 sm:inline">
-        {me.name?.split(" ")[0] || me.email}
-      </span>
-    </div>
-  );
-}
