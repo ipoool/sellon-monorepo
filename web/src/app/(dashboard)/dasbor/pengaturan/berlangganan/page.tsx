@@ -121,10 +121,10 @@ export default async function BerlanggananPage() {
               </p>
               <ul className="mt-3 flex flex-col gap-1.5 text-sm text-neutral-700">
                 {[
-                  "Maks 30 produk",
-                  "Maks 50 order/bulan",
-                  "Laporan 7 hari",
-                  "Watermark SellOn di halaman toko",
+                  "Sampai 30 produk",
+                  "Pembayaran QRIS",
+                  "1 staf admin",
+                  "Laporan dasar",
                 ].map((b) => (
                   <li key={b} className="flex items-center gap-1.5">
                     <Check
@@ -149,12 +149,11 @@ export default async function BerlanggananPage() {
               </p>
               <ul className="mt-3 flex flex-col gap-1.5 text-sm text-neutral-700">
                 {[
-                  "Produk & varian tak terbatas",
-                  "Order tak terbatas",
-                  "Bulk upload via Excel",
-                  "Laporan & insight 90 hari",
-                  "Promo + kupon diskon",
-                  "Tanpa watermark di halaman toko",
+                  "Produk tanpa batas",
+                  "Otomasi WhatsApp",
+                  "5 staf admin",
+                  "Integrasi kurir",
+                  "Laporan lengkap",
                 ].map((b) => (
                   <li key={b} className="flex items-center gap-1.5">
                     <Check

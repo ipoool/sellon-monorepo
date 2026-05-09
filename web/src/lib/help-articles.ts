@@ -820,26 +820,36 @@ export const helpArticles: HelpArticle[] = [
       "Limit dan watermark di tier Gratis vs full access di Pro.",
     readingTime: "2 menit",
     body: [
-      { type: "h2", text: "Tier Gratis" },
+      { type: "h2", text: "Tier Gratis (Rp 0/bulan)" },
       {
         type: "ul",
         items: [
-          "Maks 30 produk aktif.",
-          "Maks 50 order/bulan.",
-          "Laporan & insight 7 hari.",
-          "Watermark 'SellOn' di halaman toko publik.",
+          "Sampai 30 produk.",
+          "Pembayaran QRIS.",
+          "1 staf admin.",
+          "Laporan dasar.",
         ],
       },
-      { type: "h2", text: "Tier Pro" },
+      { type: "h2", text: "Tier Pro (Rp 99.000/bulan)" },
       {
         type: "ul",
         items: [
-          "Produk & varian tak terbatas.",
-          "Order tak terbatas.",
-          "Bulk upload via Excel.",
-          "Laporan & insight 90 hari.",
-          "Promo + kupon diskon.",
-          "Tanpa watermark di halaman toko.",
+          "Produk tanpa batas.",
+          "Otomasi WhatsApp.",
+          "5 staf admin.",
+          "Integrasi kurir.",
+          "Laporan lengkap.",
+        ],
+      },
+      { type: "h2", text: "Tier Bisnis (Rp 299.000/bulan)" },
+      {
+        type: "ul",
+        items: [
+          "Semua fitur Pro.",
+          "Multi-cabang.",
+          "Staf tanpa batas.",
+          "API & webhook.",
+          "Priority support.",
         ],
       },
       {

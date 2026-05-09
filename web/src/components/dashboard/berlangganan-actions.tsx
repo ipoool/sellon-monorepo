@@ -234,11 +234,11 @@ export function BerlanggananActions({ subscription }: Props) {
             </div>
             <ul className="mt-3 flex flex-col gap-1.5 text-xs text-neutral-700">
               {[
-                "Produk & varian tak terbatas",
-                "Bulk upload via Excel",
-                "Laporan & insight 90 hari",
-                "Promo + kupon diskon",
-                "Tanpa watermark di halaman toko",
+                "Produk tanpa batas",
+                "Otomasi WhatsApp",
+                "5 staf admin",
+                "Integrasi kurir",
+                "Laporan lengkap",
               ].map((b) => (
                 <li key={b} className="flex items-center gap-1.5">
                   <Check className="size-3.5 text-brand-600" aria-hidden />

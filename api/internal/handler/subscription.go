@@ -25,7 +25,8 @@ func NewSubscriptionHandler(subs *repository.SubscriptionRepo, stores *repositor
 
 // Pricing source-of-truth lives here for now. When automated billing
 // arrives, move this into the DB so plan changes don't require a deploy.
-const proPriceCentsPerMonth = 49_000_00 // Rp 49.000 per month
+// Must match the Pro tier on the landing page (web/src/components/home/pricing.tsx).
+const proPriceCentsPerMonth = 99_000_00 // Rp 99.000 per month (= "Rp 99rb")
 
 type subscriptionDTO struct {
 	Plan               string  `json:"plan"`
