@@ -248,8 +248,8 @@ export default async function TentangPage() {
           </Container>
         </Section>
 
-        {/* Team */}
-        <Section>
+        {/* Team — hidden until real team profiles are ready */}
+        {/* <Section>
           <Container>
             <div className="mx-auto max-w-2xl text-center">
               <p className="text-sm font-medium text-brand-600">Tim</p>
@@ -278,7 +278,7 @@ export default async function TentangPage() {
               ))}
             </div>
           </Container>
-        </Section>
+        </Section> */}
 
         {/* CTA */}
         <Section tight>
