@@ -14,13 +14,14 @@ import (
 )
 
 type SubscriptionHandler struct {
-	subs   *repository.SubscriptionRepo
-	stores *repository.StoreRepo
-	logger *slog.Logger
+	subs     *repository.SubscriptionRepo
+	stores   *repository.StoreRepo
+	products *repository.ProductRepo
+	logger   *slog.Logger
 }
 
-func NewSubscriptionHandler(subs *repository.SubscriptionRepo, stores *repository.StoreRepo, logger *slog.Logger) *SubscriptionHandler {
-	return &SubscriptionHandler{subs: subs, stores: stores, logger: logger}
+func NewSubscriptionHandler(subs *repository.SubscriptionRepo, stores *repository.StoreRepo, products *repository.ProductRepo, logger *slog.Logger) *SubscriptionHandler {
+	return &SubscriptionHandler{subs: subs, stores: stores, products: products, logger: logger}
 }
 
 // Pricing source-of-truth. Must match landing page tiers
@@ -42,15 +43,21 @@ func priceForPlan(plan string) int64 {
 	}
 }
 
+type quotaUsage struct {
+	Used  int `json:"used"`
+	Limit int `json:"limit"` // -1 = unlimited
+}
+
 type subscriptionDTO struct {
-	Plan               string  `json:"plan"`
-	Status             string  `json:"status"`
-	CurrentPeriodStart *string `json:"current_period_start"`
-	CurrentPeriodEnd   *string `json:"current_period_end"`
-	CancelledAt        *string `json:"cancelled_at"`
-	DaysRemaining      int     `json:"days_remaining"`
-	ProPriceCents      int64   `json:"pro_price_cents"`
-	BisnisPriceCents   int64   `json:"bisnis_price_cents"`
+	Plan               string                `json:"plan"`
+	Status             string                `json:"status"`
+	CurrentPeriodStart *string               `json:"current_period_start"`
+	CurrentPeriodEnd   *string               `json:"current_period_end"`
+	CancelledAt        *string               `json:"cancelled_at"`
+	DaysRemaining      int                   `json:"days_remaining"`
+	ProPriceCents      int64                 `json:"pro_price_cents"`
+	BisnisPriceCents   int64                 `json:"bisnis_price_cents"`
+	Quotas             map[string]quotaUsage `json:"quotas"`
 }
 
 type invoiceDTO struct {
@@ -142,8 +149,15 @@ func (h *SubscriptionHandler) Get(w http.ResponseWriter, r *http.Request) {
 	for _, inv := range invoices {
 		out = append(out, toInvoiceDTO(inv))
 	}
+
+	dto := toSubDTO(sub)
+	productCount, _ := h.products.CountAll(r.Context(), store.ID)
+	dto.Quotas = map[string]quotaUsage{
+		"products": {Used: productCount, Limit: productLimitForPlan(sub.Plan)},
+	}
+
 	response.JSON(w, http.StatusOK, map[string]any{
-		"subscription": toSubDTO(sub),
+		"subscription": dto,
 		"invoices":     out,
 	})
 }

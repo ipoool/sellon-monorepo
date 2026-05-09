@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { Plus, Package, FileSpreadsheet } from "lucide-react";
+import { Plus, Package, FileSpreadsheet, Crown } from "lucide-react";
 
 import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,8 @@ import { ProductRowActions } from "@/components/dashboard/product-row-actions";
 import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import { formatRupiah, formatDateID } from "@/lib/format";
-import type { Product, Store } from "@/lib/types";
+import { cn } from "@/lib/utils";
+import type { Product, Store, Subscription } from "@/lib/types";
 
 export const metadata = { title: "Produk — SellOn" };
 
@@ -37,13 +38,23 @@ export default async function ProdukListPage({
   if (status) params.set("status", status);
   const qs = params.toString() ? `?${params.toString()}` : "";
 
-  const [data, storeRes] = await Promise.all([
+  const [data, storeRes, subRes] = await Promise.all([
     serverApi<{ products: Product[]; total: number }>(`/api/v1/products${qs}`),
     serverApi<{ store: Store | null }>("/api/v1/store"),
+    serverApi<{ subscription: Subscription }>("/api/v1/subscription"),
   ]);
   const products = data?.products ?? [];
   const total = data?.total ?? 0;
   const storeSlug = storeRes?.store?.slug ?? "";
+  const sub = subRes?.subscription;
+  const productQuota = sub?.quotas?.products;
+  const isCapped = !!productQuota && productQuota.limit > 0;
+  const quotaUsedPct = isCapped
+    ? Math.min(100, (productQuota.used / productQuota.limit) * 100)
+    : 0;
+  const quotaFull = isCapped && productQuota.used >= productQuota.limit;
+  const quotaWarn =
+    isCapped && !quotaFull && productQuota.used >= productQuota.limit * 0.8;
 
   return (
     <DashboardShell
@@ -52,21 +63,95 @@ export default async function ProdukListPage({
       pageSubtitle={`${total} produk di katalog`}
       actions={
         <>
-          <Link href="/dasbor/produk/bulk-upload">
-            <Button size="sm" variant="outline">
-              <FileSpreadsheet className="size-4" aria-hidden />
-              Upload Massal
-            </Button>
-          </Link>
-          <Link href="/dasbor/produk/baru">
-            <Button size="sm">
-              <Plus className="size-4" aria-hidden />
-              Tambah Produk
-            </Button>
-          </Link>
+          {quotaFull ? (
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled
+                title="Limit tier Gratis tercapai"
+              >
+                <FileSpreadsheet className="size-4" aria-hidden />
+                Upload Massal
+              </Button>
+              <Button
+                size="sm"
+                disabled
+                title="Limit tier Gratis tercapai"
+              >
+                <Plus className="size-4" aria-hidden />
+                Tambah Produk
+              </Button>
+            </>
+          ) : (
+            <>
+              <Link href="/dasbor/produk/bulk-upload">
+                <Button size="sm" variant="outline">
+                  <FileSpreadsheet className="size-4" aria-hidden />
+                  Upload Massal
+                </Button>
+              </Link>
+              <Link href="/dasbor/produk/baru">
+                <Button size="sm">
+                  <Plus className="size-4" aria-hidden />
+                  Tambah Produk
+                </Button>
+              </Link>
+            </>
+          )}
         </>
       }
     >
+      {/* Quota indicator (Free tier only) */}
+      {isCapped && (
+        <div
+          className={cn(
+            "mb-5 flex flex-col gap-2 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between",
+            quotaFull
+              ? "border-danger/40 bg-danger/5"
+              : quotaWarn
+                ? "border-warning/40 bg-warning/10"
+                : "border-neutral-200 bg-neutral-50",
+          )}
+        >
+          <div className="flex flex-1 flex-col gap-1.5">
+            <div className="flex items-baseline justify-between gap-3">
+              <p className="text-sm font-medium text-neutral-900">
+                Kuota produk tier Gratis
+              </p>
+              <p className="text-xs font-medium text-neutral-700">
+                {productQuota.used} / {productQuota.limit}
+              </p>
+            </div>
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-white">
+              <div
+                className={cn(
+                  "h-full rounded-full transition-all",
+                  quotaFull
+                    ? "bg-danger"
+                    : quotaWarn
+                      ? "bg-warning"
+                      : "bg-brand-500",
+                )}
+                style={{ width: `${quotaUsedPct}%` }}
+              />
+            </div>
+            {quotaFull && (
+              <p className="text-xs font-medium text-danger">
+                Limit tercapai. Tambah / duplikat / bulk upload produk akan
+                ditolak sampai upgrade.
+              </p>
+            )}
+          </div>
+          <Link href="/dasbor/pengaturan/berlangganan" className="sm:shrink-0">
+            <Button size="sm" variant={quotaFull ? "default" : "outline"}>
+              <Crown className="size-4" aria-hidden />
+              Upgrade ke Pro
+            </Button>
+          </Link>
+        </div>
+      )}
+
       {/* Filter bar */}
       <form className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center">
         <div className="flex-1">

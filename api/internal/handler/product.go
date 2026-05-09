@@ -21,15 +21,43 @@ type ProductHandler struct {
 	products *repository.ProductRepo
 	variants *repository.VariantRepo
 	stores   *repository.StoreRepo
+	subs     *repository.SubscriptionRepo
 	storage  *storage.SupabaseClient
 	logger   *slog.Logger
 }
 
-func NewProductHandler(products *repository.ProductRepo, variants *repository.VariantRepo, stores *repository.StoreRepo, storageCli *storage.SupabaseClient, logger *slog.Logger) *ProductHandler {
+func NewProductHandler(products *repository.ProductRepo, variants *repository.VariantRepo, stores *repository.StoreRepo, subs *repository.SubscriptionRepo, storageCli *storage.SupabaseClient, logger *slog.Logger) *ProductHandler {
 	return &ProductHandler{
 		products: products, variants: variants, stores: stores,
+		subs:    subs,
 		storage: storageCli, logger: logger,
 	}
+}
+
+// quotaCheck returns a non-nil error message string if creating `wantCount`
+// new products would exceed the seller's tier limit. Caller surfaces with
+// HTTP 402 Payment Required.
+func (h *ProductHandler) quotaCheck(r *http.Request, storeID uuid.UUID, wantCount int) (string, bool) {
+	sub, err := h.subs.GetOrCreate(r.Context(), storeID)
+	if err != nil {
+		// Fail-open on subscription read errors — better to allow the create
+		// than to brick the dashboard. Log handled by repo.
+		return "", true
+	}
+	limit := productLimitForPlan(sub.Plan)
+	if limit < 0 {
+		return "", true
+	}
+	current, err := h.products.CountAll(r.Context(), storeID)
+	if err != nil {
+		return "", true
+	}
+	if current+wantCount > limit {
+		return "Limit produk tier " + sub.Plan + " sudah tercapai (" +
+			strconv.Itoa(current) + "/" + strconv.Itoa(limit) +
+			"). Upgrade ke Pro untuk produk tanpa batas.", false
+	}
+	return "", true
 }
 
 type variantDTO struct {
@@ -249,6 +277,11 @@ func (h *ProductHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	saveIn.StoreID = store.ID
 
+	if msg, ok := h.quotaCheck(r, store.ID, 1); !ok {
+		response.Error(w, http.StatusPaymentRequired, msg)
+		return
+	}
+
 	p, err := h.products.Create(r.Context(), saveIn)
 	if err != nil {
 		h.logger.Error("create product", "err", err)
@@ -364,6 +397,10 @@ func (h *ProductHandler) Duplicate(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		response.Error(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	if msg, ok := h.quotaCheck(r, store.ID, 1); !ok {
+		response.Error(w, http.StatusPaymentRequired, msg)
 		return
 	}
 	src, err := h.products.FindByID(r.Context(), store.ID, id)

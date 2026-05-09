@@ -181,6 +181,8 @@ export type Promo = {
   created_at: string;
 };
 
+export type QuotaUsage = { used: number; limit: number };
+
 export type Subscription = {
   plan: "free" | "pro" | "bisnis";
   status: "active" | "cancelled" | "expired";
@@ -190,6 +192,7 @@ export type Subscription = {
   days_remaining: number;
   pro_price_cents: number;
   bisnis_price_cents: number;
+  quotas?: Record<string, QuotaUsage>;
 };
 
 export type SubscriptionInvoice = {

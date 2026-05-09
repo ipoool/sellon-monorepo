@@ -253,6 +253,14 @@ func (h *ProductHandler) BulkUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Refuse the whole upload up front if it would push the seller past
+	// their tier quota — partial saves leave the seller in a confusing
+	// half-state.
+	if msg, ok := h.quotaCheck(r, store.ID, len(dataRows)); !ok {
+		response.Error(w, http.StatusPaymentRequired, msg)
+		return
+	}
+
 	result := bulkResultDTO{TotalRows: len(dataRows)}
 	seenSlugs := map[string]int{} // slug -> row number where first seen
 

@@ -52,7 +52,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 
 	authHandler := handler.NewAuthHandler(users, googleVerifier, jwtSvc, logger, cfg.IsProd())
 	storeHandler := handler.NewStoreHandler(stores, logger)
-	productHandler := handler.NewProductHandler(products, variants, stores, storageClient, logger)
+	productHandler := handler.NewProductHandler(products, variants, stores, subscriptions, storageClient, logger)
 	uploadHandler := handler.NewUploadHandler(stores, storageClient, logger)
 	orderHandler := handler.NewOrderHandler(orders, stores, gateways, encryptor, midtransClient, logger)
 	customerHandler := handler.NewCustomerHandler(customers, orders, stores, logger)
@@ -65,7 +65,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	categoryHandler := handler.NewCategoryHandler(categories, stores, logger)
 	promoHandler := handler.NewPromoHandler(promos, stores, logger)
 	reportsHandler := handler.NewReportsHandler(stores, reports, logger)
-	subscriptionHandler := handler.NewSubscriptionHandler(subscriptions, stores, logger)
+	subscriptionHandler := handler.NewSubscriptionHandler(subscriptions, stores, products, logger)
 
 	requireAuth := middleware.RequireAuth(jwtSvc)
 

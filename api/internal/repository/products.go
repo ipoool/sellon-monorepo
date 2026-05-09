@@ -232,6 +232,17 @@ func (r *ProductRepo) Delete(ctx context.Context, storeID, id uuid.UUID) error {
 	return nil
 }
 
+// CountAll returns the total product count for a store (active + inactive +
+// sold_out). Used for tier-quota enforcement so sellers can't dodge the
+// limit by toggling status.
+func (r *ProductRepo) CountAll(ctx context.Context, storeID uuid.UUID) (int, error) {
+	var n int
+	err := r.pool.QueryRow(ctx,
+		"SELECT COUNT(*) FROM products WHERE store_id = $1", storeID,
+	).Scan(&n)
+	return n, err
+}
+
 // CountByStatus returns map of status → count for a store. Used on dasbor home.
 func (r *ProductRepo) CountByStatus(ctx context.Context, storeID uuid.UUID) (map[string]int, error) {
 	rows, err := r.pool.Query(ctx,
