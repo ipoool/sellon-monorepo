@@ -20,6 +20,11 @@ import { Footer } from "@/components/layout/footer";
 import { Section } from "@/components/layout/section";
 import { Badge } from "@/components/ui/badge";
 import { getMe } from "@/lib/server-auth";
+import {
+  helpCategories,
+  articlesByCategory,
+  type HelpCategorySlug,
+} from "@/lib/help-articles";
 
 export const metadata: Metadata = {
   title: "Pusat Bantuan — SellOn",
@@ -27,81 +32,14 @@ export const metadata: Metadata = {
     "Jawaban atas pertanyaan umum, panduan langkah demi langkah, dan cara menghubungi tim support SellOn.",
 };
 
-type Category = {
-  icon: LucideIcon;
-  title: string;
-  count: number;
-  articles: string[];
+const iconBySlug: Record<HelpCategorySlug, LucideIcon> = {
+  memulai: Rocket,
+  "produk-katalog": Package,
+  pesanan: ShoppingCart,
+  pembayaran: CreditCard,
+  "akun-pengaturan": Settings,
+  berlangganan: Headphones,
 };
-
-const categories: Category[] = [
-  {
-    icon: Rocket,
-    title: "Memulai",
-    count: 8,
-    articles: [
-      "Cara daftar akun SellOn",
-      "Setup toko pertamamu dalam 5 menit",
-      "Cara menghubungkan akun Midtrans/Xendit",
-      "Membuat link katalog WhatsApp",
-    ],
-  },
-  {
-    icon: Package,
-    title: "Produk & Katalog",
-    count: 12,
-    articles: [
-      "Upload produk dengan foto bagus",
-      "Mengatur stok dan varian",
-      "Tips menulis deskripsi produk yang menjual",
-      "Membuat kategori dan tag",
-    ],
-  },
-  {
-    icon: ShoppingCart,
-    title: "Pesanan",
-    count: 10,
-    articles: [
-      "Konfirmasi dan proses pesanan",
-      "Mengirim resi ke pembeli",
-      "Membatalkan dan refund pesanan",
-      "Mengelola retur dan komplain",
-    ],
-  },
-  {
-    icon: CreditCard,
-    title: "Pembayaran",
-    count: 7,
-    articles: [
-      "Cara kerja QRIS di SellOn",
-      "Settlement dan jadwal pencairan",
-      "Memahami fee QRIS",
-      "Mengubah rekening tujuan",
-    ],
-  },
-  {
-    icon: Settings,
-    title: "Akun & Pengaturan",
-    count: 6,
-    articles: [
-      "Menambah staf admin",
-      "Mengubah profil toko",
-      "Notifikasi via WhatsApp & email",
-      "Menghapus akun",
-    ],
-  },
-  {
-    icon: Headphones,
-    title: "Berlangganan",
-    count: 5,
-    articles: [
-      "Upgrade dari Gratis ke Pro",
-      "Membatalkan langganan",
-      "Faktur dan riwayat pembayaran",
-      "Mode read-only setelah berhenti",
-    ],
-  },
-];
 
 export default async function BantuanPage() {
   const me = await getMe();
@@ -157,39 +95,53 @@ export default async function BantuanPage() {
         <Section>
           <Container>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {categories.map(({ icon: Icon, title, count, articles }) => (
-                <div
-                  key={title}
-                  className="group flex flex-col gap-4 rounded-xl border border-neutral-200 bg-white p-6 shadow-card transition-all hover:-translate-y-0.5 hover:shadow-elevated"
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex size-10 items-center justify-center rounded-lg bg-brand-50 text-brand-600 transition-colors group-hover:bg-brand-100">
-                      <Icon className="size-5" strokeWidth={2} aria-hidden />
+              {helpCategories.map(({ slug, title }) => {
+                const Icon = iconBySlug[slug];
+                const articles = articlesByCategory(slug);
+                return (
+                  <div
+                    key={slug}
+                    className="group flex flex-col gap-4 rounded-xl border border-neutral-200 bg-white p-6 shadow-card transition-all hover:-translate-y-0.5 hover:shadow-elevated"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex size-10 items-center justify-center rounded-lg bg-brand-50 text-brand-600 transition-colors group-hover:bg-brand-100">
+                        <Icon className="size-5" strokeWidth={2} aria-hidden />
+                      </div>
+                      <span className="text-xs font-medium text-neutral-500">
+                        {articles.length} artikel
+                      </span>
                     </div>
-                    <span className="text-xs font-medium text-neutral-500">
-                      {count} artikel
-                    </span>
-                  </div>
 
-                  <div>
-                    <h2 className="font-semibold text-neutral-900">{title}</h2>
-                    <ul className="mt-3 flex flex-col gap-1.5 text-sm">
-                      {articles.map((a) => (
-                        <li key={a}>
-                          <span className="cursor-not-allowed text-neutral-600 hover:text-neutral-400">
-                            · {a}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
+                    <div>
+                      <h2 className="font-semibold text-neutral-900">
+                        {title}
+                      </h2>
+                      <ul className="mt-3 flex flex-col gap-1.5 text-sm">
+                        {articles.map((a) => (
+                          <li key={a.slug}>
+                            <Link
+                              href={`/bantuan/${a.slug}`}
+                              className="text-neutral-600 transition-colors hover:text-brand-700"
+                            >
+                              · {a.title}
+                            </Link>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
 
-                  <span className="mt-auto inline-flex items-center gap-1 text-sm font-medium text-brand-600">
-                    Lihat semua
-                    <ArrowRight className="size-3.5" aria-hidden />
-                  </span>
-                </div>
-              ))}
+                    {articles[0] && (
+                      <Link
+                        href={`/bantuan/${articles[0].slug}`}
+                        className="mt-auto inline-flex items-center gap-1 text-sm font-medium text-brand-600 hover:text-brand-700"
+                      >
+                        Mulai baca
+                        <ArrowRight className="size-3.5" aria-hidden />
+                      </Link>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </Container>
         </Section>
