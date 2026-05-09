@@ -27,6 +27,8 @@ type StorefrontStore = {
   name: string;
   description: string;
   logo_url: string;
+  banner_url: string;
+  tagline: string;
   category: string;
   city: string;
   whatsapp_number: string;
@@ -45,6 +47,7 @@ type StorefrontProduct = {
   price_cents: number;
   stock: number;
   photo_urls: string[];
+  is_featured: boolean;
 };
 
 type StorefrontCategory = { id: string; name: string };
@@ -135,14 +138,48 @@ export default async function StorefrontPage({
 
   return (
     <div className="min-h-svh bg-neutral-50">
-      <header className="border-b border-neutral-200 bg-white">
+      {store.banner_url && (
+        <div className="relative h-44 w-full overflow-hidden bg-neutral-100 sm:h-56 lg:h-64">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={store.banner_url}
+            alt={`Banner ${store.name}`}
+            className="size-full object-cover"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-black/0 to-black/0" />
+          {store.tagline && (
+            <Container>
+              <p className="absolute inset-x-0 bottom-4 mx-auto max-w-3xl px-6 font-display text-lg font-medium text-white drop-shadow sm:bottom-6 sm:text-xl">
+                {store.tagline}
+              </p>
+            </Container>
+          )}
+        </div>
+      )}
+
+      <header
+        className={
+          "border-b border-neutral-200 bg-white" +
+          (store.banner_url ? "" : "")
+        }
+      >
         <Container>
-          <div className="flex flex-col gap-5 py-8 sm:flex-row sm:items-center sm:gap-6">
+          <div
+            className={
+              "flex flex-col gap-5 py-8 sm:flex-row sm:items-center sm:gap-6" +
+              (store.banner_url ? " sm:-mt-10" : "")
+            }
+          >
             <Avatar
               src={store.logo_url}
               name={store.name}
               size="lg"
-              className="size-16 text-xl"
+              className={
+                "size-16 text-xl" +
+                (store.banner_url
+                  ? " ring-4 ring-white shadow-card"
+                  : "")
+              }
             />
             <div className="flex-1">
               <div className="flex flex-wrap items-center gap-2">
@@ -157,6 +194,11 @@ export default async function StorefrontPage({
                   <Badge variant="warning">Tutup Sekarang</Badge>
                 )}
               </div>
+              {store.tagline && !store.banner_url && (
+                <p className="mt-1 text-sm font-medium text-brand-700">
+                  {store.tagline}
+                </p>
+              )}
               {store.description && (
                 <p className="mt-2 text-sm leading-relaxed text-neutral-600">
                   {store.description}

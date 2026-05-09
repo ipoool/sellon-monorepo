@@ -8,6 +8,8 @@ export type Store = {
   name: string;
   description: string;
   logo_url: string;
+  banner_url: string;
+  tagline: string;
   category: string;
   city: string;
   whatsapp_number: string;
@@ -58,6 +60,7 @@ export type Product = {
   status: "active" | "inactive" | "sold_out";
   photo_urls: string[];
   has_variants: boolean;
+  is_featured: boolean;
   variants?: Variant[];
   created_at: string;
 };

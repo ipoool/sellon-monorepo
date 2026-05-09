@@ -28,6 +28,7 @@ type Product struct {
 	Status            string
 	PhotoURLs         []string
 	HasVariants       bool
+	IsFeatured        bool
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 }
@@ -44,14 +45,15 @@ var ErrProductNotFound = errors.New("product not found")
 
 const productColumns = `id, store_id, category_id, name, slug, description, price_cents, stock,
 	low_stock_threshold, weight_g, length_cm, width_cm, height_cm,
-	status, photo_urls, has_variants, created_at, updated_at`
+	status, photo_urls, has_variants, is_featured, created_at, updated_at`
 
 func scanProduct(row pgx.Row, p *Product) error {
 	return row.Scan(
 		&p.ID, &p.StoreID, &p.CategoryID, &p.Name, &p.Slug, &p.Description,
 		&p.PriceCents, &p.Stock, &p.LowStockThreshold,
 		&p.WeightG, &p.LengthCm, &p.WidthCm, &p.HeightCm,
-		&p.Status, &p.PhotoURLs, &p.HasVariants, &p.CreatedAt, &p.UpdatedAt,
+		&p.Status, &p.PhotoURLs, &p.HasVariants, &p.IsFeatured,
+		&p.CreatedAt, &p.UpdatedAt,
 	)
 }
 
@@ -111,12 +113,13 @@ func (r *ProductRepo) List(ctx context.Context, f ListProductsFilter) ([]Product
 }
 
 // ListActiveByStore returns active products for storefront display (public).
+// Featured products are surfaced first; rest fall back to recency.
 func (r *ProductRepo) ListActiveByStore(ctx context.Context, storeID uuid.UUID) ([]Product, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT `+productColumns+`
 		FROM products
 		WHERE store_id = $1 AND status = 'active'
-		ORDER BY created_at DESC
+		ORDER BY is_featured DESC, created_at DESC
 		LIMIT 200
 	`, storeID)
 	if err != nil {
@@ -173,20 +176,21 @@ type SaveProductInput struct {
 	HeightCm          int
 	Status            string
 	PhotoURLs         []string
+	IsFeatured        bool
 }
 
 func (r *ProductRepo) Create(ctx context.Context, in SaveProductInput) (*Product, error) {
 	q := `
 		INSERT INTO products (store_id, category_id, name, slug, description, price_cents, stock,
 		                     low_stock_threshold,
-		                     weight_g, length_cm, width_cm, height_cm, status, photo_urls)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+		                     weight_g, length_cm, width_cm, height_cm, status, photo_urls, is_featured)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 		RETURNING ` + productColumns
 	var p Product
 	if err := scanProduct(r.pool.QueryRow(ctx, q,
 		in.StoreID, in.CategoryID, in.Name, in.Slug, in.Description, in.PriceCents, in.Stock,
 		in.LowStockThreshold,
-		in.WeightG, in.LengthCm, in.WidthCm, in.HeightCm, in.Status, in.PhotoURLs,
+		in.WeightG, in.LengthCm, in.WidthCm, in.HeightCm, in.Status, in.PhotoURLs, in.IsFeatured,
 	), &p); err != nil {
 		return nil, err
 	}
@@ -200,14 +204,14 @@ func (r *ProductRepo) Update(ctx context.Context, id uuid.UUID, in SaveProductIn
 		    name = $4, slug = $5, description = $6, price_cents = $7, stock = $8,
 		    low_stock_threshold = $9,
 		    weight_g = $10, length_cm = $11, width_cm = $12, height_cm = $13,
-		    status = $14, photo_urls = $15, updated_at = now()
+		    status = $14, photo_urls = $15, is_featured = $16, updated_at = now()
 		WHERE id = $1 AND store_id = $2
 		RETURNING ` + productColumns
 	var p Product
 	if err := scanProduct(r.pool.QueryRow(ctx, q,
 		id, in.StoreID, in.CategoryID, in.Name, in.Slug, in.Description, in.PriceCents, in.Stock,
 		in.LowStockThreshold,
-		in.WeightG, in.LengthCm, in.WidthCm, in.HeightCm, in.Status, in.PhotoURLs,
+		in.WeightG, in.LengthCm, in.WidthCm, in.HeightCm, in.Status, in.PhotoURLs, in.IsFeatured,
 	), &p); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrProductNotFound

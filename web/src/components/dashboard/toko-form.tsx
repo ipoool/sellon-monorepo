@@ -55,6 +55,8 @@ export function TokoForm({ initial }: { initial: Store | null }) {
       slug: String(fd.get("slug") ?? ""),
       description: String(fd.get("description") ?? ""),
       logo_url: String(fd.get("logo_url") ?? ""),
+      banner_url: String(fd.get("banner_url") ?? ""),
+      tagline: String(fd.get("tagline") ?? ""),
       category: String(fd.get("category") ?? ""),
       city: String(fd.get("city") ?? ""),
       whatsapp_number: String(fd.get("whatsapp_number") ?? ""),
@@ -170,6 +172,33 @@ export function TokoForm({ initial }: { initial: Store | null }) {
             <p className="text-xs text-neutral-500">
               Tempel link gambar (PNG/JPG, kotak ~512×512). Upload langsung akan
               hadir saat integrasi storage selesai.
+            </p>
+          </div>
+          <div className="flex flex-col gap-1.5 sm:col-span-2">
+            <Label htmlFor="tagline">Tagline</Label>
+            <Input
+              id="tagline"
+              name="tagline"
+              maxLength={120}
+              defaultValue={initial?.tagline ?? ""}
+              placeholder="Mis: Kopi Sangrai Lokal Terbaik di Jogja"
+            />
+            <p className="text-xs text-neutral-500">
+              Satu kalimat catchy. Muncul di banner halaman toko.
+            </p>
+          </div>
+          <div className="flex flex-col gap-1.5 sm:col-span-2">
+            <Label htmlFor="banner_url">URL Banner</Label>
+            <Input
+              id="banner_url"
+              name="banner_url"
+              type="url"
+              defaultValue={initial?.banner_url ?? ""}
+              placeholder="https://example.com/banner.jpg"
+            />
+            <p className="text-xs text-neutral-500">
+              Gambar landscape (~1600×500) untuk hero halaman toko. Kosongkan jika
+              tidak pakai.
             </p>
           </div>
         </div>

@@ -28,6 +28,8 @@ type storeDTO struct {
 	Name           string          `json:"name"`
 	Description    string          `json:"description"`
 	LogoURL        string          `json:"logo_url"`
+	BannerURL      string          `json:"banner_url"`
+	Tagline        string          `json:"tagline"`
 	Category       string          `json:"category"`
 	City           string          `json:"city"`
 	WhatsAppNumber string          `json:"whatsapp_number"`
@@ -44,7 +46,8 @@ func toStoreDTO(s *repository.Store) storeDTO {
 	}
 	return storeDTO{
 		ID: s.ID.String(), Slug: s.Slug, Name: s.Name, Description: s.Description,
-		LogoURL: s.LogoURL, Category: s.Category, City: s.City,
+		LogoURL: s.LogoURL, BannerURL: s.BannerURL, Tagline: s.Tagline,
+		Category: s.Category, City: s.City,
 		WhatsAppNumber: s.WhatsAppNumber, Instagram: s.Instagram, TikTok: s.TikTok,
 		OpenHours: openHours, IsOpen: s.IsOpen,
 	}
@@ -110,6 +113,8 @@ type updateStoreReq struct {
 	Name           string          `json:"name"`
 	Description    string          `json:"description"`
 	LogoURL        string          `json:"logo_url"`
+	BannerURL      string          `json:"banner_url"`
+	Tagline        string          `json:"tagline"`
 	Category       string          `json:"category"`
 	City           string          `json:"city"`
 	WhatsAppNumber string          `json:"whatsapp_number"`
@@ -144,6 +149,7 @@ func (h *StoreHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	store, err := h.stores.Update(r.Context(), existing.ID, repository.UpdateStoreInput{
 		Name: strings.TrimSpace(req.Name), Description: req.Description, LogoURL: req.LogoURL,
+		BannerURL: req.BannerURL, Tagline: strings.TrimSpace(req.Tagline),
 		Category: req.Category, City: req.City,
 		WhatsAppNumber: req.WhatsAppNumber, Instagram: req.Instagram, TikTok: req.TikTok,
 		OpenHoursJSON: openHours,

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Search, Package } from "lucide-react";
+import { Search, Package, Star } from "lucide-react";
 
 import { formatRupiah } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -16,6 +16,7 @@ type StorefrontProduct = {
   price_cents: number;
   stock: number;
   photo_urls: string[];
+  is_featured: boolean;
 };
 
 type StorefrontCategory = {
@@ -53,6 +54,16 @@ export function StorefrontCatalog({ storeSlug, products, categories }: Props) {
       return (p.name + " " + p.description).toLowerCase().includes(q);
     });
   }, [query, products, activeCategoryId]);
+
+  const featured = useMemo(
+    () => products.filter((p) => p.is_featured),
+    [products],
+  );
+  const showFeaturedSection =
+    !query && !activeCategoryId && featured.length > 0;
+  const gridProducts = showFeaturedSection
+    ? filtered.filter((p) => !p.is_featured)
+    : filtered;
 
   return (
     <>
@@ -139,42 +150,90 @@ export function StorefrontCatalog({ storeSlug, products, categories }: Props) {
           </p>
         </div>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {filtered.map((p) => (
-            <Link
-              key={p.id}
-              href={`/${storeSlug}/produk/${p.slug}`}
-              className="group flex flex-col overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-card transition-all hover:-translate-y-0.5 hover:shadow-elevated"
-            >
-              <div className="aspect-square overflow-hidden bg-neutral-100">
-                {p.photo_urls[0] ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={p.photo_urls[0]}
-                    alt={p.name}
-                    className="size-full object-cover transition-transform group-hover:scale-105"
-                  />
-                ) : (
-                  <div className="flex size-full items-center justify-center text-neutral-400">
-                    <Package className="size-10" aria-hidden />
-                  </div>
-                )}
+        <>
+          {showFeaturedSection && (
+            <section className="mb-8">
+              <div className="mb-3 flex items-center gap-2">
+                <Star
+                  className="size-4 fill-warning text-warning"
+                  aria-hidden
+                />
+                <h3 className="font-display text-lg font-semibold text-neutral-900">
+                  Produk Unggulan
+                </h3>
               </div>
-              <div className="flex flex-col gap-1 p-4">
-                <p className="line-clamp-2 text-sm font-medium text-neutral-900">
-                  {p.name}
-                </p>
-                <p className="font-display text-base font-semibold text-neutral-900">
-                  {formatRupiah(p.price_cents)}
-                </p>
-                <p className="mt-1 text-xs text-neutral-500">
-                  {p.stock > 0 ? `Stok: ${p.stock}` : "Stok habis"}
-                </p>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {featured.map((p) => (
+                  <ProductCard key={p.id} p={p} storeSlug={storeSlug} featured />
+                ))}
               </div>
-            </Link>
-          ))}
-        </div>
+            </section>
+          )}
+
+          {gridProducts.length > 0 && (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {gridProducts.map((p) => (
+                <ProductCard key={p.id} p={p} storeSlug={storeSlug} />
+              ))}
+            </div>
+          )}
+        </>
       )}
     </>
+  );
+}
+
+function ProductCard({
+  p,
+  storeSlug,
+  featured = false,
+}: {
+  p: StorefrontProduct;
+  storeSlug: string;
+  featured?: boolean;
+}) {
+  return (
+    <Link
+      href={`/${storeSlug}/produk/${p.slug}`}
+      className={cn(
+        "group flex flex-col overflow-hidden rounded-xl border bg-white shadow-card transition-all hover:-translate-y-0.5 hover:shadow-elevated",
+        featured ? "border-warning/30" : "border-neutral-200",
+      )}
+    >
+      <div className="relative aspect-square overflow-hidden bg-neutral-100">
+        {p.photo_urls[0] ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={p.photo_urls[0]}
+            alt={p.name}
+            className="size-full object-cover transition-transform group-hover:scale-105"
+          />
+        ) : (
+          <div className="flex size-full items-center justify-center text-neutral-400">
+            <Package className="size-10" aria-hidden />
+          </div>
+        )}
+        {p.is_featured && !featured && (
+          <span
+            className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-warning/90 px-2 py-0.5 text-[10px] font-semibold text-white"
+            aria-label="Unggulan"
+          >
+            <Star className="size-3 fill-current" aria-hidden />
+            Unggulan
+          </span>
+        )}
+      </div>
+      <div className="flex flex-col gap-1 p-4">
+        <p className="line-clamp-2 text-sm font-medium text-neutral-900">
+          {p.name}
+        </p>
+        <p className="font-display text-base font-semibold text-neutral-900">
+          {formatRupiah(p.price_cents)}
+        </p>
+        <p className="mt-1 text-xs text-neutral-500">
+          {p.stock > 0 ? `Stok: ${p.stock}` : "Stok habis"}
+        </p>
+      </div>
+    </Link>
   );
 }

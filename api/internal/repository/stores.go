@@ -17,6 +17,8 @@ type Store struct {
 	Name           string
 	Description    string
 	LogoURL        string
+	BannerURL      string
+	Tagline        string
 	Category       string
 	City           string
 	WhatsAppNumber string
@@ -38,12 +40,13 @@ func NewStoreRepo(pool *pgxpool.Pool) *StoreRepo {
 
 var ErrStoreNotFound = errors.New("store not found")
 
-const storeColumns = `id, owner_id, slug, name, description, logo_url, category, city,
-	whatsapp_number, instagram, tiktok, open_hours, is_open, created_at, updated_at`
+const storeColumns = `id, owner_id, slug, name, description, logo_url, banner_url, tagline,
+	category, city, whatsapp_number, instagram, tiktok, open_hours, is_open, created_at, updated_at`
 
 func scanStore(row pgx.Row, s *Store) error {
 	return row.Scan(
 		&s.ID, &s.OwnerID, &s.Slug, &s.Name, &s.Description, &s.LogoURL,
+		&s.BannerURL, &s.Tagline,
 		&s.Category, &s.City, &s.WhatsAppNumber, &s.Instagram, &s.TikTok,
 		&s.OpenHours, &s.IsOpen, &s.CreatedAt, &s.UpdatedAt,
 	)
@@ -97,6 +100,8 @@ type UpdateStoreInput struct {
 	Name           string
 	Description    string
 	LogoURL        string
+	BannerURL      string
+	Tagline        string
 	Category       string
 	City           string
 	WhatsAppNumber string
@@ -109,16 +114,20 @@ type UpdateStoreInput struct {
 func (r *StoreRepo) Update(ctx context.Context, id uuid.UUID, in UpdateStoreInput) (*Store, error) {
 	q := `
 		UPDATE stores
-		SET name = $2, description = $3, logo_url = $4, category = $5, city = $6,
-		    whatsapp_number = $7, instagram = $8, tiktok = $9,
-		    open_hours = COALESCE($10::jsonb, open_hours),
-		    is_open = $11,
+		SET name = $2, description = $3, logo_url = $4,
+		    banner_url = $5, tagline = $6,
+		    category = $7, city = $8,
+		    whatsapp_number = $9, instagram = $10, tiktok = $11,
+		    open_hours = COALESCE($12::jsonb, open_hours),
+		    is_open = $13,
 		    updated_at = now()
 		WHERE id = $1
 		RETURNING ` + storeColumns
 	var s Store
 	if err := scanStore(r.pool.QueryRow(ctx, q, id,
-		in.Name, in.Description, in.LogoURL, in.Category, in.City,
+		in.Name, in.Description, in.LogoURL,
+		in.BannerURL, in.Tagline,
+		in.Category, in.City,
 		in.WhatsAppNumber, in.Instagram, in.TikTok,
 		in.OpenHoursJSON, in.IsOpen,
 	), &s); err != nil {

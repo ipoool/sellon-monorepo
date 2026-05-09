@@ -45,6 +45,8 @@ type publicStoreDTO struct {
 	Name           string          `json:"name"`
 	Description    string          `json:"description"`
 	LogoURL        string          `json:"logo_url"`
+	BannerURL      string          `json:"banner_url"`
+	Tagline        string          `json:"tagline"`
 	Category       string          `json:"category"`
 	City           string          `json:"city"`
 	WhatsAppNumber string          `json:"whatsapp_number"`
@@ -63,6 +65,7 @@ type publicProductDTO struct {
 	PriceCents  int64    `json:"price_cents"`
 	Stock       int      `json:"stock"`
 	PhotoURLs   []string `json:"photo_urls"`
+	IsFeatured  bool     `json:"is_featured"`
 }
 
 type publicCategoryDTO struct {
@@ -84,7 +87,8 @@ func toPublicStore(s *repository.Store) publicStoreDTO {
 	}
 	return publicStoreDTO{
 		ID: s.ID.String(), Slug: s.Slug, Name: s.Name, Description: s.Description,
-		LogoURL: s.LogoURL, Category: s.Category, City: s.City,
+		LogoURL: s.LogoURL, BannerURL: s.BannerURL, Tagline: s.Tagline,
+		Category: s.Category, City: s.City,
 		WhatsAppNumber: s.WhatsAppNumber, Instagram: s.Instagram, TikTok: s.TikTok,
 		OpenHours: openHours, IsOpen: s.IsOpen,
 	}
@@ -99,6 +103,7 @@ func toPublicProduct(p *repository.Product) publicProductDTO {
 		ID: p.ID.String(), CategoryID: categoryID,
 		Name: p.Name, Slug: p.Slug, Description: p.Description,
 		PriceCents: p.PriceCents, Stock: p.Stock, PhotoURLs: p.PhotoURLs,
+		IsFeatured: p.IsFeatured,
 	}
 }
 

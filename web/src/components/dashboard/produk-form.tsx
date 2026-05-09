@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Trash2, Save, ArrowLeft, Plus, X, Image as ImageIcon, Layers } from "lucide-react";
+import { Trash2, Save, ArrowLeft, Plus, X, Image as ImageIcon, Layers, Star } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import type { Category, Product, Variant } from "@/lib/types";
 
 type VariantDraft = {
@@ -103,6 +104,7 @@ export function ProdukForm({ initial }: Props) {
       height_cm: Math.max(0, Number(fd.get("height_cm") ?? 0)),
       status: String(fd.get("status") ?? "active"),
       photo_urls: photoUrls,
+      is_featured: fd.get("is_featured") === "on",
       variants: cleanVariants,
     };
 
@@ -267,6 +269,24 @@ export function ProdukForm({ initial }: Props) {
             </Select>
           </div>
         </div>
+
+        <label className="mt-5 flex cursor-pointer items-start justify-between gap-4 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2.5">
+          <div className="flex items-start gap-2.5">
+            <Star className="mt-0.5 size-4 text-warning" aria-hidden />
+            <div>
+              <p className="text-sm font-medium text-neutral-900">
+                Tampilkan sebagai produk unggulan
+              </p>
+              <p className="text-xs text-neutral-600">
+                Produk unggulan muncul di section khusus paling atas halaman toko.
+              </p>
+            </div>
+          </div>
+          <Switch
+            name="is_featured"
+            defaultChecked={initial?.is_featured ?? false}
+          />
+        </label>
       </Card>
 
       <Card>

@@ -52,6 +52,7 @@ type productDTO struct {
 	Status            string       `json:"status"`
 	PhotoURLs         []string     `json:"photo_urls"`
 	HasVariants       bool         `json:"has_variants"`
+	IsFeatured        bool         `json:"is_featured"`
 	Variants          []variantDTO `json:"variants"`
 	CreatedAt         string       `json:"created_at"`
 }
@@ -75,8 +76,9 @@ func toProductDTO(p *repository.Product, variants []repository.Variant) productD
 		LowStockThreshold: p.LowStockThreshold,
 		WeightG: p.WeightG, LengthCm: p.LengthCm, WidthCm: p.WidthCm, HeightCm: p.HeightCm,
 		Status: p.Status, PhotoURLs: p.PhotoURLs, HasVariants: p.HasVariants,
-		Variants:  vDTOs,
-		CreatedAt: p.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		IsFeatured: p.IsFeatured,
+		Variants:   vDTOs,
+		CreatedAt:  p.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 }
 
@@ -169,6 +171,7 @@ type productInput struct {
 	HeightCm          int            `json:"height_cm"`
 	Status            string         `json:"status"`
 	PhotoURLs         []string       `json:"photo_urls"`
+	IsFeatured        bool           `json:"is_featured"`
 	Variants          []variantInput `json:"variants"`
 }
 
@@ -218,6 +221,7 @@ func (in productInput) sanitize() (repository.SaveProductInput, error) {
 		LowStockThreshold: in.LowStockThreshold,
 		WeightG: in.WeightG, LengthCm: in.LengthCm, WidthCm: in.WidthCm, HeightCm: in.HeightCm,
 		Status: in.Status, PhotoURLs: in.PhotoURLs,
+		IsFeatured: in.IsFeatured,
 	}, nil
 }
 
