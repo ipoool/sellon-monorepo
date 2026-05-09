@@ -14,18 +14,20 @@
    ========================================================================== */
 
 @theme {
-  /* === BRAND COLOR (ubah hue 160 ke value lain untuk shift seluruh brand) === */
-  --color-brand-50:  oklch(0.97 0.02 160);
-  --color-brand-100: oklch(0.93 0.05 160);
-  --color-brand-200: oklch(0.86 0.09 160);
-  --color-brand-300: oklch(0.76 0.13 160);
-  --color-brand-400: oklch(0.66 0.16 160);
-  --color-brand-500: oklch(0.58 0.17 160);  /* primary */
-  --color-brand-600: oklch(0.50 0.16 160);
-  --color-brand-700: oklch(0.42 0.14 160);
-  --color-brand-800: oklch(0.34 0.11 160);
-  --color-brand-900: oklch(0.27 0.08 160);
-  --color-brand-950: oklch(0.20 0.05 160);
+  /* === BRAND COLOR ===
+     Anchor: shade 500 = #3CC152 (vibrant green). Skala lain di-scale
+     dari nilai itu — ubah hue (145) untuk shift seluruh brand. */
+  --color-brand-50:  oklch(0.97 0.025 145);
+  --color-brand-100: oklch(0.94 0.06 145);
+  --color-brand-200: oklch(0.88 0.11 145);
+  --color-brand-300: oklch(0.81 0.15 145);
+  --color-brand-400: oklch(0.76 0.17 145);
+  --color-brand-500: oklch(0.71 0.18 145);  /* primary — ≈ #3CC152 */
+  --color-brand-600: oklch(0.61 0.17 145);
+  --color-brand-700: oklch(0.51 0.15 145);
+  --color-brand-800: oklch(0.41 0.12 145);
+  --color-brand-900: oklch(0.31 0.09 145);
+  --color-brand-950: oklch(0.21 0.06 145);
 
   /* === NEUTRAL (slightly cool gray) === */
   --color-neutral-0:   oklch(1.00 0 0);
@@ -117,49 +119,51 @@
    hijau (160) → oranye (30) → grayscale (chroma 0) → kembali hijau.
    @property dipakai supaya browser bisa menginterpolasi nilai oklch()
    secara halus (tanpa @property, transisinya jadi step-by-step). */
-@property --color-brand-50  { syntax: "<color>"; inherits: true; initial-value: oklch(0.97 0.02 160); }
-@property --color-brand-100 { syntax: "<color>"; inherits: true; initial-value: oklch(0.93 0.05 160); }
-@property --color-brand-200 { syntax: "<color>"; inherits: true; initial-value: oklch(0.86 0.09 160); }
-@property --color-brand-300 { syntax: "<color>"; inherits: true; initial-value: oklch(0.76 0.13 160); }
-@property --color-brand-400 { syntax: "<color>"; inherits: true; initial-value: oklch(0.66 0.16 160); }
-@property --color-brand-500 { syntax: "<color>"; inherits: true; initial-value: oklch(0.58 0.17 160); }
-@property --color-brand-600 { syntax: "<color>"; inherits: true; initial-value: oklch(0.50 0.16 160); }
-@property --color-brand-700 { syntax: "<color>"; inherits: true; initial-value: oklch(0.42 0.14 160); }
-@property --color-brand-800 { syntax: "<color>"; inherits: true; initial-value: oklch(0.34 0.11 160); }
-@property --color-brand-900 { syntax: "<color>"; inherits: true; initial-value: oklch(0.27 0.08 160); }
-@property --color-brand-950 { syntax: "<color>"; inherits: true; initial-value: oklch(0.20 0.05 160); }
+@property --color-brand-50  { syntax: "<color>"; inherits: true; initial-value: oklch(0.97 0.025 145); }
+@property --color-brand-100 { syntax: "<color>"; inherits: true; initial-value: oklch(0.94 0.06 145); }
+@property --color-brand-200 { syntax: "<color>"; inherits: true; initial-value: oklch(0.88 0.11 145); }
+@property --color-brand-300 { syntax: "<color>"; inherits: true; initial-value: oklch(0.81 0.15 145); }
+@property --color-brand-400 { syntax: "<color>"; inherits: true; initial-value: oklch(0.76 0.17 145); }
+@property --color-brand-500 { syntax: "<color>"; inherits: true; initial-value: oklch(0.71 0.18 145); }
+@property --color-brand-600 { syntax: "<color>"; inherits: true; initial-value: oklch(0.61 0.17 145); }
+@property --color-brand-700 { syntax: "<color>"; inherits: true; initial-value: oklch(0.51 0.15 145); }
+@property --color-brand-800 { syntax: "<color>"; inherits: true; initial-value: oklch(0.41 0.12 145); }
+@property --color-brand-900 { syntax: "<color>"; inherits: true; initial-value: oklch(0.31 0.09 145); }
+@property --color-brand-950 { syntax: "<color>"; inherits: true; initial-value: oklch(0.21 0.06 145); }
 
+/* Landing brand cycle:
+   - Green stop  ≈ #3CC152 (oklch hue 145, our resting brand)
+   - Orange stop ≈ #FF6532 (oklch hue 35)
+   - Black stop  → grayscale, lightness ditarik turun untuk shade 400+
+*/
 @keyframes landing-brand-cycle {
   0%, 100% {
-    --color-brand-50:  oklch(0.97 0.02 160);
-    --color-brand-100: oklch(0.93 0.05 160);
-    --color-brand-200: oklch(0.86 0.09 160);
-    --color-brand-300: oklch(0.76 0.13 160);
-    --color-brand-400: oklch(0.66 0.16 160);
-    --color-brand-500: oklch(0.58 0.17 160);
-    --color-brand-600: oklch(0.50 0.16 160);
-    --color-brand-700: oklch(0.42 0.14 160);
-    --color-brand-800: oklch(0.34 0.11 160);
-    --color-brand-900: oklch(0.27 0.08 160);
-    --color-brand-950: oklch(0.20 0.05 160);
+    --color-brand-50:  oklch(0.97 0.025 145);
+    --color-brand-100: oklch(0.94 0.06 145);
+    --color-brand-200: oklch(0.88 0.11 145);
+    --color-brand-300: oklch(0.81 0.15 145);
+    --color-brand-400: oklch(0.76 0.17 145);
+    --color-brand-500: oklch(0.71 0.18 145);
+    --color-brand-600: oklch(0.61 0.17 145);
+    --color-brand-700: oklch(0.51 0.15 145);
+    --color-brand-800: oklch(0.41 0.12 145);
+    --color-brand-900: oklch(0.31 0.09 145);
+    --color-brand-950: oklch(0.21 0.06 145);
   }
   33% {
-    --color-brand-50:  oklch(0.97 0.02 30);
-    --color-brand-100: oklch(0.93 0.05 30);
-    --color-brand-200: oklch(0.86 0.09 30);
-    --color-brand-300: oklch(0.76 0.13 30);
-    --color-brand-400: oklch(0.66 0.16 30);
-    --color-brand-500: oklch(0.58 0.17 30);
-    --color-brand-600: oklch(0.50 0.16 30);
-    --color-brand-700: oklch(0.42 0.14 30);
-    --color-brand-800: oklch(0.34 0.11 30);
-    --color-brand-900: oklch(0.27 0.08 30);
-    --color-brand-950: oklch(0.20 0.05 30);
+    --color-brand-50:  oklch(0.97 0.025 35);
+    --color-brand-100: oklch(0.94 0.06 35);
+    --color-brand-200: oklch(0.88 0.11 35);
+    --color-brand-300: oklch(0.81 0.16 35);
+    --color-brand-400: oklch(0.75 0.19 35);
+    --color-brand-500: oklch(0.70 0.20 35);
+    --color-brand-600: oklch(0.60 0.19 35);
+    --color-brand-700: oklch(0.50 0.16 35);
+    --color-brand-800: oklch(0.40 0.13 35);
+    --color-brand-900: oklch(0.30 0.10 35);
+    --color-brand-950: oklch(0.20 0.07 35);
   }
   66% {
-    /* Grayscale-ke-hitam: chroma 0 supaya hue tidak berpengaruh,
-       lightness diturunkan supaya nuansa "hitam" terasa untuk
-       shade 400 ke atas. */
     --color-brand-50:  oklch(0.97 0 0);
     --color-brand-100: oklch(0.92 0 0);
     --color-brand-200: oklch(0.84 0 0);
