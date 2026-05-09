@@ -34,7 +34,7 @@ const primaryNav: NavItem[] = [
   { label: "Pesanan", href: "/dasbor/pesanan", icon: ShoppingBag },
   { label: "Produk", href: "/dasbor/produk", icon: Package },
   { label: "Pelanggan", href: "/dasbor/pelanggan", icon: Users },
-  { label: "Promo", href: "/dasbor/promo", icon: Megaphone, disabled: true },
+  { label: "Promo", href: "/dasbor/promo", icon: Megaphone },
 ];
 
 const secondaryNav: NavItem[] = [

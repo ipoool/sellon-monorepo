@@ -157,6 +157,22 @@ export type CustomerOrderSummary = {
   created_at: string;
 };
 
+export type PromoType = "percent" | "fixed" | "free_shipping";
+
+export type Promo = {
+  id: string;
+  code: string;
+  type: PromoType;
+  value: number;
+  min_purchase_cents: number;
+  max_usage: number;
+  used_count: number;
+  starts_at: string | null;
+  expires_at: string | null;
+  is_active: boolean;
+  created_at: string;
+};
+
 export type DashboardStats = {
   has_store: boolean;
   orders_today_count: number;

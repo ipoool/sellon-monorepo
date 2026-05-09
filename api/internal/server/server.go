@@ -35,6 +35,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	bankAccounts := repository.NewBankAccountRepo(pool)
 	categories := repository.NewCategoryRepo(pool)
 	variants := repository.NewVariantRepo(pool)
+	promos := repository.NewPromoRepo(pool)
 
 	googleVerifier := auth.NewGoogleVerifier(cfg.GoogleClientID)
 	jwtSvc := auth.NewJWTService(cfg.JWTSecret, cfg.JWTTTL)
@@ -57,6 +58,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	webhookHandler := handler.NewWebhookHandler(gateways, orders, encryptor, logger)
 	bankAccountHandler := handler.NewBankAccountHandler(bankAccounts, stores, logger)
 	categoryHandler := handler.NewCategoryHandler(categories, stores, logger)
+	promoHandler := handler.NewPromoHandler(promos, stores, logger)
 
 	requireAuth := middleware.RequireAuth(jwtSvc)
 
@@ -156,6 +158,14 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 				r.Post("/", categoryHandler.Create)
 				r.Put("/{id}", categoryHandler.Update)
 				r.Delete("/{id}", categoryHandler.Delete)
+			})
+
+			r.Route("/promos", func(r chi.Router) {
+				r.Get("/", promoHandler.List)
+				r.Post("/", promoHandler.Create)
+				r.Get("/{id}", promoHandler.Get)
+				r.Put("/{id}", promoHandler.Update)
+				r.Delete("/{id}", promoHandler.Delete)
 			})
 		})
 	})
