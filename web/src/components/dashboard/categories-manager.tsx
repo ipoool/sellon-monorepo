@@ -1,7 +1,20 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
-import { Plus, Edit2, Trash2, Check, Tag, X } from "lucide-react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
+import {
+  Plus,
+  Edit2,
+  Trash2,
+  Check,
+  Tag,
+  X,
+  AlertTriangle,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,6 +31,33 @@ export function CategoriesManager() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<Category | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const deleteDialogRef = useRef<HTMLDialogElement>(null);
+
+  // Sync the dialog's open state with React state. We bind native cancel
+  // (Esc) + backdrop click to close the dialog cleanly.
+  useEffect(() => {
+    const dialog = deleteDialogRef.current;
+    if (!dialog) return;
+    if (pendingDelete && !dialog.open) dialog.showModal();
+    if (!pendingDelete && dialog.open) dialog.close();
+  }, [pendingDelete]);
+
+  useEffect(() => {
+    const dialog = deleteDialogRef.current;
+    if (!dialog) return;
+    const onClick = (e: MouseEvent) => {
+      if (e.target === dialog) setPendingDelete(null);
+    };
+    const onCancel = () => setPendingDelete(null);
+    dialog.addEventListener("click", onClick);
+    dialog.addEventListener("cancel", onCancel);
+    return () => {
+      dialog.removeEventListener("click", onClick);
+      dialog.removeEventListener("cancel", onCancel);
+    };
+  }, []);
 
   async function refresh() {
     try {
@@ -83,18 +123,28 @@ export function CategoriesManager() {
     }
   }
 
-  async function onDelete(c: Category) {
-    if (!confirm(`Hapus kategori "${c.name}"? Produk yang ada di kategori ini akan jadi tanpa kategori.`)) return;
+  function onDelete(c: Category) {
+    setDeleteError(null);
+    setPendingDelete(c);
+  }
+
+  async function confirmDelete() {
+    if (!pendingDelete) return;
     setBusy(true);
+    setDeleteError(null);
     try {
-      const res = await fetch(`${apiBase}/api/v1/categories/${c.id}`, {
-        method: "DELETE",
-        credentials: "include",
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const res = await fetch(
+        `${apiBase}/api/v1/categories/${pendingDelete.id}`,
+        { method: "DELETE", credentials: "include" },
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      setPendingDelete(null);
       await refresh();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Gagal");
+      setDeleteError(err instanceof Error ? err.message : "Gagal hapus");
     } finally {
       setBusy(false);
     }
@@ -202,6 +252,57 @@ export function CategoriesManager() {
           ))}
         </ul>
       )}
+
+      {/* Delete confirmation dialog */}
+      <dialog
+        ref={deleteDialogRef}
+        aria-labelledby="delete-cat-title"
+        className="fixed left-1/2 top-1/2 m-0 w-[min(420px,95vw)] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-neutral-200 bg-white p-0 shadow-popout backdrop:bg-neutral-900/40 backdrop:backdrop-blur-sm"
+      >
+        <div className="flex items-start gap-3 p-5">
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-danger/10 text-danger">
+            <AlertTriangle className="size-5" aria-hidden />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2
+              id="delete-cat-title"
+              className="font-display text-base font-semibold text-neutral-900"
+            >
+              Hapus kategori &ldquo;{pendingDelete?.name}&rdquo;?
+            </h2>
+            <p className="mt-1.5 text-sm text-neutral-600">
+              Produk yang ada di kategori ini akan jadi tanpa kategori. Aksi
+              ini tidak bisa di-undo.
+            </p>
+            {deleteError && (
+              <p className="mt-2 text-sm font-medium text-danger">
+                {deleteError}
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t border-neutral-200 bg-neutral-50 px-5 py-3">
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={() => setPendingDelete(null)}
+            disabled={busy}
+          >
+            Batal
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="destructive"
+            onClick={confirmDelete}
+            disabled={busy}
+          >
+            <Trash2 className="size-4" aria-hidden />
+            {busy ? "Menghapus…" : "Hapus"}
+          </Button>
+        </div>
+      </dialog>
     </Card>
   );
 }
