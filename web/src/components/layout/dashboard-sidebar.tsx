@@ -95,32 +95,44 @@ export function DashboardSidebar({ me, open, onClose }: Props) {
         aria-label="Menu navigasi"
         className="fixed inset-y-0 left-0 m-0 h-svh max-h-none w-72 max-w-[85vw] border-r border-neutral-200 bg-white p-0 shadow-popout backdrop:bg-neutral-900/40 backdrop:backdrop-blur-sm lg:hidden"
       >
-        <div className="relative flex h-full flex-col">
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Tutup menu"
-            className="absolute right-3 top-3 z-10 flex size-8 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900"
-          >
-            <X className="size-5" aria-hidden />
-          </button>
-          <SidebarContent me={me} pathname={pathname} />
+        <div className="flex h-full flex-col">
+          <SidebarContent me={me} pathname={pathname} onClose={onClose} />
         </div>
       </dialog>
     </>
   );
 }
 
-function SidebarContent({ me, pathname }: { me: Me; pathname: string }) {
+function SidebarContent({
+  me,
+  pathname,
+  onClose,
+}: {
+  me: Me;
+  pathname: string;
+  onClose?: () => void;
+}) {
   return (
     <>
       <div className="flex h-16 items-center justify-between gap-3 border-b border-neutral-200 px-5">
-        <Link
-          href="/"
-          className="font-display text-lg font-semibold tracking-tight text-neutral-900"
-        >
-          SellOn
-        </Link>
+        <div className="flex min-w-0 items-center gap-2">
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Tutup menu"
+              className="-ml-2 flex size-8 shrink-0 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900"
+            >
+              <X className="size-5" aria-hidden />
+            </button>
+          )}
+          <Link
+            href="/"
+            className="font-display text-lg font-semibold tracking-tight text-neutral-900"
+          >
+            SellOn
+          </Link>
+        </div>
         <Badge variant="success">Aktif</Badge>
       </div>
 
