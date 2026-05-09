@@ -266,7 +266,7 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
             }
             target="_blank"
             rel="noopener noreferrer"
-            className="hidden text-sm font-medium text-brand-600 hover:text-brand-700 sm:inline-flex sm:items-center sm:gap-1"
+            className="hidden shrink-0 whitespace-nowrap text-sm font-medium text-brand-600 hover:text-brand-700 sm:inline-flex sm:items-center sm:gap-1"
           >
             Dapatkan API Key
             <ExternalLink className="size-3.5" aria-hidden />
