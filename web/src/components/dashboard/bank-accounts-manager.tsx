@@ -6,7 +6,6 @@ import { Plus, Edit2, Trash2, Check, Star, QrCode } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import type { BankAccount } from "@/lib/types";
 
@@ -98,7 +97,7 @@ export function BankAccountsManager() {
   }
 
   return (
-    <Card>
+    <section className="border-t border-neutral-200 pt-5">
       <div className="mb-4 flex items-start justify-between gap-3">
         <div>
           <h3 className="font-semibold text-neutral-900">
@@ -294,6 +293,6 @@ export function BankAccountsManager() {
           </div>
         </form>
       )}
-    </Card>
+    </section>
   );
 }

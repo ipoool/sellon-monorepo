@@ -9,7 +9,7 @@ export default async function PengaturanPembayaranPage() {
   const data = await serverApi<GatewayInfo>("/api/v1/payments/midtrans");
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-6">
       <PaymentForm initial={data} />
       <BankAccountsManager />
     </div>
