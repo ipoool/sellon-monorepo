@@ -112,6 +112,79 @@
   }
 }
 
+/* === LANDING BRAND CYCLE ===
+   Animasi warna brand di halaman landing. Hue OKLCH bergerak dari
+   hijau (160) → oranye (30) → grayscale (chroma 0) → kembali hijau.
+   @property dipakai supaya browser bisa menginterpolasi nilai oklch()
+   secara halus (tanpa @property, transisinya jadi step-by-step). */
+@property --color-brand-50  { syntax: "<color>"; inherits: true; initial-value: oklch(0.97 0.02 160); }
+@property --color-brand-100 { syntax: "<color>"; inherits: true; initial-value: oklch(0.93 0.05 160); }
+@property --color-brand-200 { syntax: "<color>"; inherits: true; initial-value: oklch(0.86 0.09 160); }
+@property --color-brand-300 { syntax: "<color>"; inherits: true; initial-value: oklch(0.76 0.13 160); }
+@property --color-brand-400 { syntax: "<color>"; inherits: true; initial-value: oklch(0.66 0.16 160); }
+@property --color-brand-500 { syntax: "<color>"; inherits: true; initial-value: oklch(0.58 0.17 160); }
+@property --color-brand-600 { syntax: "<color>"; inherits: true; initial-value: oklch(0.50 0.16 160); }
+@property --color-brand-700 { syntax: "<color>"; inherits: true; initial-value: oklch(0.42 0.14 160); }
+@property --color-brand-800 { syntax: "<color>"; inherits: true; initial-value: oklch(0.34 0.11 160); }
+@property --color-brand-900 { syntax: "<color>"; inherits: true; initial-value: oklch(0.27 0.08 160); }
+@property --color-brand-950 { syntax: "<color>"; inherits: true; initial-value: oklch(0.20 0.05 160); }
+
+@keyframes landing-brand-cycle {
+  0%, 100% {
+    --color-brand-50:  oklch(0.97 0.02 160);
+    --color-brand-100: oklch(0.93 0.05 160);
+    --color-brand-200: oklch(0.86 0.09 160);
+    --color-brand-300: oklch(0.76 0.13 160);
+    --color-brand-400: oklch(0.66 0.16 160);
+    --color-brand-500: oklch(0.58 0.17 160);
+    --color-brand-600: oklch(0.50 0.16 160);
+    --color-brand-700: oklch(0.42 0.14 160);
+    --color-brand-800: oklch(0.34 0.11 160);
+    --color-brand-900: oklch(0.27 0.08 160);
+    --color-brand-950: oklch(0.20 0.05 160);
+  }
+  33% {
+    --color-brand-50:  oklch(0.97 0.02 30);
+    --color-brand-100: oklch(0.93 0.05 30);
+    --color-brand-200: oklch(0.86 0.09 30);
+    --color-brand-300: oklch(0.76 0.13 30);
+    --color-brand-400: oklch(0.66 0.16 30);
+    --color-brand-500: oklch(0.58 0.17 30);
+    --color-brand-600: oklch(0.50 0.16 30);
+    --color-brand-700: oklch(0.42 0.14 30);
+    --color-brand-800: oklch(0.34 0.11 30);
+    --color-brand-900: oklch(0.27 0.08 30);
+    --color-brand-950: oklch(0.20 0.05 30);
+  }
+  66% {
+    /* Grayscale-ke-hitam: chroma 0 supaya hue tidak berpengaruh,
+       lightness diturunkan supaya nuansa "hitam" terasa untuk
+       shade 400 ke atas. */
+    --color-brand-50:  oklch(0.97 0 0);
+    --color-brand-100: oklch(0.92 0 0);
+    --color-brand-200: oklch(0.84 0 0);
+    --color-brand-300: oklch(0.70 0 0);
+    --color-brand-400: oklch(0.55 0 0);
+    --color-brand-500: oklch(0.30 0 0);
+    --color-brand-600: oklch(0.22 0 0);
+    --color-brand-700: oklch(0.16 0 0);
+    --color-brand-800: oklch(0.12 0 0);
+    --color-brand-900: oklch(0.08 0 0);
+    --color-brand-950: oklch(0.04 0 0);
+  }
+}
+
+.landing-brand-cycle {
+  animation: landing-brand-cycle 18s ease-in-out infinite;
+}
+
+/* Hormati preferensi pengguna yang minta sedikit gerakan. */
+@media (prefers-reduced-motion: reduce) {
+  .landing-brand-cycle {
+    animation: none;
+  }
+}
+
 /* === BASE STYLES === */
 @layer base {
   html {

@@ -14,7 +14,7 @@ export default async function Home() {
   const me = await getMe();
 
   return (
-    <>
+    <div className="landing-brand-cycle">
       <Header me={me} />
       <main>
         <Hero />
@@ -27,6 +27,6 @@ export default async function Home() {
         <CtaBanner />
       </main>
       <Footer />
-    </>
+    </div>
   );
 }
