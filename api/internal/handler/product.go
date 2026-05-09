@@ -408,7 +408,9 @@ func (h *ProductHandler) Duplicate(w http.ResponseWriter, r *http.Request) {
 		WidthCm:           src.WidthCm,
 		HeightCm:          src.HeightCm,
 		Status:            "inactive",
-		PhotoURLs:         append([]string(nil), src.PhotoURLs...),
+		// Force a non-nil slice so the NOT NULL photo_urls column accepts
+		// the INSERT even when the source had no photos.
+		PhotoURLs: append([]string{}, src.PhotoURLs...),
 		IsFeatured:        false,
 	}
 	created, err := h.products.Create(r.Context(), copyIn)
