@@ -26,7 +26,8 @@ export type HelpCategorySlug =
   | "produk-katalog"
   | "pesanan"
   | "pembayaran"
-  | "akun-pengaturan";
+  | "akun-pengaturan"
+  | "berlangganan";
 
 export type HelpCategory = {
   slug: HelpCategorySlug;
@@ -39,6 +40,7 @@ export const helpCategories: HelpCategory[] = [
   { slug: "pesanan", title: "Pesanan" },
   { slug: "pembayaran", title: "Pembayaran" },
   { slug: "akun-pengaturan", title: "Akun & Pengaturan" },
+  { slug: "berlangganan", title: "Berlangganan" },
 ];
 
 export const helpArticles: HelpArticle[] = [
@@ -714,6 +716,137 @@ export const helpArticles: HelpArticle[] = [
         type: "p",
         text:
           "MVP belum kirim notifikasi email/WhatsApp ke seller saat ada pesanan baru. Real-time notification ada di roadmap. Untuk sekarang, cek Dasbor → Pesanan secara berkala.",
+      },
+    ],
+  },
+  {
+    slug: "upgrade-ke-pro",
+    category: "berlangganan",
+    title: "Upgrade ke Pro",
+    excerpt:
+      "Buka semua fitur tanpa batasan + hapus watermark di halaman toko publik.",
+    readingTime: "2 menit",
+    body: [
+      {
+        type: "p",
+        text:
+          "Tier Pro menghapus batas produk, batas order/bulan, dan watermark SellOn di halaman toko publik. Saat ini pembayaran masih manual via transfer bank — automatic recurring akan datang di update mendatang.",
+      },
+      { type: "h2", text: "Cara upgrade" },
+      {
+        type: "ol",
+        items: [
+          "Pengaturan → Berlangganan → klik 'Upgrade ke Pro'.",
+          "Pilih durasi (1, 3, 6, atau 12 bulan).",
+          "Transfer ke rekening yang ditampilkan di dialog.",
+          "Klik 'Saya sudah transfer' (atau kirim bukti via WhatsApp ke tim support).",
+          "Tim akan aktifkan tier Pro dalam 1×24 jam setelah verifikasi.",
+        ],
+      },
+      {
+        type: "callout",
+        tone: "info",
+        text:
+          "Anda tetap bisa pakai SellOn selama proses verifikasi. Setelah aktif, tanggal expired ditampilkan di Pengaturan → Berlangganan.",
+      },
+    ],
+  },
+  {
+    slug: "membatalkan-langganan",
+    category: "berlangganan",
+    title: "Membatalkan langganan",
+    excerpt:
+      "Cancel kapan saja — akses Pro tetap aktif sampai akhir periode yang sudah dibayar.",
+    readingTime: "2 menit",
+    body: [
+      {
+        type: "p",
+        text:
+          "Karena pembayaran masih manual, membatalkan tidak menghentikan tagihan otomatis (tidak ada). Tombol 'Batalkan' menonaktifkan tier Pro saat periode habis — sampai itu, semua fitur Pro tetap aktif.",
+      },
+      { type: "h2", text: "Cara cancel" },
+      {
+        type: "ol",
+        items: [
+          "Pengaturan → Berlangganan → 'Batalkan langganan'.",
+          "Konfirmasi dialog. Status berubah ke 'Dibatalkan'.",
+          "Akses Pro tetap aktif sampai tanggal expired yang ditampilkan.",
+          "Setelah lewat, tier turun ke Gratis otomatis.",
+        ],
+      },
+      {
+        type: "callout",
+        tone: "info",
+        text:
+          "Berubah pikiran sebelum periode habis? Klik 'Aktifkan kembali' di halaman yang sama untuk membatalkan pembatalan.",
+      },
+    ],
+  },
+  {
+    slug: "riwayat-pembayaran",
+    category: "berlangganan",
+    title: "Riwayat pembayaran",
+    excerpt:
+      "Lihat semua transaksi langganan + status verifikasi di satu halaman.",
+    readingTime: "1 menit",
+    body: [
+      {
+        type: "p",
+        text:
+          "Setiap kali Anda klik 'Saya sudah transfer', sebuah baris invoice dibuat dengan status 'Menunggu verifikasi'. Setelah tim cek bukti transfer, status berubah ke 'Lunas'.",
+      },
+      { type: "h2", text: "Cara akses" },
+      {
+        type: "ol",
+        items: [
+          "Pengaturan → Berlangganan → scroll ke bagian 'Riwayat Pembayaran'.",
+          "List semua transaksi diurutkan dari yang terbaru.",
+          "Status: Menunggu verifikasi (kuning), Lunas (hijau), atau Gagal.",
+        ],
+      },
+      {
+        type: "callout",
+        tone: "info",
+        text:
+          "Butuh invoice PDF untuk reimbursement? Email halo@sellon.id dengan ID invoice — tim akan kirim file PDF resmi.",
+      },
+    ],
+  },
+  {
+    slug: "tier-pro-vs-gratis",
+    category: "berlangganan",
+    title: "Bedanya Pro vs Gratis",
+    excerpt:
+      "Limit dan watermark di tier Gratis vs full access di Pro.",
+    readingTime: "2 menit",
+    body: [
+      { type: "h2", text: "Tier Gratis" },
+      {
+        type: "ul",
+        items: [
+          "Maks 30 produk aktif.",
+          "Maks 50 order/bulan.",
+          "Laporan & insight 7 hari.",
+          "Watermark 'SellOn' di halaman toko publik.",
+        ],
+      },
+      { type: "h2", text: "Tier Pro" },
+      {
+        type: "ul",
+        items: [
+          "Produk & varian tak terbatas.",
+          "Order tak terbatas.",
+          "Bulk upload via Excel.",
+          "Laporan & insight 90 hari.",
+          "Promo + kupon diskon.",
+          "Tanpa watermark di halaman toko.",
+        ],
+      },
+      {
+        type: "callout",
+        tone: "info",
+        text:
+          "Limit di tier Gratis akan diaktifkan secara bertahap; sekarang banyak fitur Pro yang masih bisa diakses dari Gratis untuk dicoba.",
       },
     ],
   },

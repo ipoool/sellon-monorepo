@@ -181,6 +181,27 @@ export type Promo = {
   created_at: string;
 };
 
+export type Subscription = {
+  plan: "free" | "pro";
+  status: "active" | "cancelled" | "expired";
+  current_period_start: string | null;
+  current_period_end: string | null;
+  cancelled_at: string | null;
+  days_remaining: number;
+  pro_price_cents: number;
+};
+
+export type SubscriptionInvoice = {
+  id: string;
+  amount_cents: number;
+  status: "pending" | "paid" | "failed";
+  period_start: string | null;
+  period_end: string | null;
+  paid_at: string | null;
+  notes: string;
+  created_at: string;
+};
+
 export type DashboardStats = {
   has_store: boolean;
   orders_today_count: number;

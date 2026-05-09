@@ -38,6 +38,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	variants := repository.NewVariantRepo(pool)
 	promos := repository.NewPromoRepo(pool)
 	reports := repository.NewReportsRepo(pool)
+	subscriptions := repository.NewSubscriptionRepo(pool)
 
 	googleVerifier := auth.NewGoogleVerifier(cfg.GoogleClientID)
 	jwtSvc := auth.NewJWTService(cfg.JWTSecret, cfg.JWTTTL)
@@ -64,6 +65,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	categoryHandler := handler.NewCategoryHandler(categories, stores, logger)
 	promoHandler := handler.NewPromoHandler(promos, stores, logger)
 	reportsHandler := handler.NewReportsHandler(stores, reports, logger)
+	subscriptionHandler := handler.NewSubscriptionHandler(subscriptions, stores, logger)
 
 	requireAuth := middleware.RequireAuth(jwtSvc)
 
@@ -180,6 +182,13 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 
 			r.Route("/reports", func(r chi.Router) {
 				r.Get("/overview", reportsHandler.Overview)
+			})
+
+			r.Route("/subscription", func(r chi.Router) {
+				r.Get("/", subscriptionHandler.Get)
+				r.Post("/request-upgrade", subscriptionHandler.RequestUpgrade)
+				r.Post("/cancel", subscriptionHandler.Cancel)
+				r.Post("/resume", subscriptionHandler.Resume)
 			})
 		})
 	})
