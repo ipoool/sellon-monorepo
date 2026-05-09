@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { CityPicker } from "@/components/dashboard/city-picker";
 import { formatRupiah } from "@/lib/format";
 import { fillTemplate, waLink } from "@/lib/whatsapp";
 import { cn } from "@/lib/utils";
@@ -122,6 +123,7 @@ export function CheckoutForm({
   const [qty, setQty] = useState(1);
   const [variantId, setVariantId] = useState<string>("");
   const [city, setCity] = useState("");
+  const [cityID, setCityID] = useState("");
   const [shipping, setShipping] = useState<ShippingOption[]>([]);
   const [shippingLoading, setShippingLoading] = useState(false);
   const [pickedShipping, setPickedShipping] = useState<string>(""); // "code|service"
@@ -170,6 +172,7 @@ export function CheckoutForm({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           city: trimmed,
+          city_id: cityID,
           items: [{ product_id: product.id, quantity: qty }],
         }),
         signal: ctrl.signal,
@@ -187,7 +190,7 @@ export function CheckoutForm({
       ctrl.abort();
       clearTimeout(t);
     };
-  }, [city, qty, variantId, product.id, storeSlug]);
+  }, [city, cityID, qty, variantId, product.id, storeSlug]);
 
   const pickedOption = shipping.find(
     (o) => `${o.code}|${o.service}` === pickedShipping,
@@ -446,17 +449,18 @@ export function CheckoutForm({
             />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="customer_city">Kota / Kabupaten</Label>
-            <Input
-              id="customer_city"
-              value={city}
-              onChange={(e) => setCity(e.target.value)}
+            <CityPicker
+              label="Kota / Kabupaten *"
+              placeholder="Cari (mis. Yogyakarta)…"
+              selectedID={cityID}
+              selectedName={city}
+              onChange={(id, name) => {
+                setCityID(id);
+                setCity(name);
+              }}
+              description="Ongkir dihitung otomatis berdasarkan kota."
               disabled={disabled}
-              placeholder="Yogyakarta"
             />
-            <p className="text-xs text-neutral-500">
-              Ongkir akan dihitung otomatis berdasarkan kota.
-            </p>
           </div>
 
           {/* Shipping picker */}

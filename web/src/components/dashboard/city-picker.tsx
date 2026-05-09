@@ -44,6 +44,8 @@ export function CityPicker({
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // True when /cities/search returns 503 — degrades to plain text input.
+  const [noServer, setNoServer] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Re-sync the visible label whenever the parent provides a fresh
@@ -66,13 +68,18 @@ export function CityPicker({
       )
         .then(async (r) => {
           if (r.status === 503) {
-            setError(
-              "RajaOngkir belum dikonfigurasi server. Set RAJAONGKIR_API_KEY di .env.",
-            );
+            // Server has no API key — degrade to plain text input. The
+            // parent receives the typed value via the keystroke handler
+            // below.
+            setNoServer(true);
+            setOpen(false);
+            setError(null);
+            setResults([]);
             return;
           }
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
           const data = (await r.json()) as { cities: CityResult[] };
+          setNoServer(false);
           setError(null);
           setResults(data.cities ?? []);
         })
@@ -132,10 +139,14 @@ export function CityPicker({
         <Input
           value={query}
           onChange={(e) => {
-            setQuery(e.target.value);
-            setOpen(true);
+            const v = e.target.value;
+            setQuery(v);
+            // In degraded mode, propagate keystrokes as plain text so
+            // the parent's onChange still fires (id stays empty).
+            if (noServer) onChange("", v);
+            setOpen(!noServer);
           }}
-          onFocus={() => setOpen(true)}
+          onFocus={() => !noServer && setOpen(true)}
           placeholder={placeholder}
           disabled={disabled}
           className="pl-9 pr-9"
