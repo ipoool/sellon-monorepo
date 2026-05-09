@@ -427,6 +427,14 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 		Items:           items,
 	})
 	if err != nil {
+		// Concurrency: another buyer just bought the last unit between our
+		// pre-check and the decrement. Surface a friendly message so the
+		// buyer knows the issue is transient.
+		if errors.Is(err, repository.ErrStockInsufficient) {
+			response.Error(w, http.StatusConflict,
+				"stok barusan habis — silakan refresh dan coba lagi")
+			return
+		}
 		h.logger.Error("storefront create order", "err", err)
 		response.Error(w, http.StatusInternalServerError, "gagal membuat pesanan")
 		return

@@ -314,7 +314,13 @@ func (r *OrderRepo) Complete(ctx context.Context, storeID, id uuid.UUID) error {
 
 // Cancel transitions any non-final order -> cancelled with optional reason.
 func (r *OrderRepo) Cancel(ctx context.Context, storeID, id uuid.UUID, reason string) error {
-	tag, err := r.pool.Exec(ctx, `
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	tag, err := tx.Exec(ctx, `
 		UPDATE orders SET status = 'cancelled',
 		    cancellation_reason = $3,
 		    cancelled_at = now(),
@@ -327,7 +333,30 @@ func (r *OrderRepo) Cancel(ctx context.Context, storeID, id uuid.UUID, reason st
 	if tag.RowsAffected() == 0 {
 		return ErrInvalidTransition
 	}
-	return nil
+
+	// Restore stock for every line item — orders that get to "cancelled"
+	// should give the stock back so the seller can sell it again.
+	if _, err := tx.Exec(ctx, `
+		UPDATE products p
+		SET stock = p.stock + oi.quantity, updated_at = now()
+		FROM order_items oi
+		WHERE oi.order_id = $1
+		  AND oi.product_id = p.id
+		  AND oi.variant_id IS NULL
+	`, id); err != nil {
+		return fmt.Errorf("restore product stock: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE product_variants pv
+		SET stock = pv.stock + oi.quantity
+		FROM order_items oi
+		WHERE oi.order_id = $1
+		  AND oi.variant_id = pv.id
+	`, id); err != nil {
+		return fmt.Errorf("restore variant stock: %w", err)
+	}
+
+	return tx.Commit(ctx)
 }
 
 // FindByOrderNumber looks up an order by store + order_number (unique pair).
@@ -479,6 +508,35 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 	}
 
 	for _, it := range in.Items {
+		// Decrement stock atomically. The WHERE stock >= qty guard prevents
+		// overselling under concurrent checkouts — if rows-affected is 0 the
+		// item is out of stock and the whole order rolls back.
+		var rowsAffected int64
+		if it.VariantID != nil {
+			tag, err := tx.Exec(ctx, `
+				UPDATE product_variants
+				SET stock = stock - $2
+				WHERE id = $1 AND stock >= $2
+			`, *it.VariantID, it.Quantity)
+			if err != nil {
+				return nil, fmt.Errorf("decrement variant stock: %w", err)
+			}
+			rowsAffected = tag.RowsAffected()
+		} else {
+			tag, err := tx.Exec(ctx, `
+				UPDATE products
+				SET stock = stock - $2, updated_at = now()
+				WHERE id = $1 AND stock >= $2
+			`, it.ProductID, it.Quantity)
+			if err != nil {
+				return nil, fmt.Errorf("decrement product stock: %w", err)
+			}
+			rowsAffected = tag.RowsAffected()
+		}
+		if rowsAffected == 0 {
+			return nil, ErrStockInsufficient
+		}
+
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO order_items (order_id, product_id, variant_id, product_name, variant_name,
 			                         unit_price_cents, quantity, subtotal_cents)
@@ -496,6 +554,10 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 	}
 	return &o, nil
 }
+
+// ErrStockInsufficient is returned by Create when a concurrent order or
+// stock change has just made one of the requested items unavailable.
+var ErrStockInsufficient = errors.New("stok tidak cukup")
 
 func generateOrderNumber() string {
 	now := time.Now().UTC()
