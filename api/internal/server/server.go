@@ -123,6 +123,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 				r.Get("/{id}", productHandler.Get)
 				r.Put("/{id}", productHandler.Update)
 				r.Delete("/{id}", productHandler.Delete)
+				r.Post("/{id}/duplicate", productHandler.Duplicate)
 			})
 
 			r.Post("/uploads/image", uploadHandler.Image)

@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { ShareProductButton } from "@/components/dashboard/share-product-button";
+import { ProductRowActions } from "@/components/dashboard/product-row-actions";
 import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import { formatRupiah, formatDateID } from "@/lib/format";
@@ -172,7 +173,7 @@ export default async function ProdukListPage({
                     {formatDateID(p.created_at)}
                   </td>
                   <td className="px-5 py-3">
-                    <div className="flex items-center justify-end gap-2">
+                    <div className="flex items-center justify-end gap-1">
                       {storeSlug && (
                         <ShareProductButton
                           storeSlug={storeSlug}
@@ -180,12 +181,10 @@ export default async function ProdukListPage({
                           productName={p.name}
                         />
                       )}
-                      <Link
-                        href={`/dasbor/produk/${p.id}`}
-                        className="text-sm font-medium text-brand-600 hover:text-brand-700"
-                      >
-                        Edit
-                      </Link>
+                      <ProductRowActions
+                        productId={p.id}
+                        productName={p.name}
+                      />
                     </div>
                   </td>
                 </tr>

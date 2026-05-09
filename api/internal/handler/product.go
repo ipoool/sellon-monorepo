@@ -352,3 +352,96 @@ func (h *ProductHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+// POST /api/v1/products/{id}/duplicate — clone a product (incl. variants).
+// Name suffix: " (Copy)"; slug suffix: -copy / -copy-2 / -copy-3 to avoid
+// the unique (store_id, slug) constraint.
+func (h *ProductHandler) Duplicate(w http.ResponseWriter, r *http.Request) {
+	store, err := h.requireStore(r)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "toko belum dibuat")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	src, err := h.products.FindByID(r.Context(), store.ID, id)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "produk sumber tidak ditemukan")
+		return
+	}
+
+	// Find a free slug. Try "{slug}-copy", then "-copy-2", -copy-3, …
+	newSlug := src.Slug + "-copy"
+	for n := 2; ; n++ {
+		_, err := h.products.FindBySlug(r.Context(), store.ID, newSlug)
+		if errors.Is(err, repository.ErrProductNotFound) {
+			break
+		}
+		if err != nil {
+			h.logger.Error("duplicate: slug probe", "err", err)
+			response.Error(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		newSlug = src.Slug + "-copy-" + strconv.Itoa(n)
+		if n > 50 {
+			response.Error(w, http.StatusConflict, "tidak bisa generate slug unik untuk salinan")
+			return
+		}
+	}
+
+	// Make a copy as a draft (status = inactive) so the seller can review
+	// before publishing. Stock is preserved; the seller usually wants the
+	// same baseline.
+	copyIn := repository.SaveProductInput{
+		StoreID:           store.ID,
+		CategoryID:        src.CategoryID,
+		Name:              src.Name + " (Copy)",
+		Slug:              newSlug,
+		Description:       src.Description,
+		PriceCents:        src.PriceCents,
+		Stock:             src.Stock,
+		LowStockThreshold: src.LowStockThreshold,
+		WeightG:           src.WeightG,
+		LengthCm:          src.LengthCm,
+		WidthCm:           src.WidthCm,
+		HeightCm:          src.HeightCm,
+		Status:            "inactive",
+		PhotoURLs:         append([]string(nil), src.PhotoURLs...),
+		IsFeatured:        false,
+	}
+	created, err := h.products.Create(r.Context(), copyIn)
+	if err != nil {
+		h.logger.Error("duplicate product", "err", err)
+		response.Error(w, http.StatusInternalServerError, "gagal duplikat")
+		return
+	}
+
+	// Clone variants if any.
+	if src.HasVariants {
+		srcVars, err := h.variants.ListByProduct(r.Context(), src.ID)
+		if err == nil && len(srcVars) > 0 {
+			inputs := make([]repository.VariantInput, 0, len(srcVars))
+			for _, v := range srcVars {
+				inputs = append(inputs, repository.VariantInput{
+					Name:       v.Name,
+					SKU:        v.SKU, // SKU may need uniqueness handling in future
+					PriceCents: v.PriceCents,
+					Stock:      v.Stock,
+					SortOrder:  v.SortOrder,
+				})
+			}
+			if err := h.variants.ReplaceForProduct(r.Context(), created.ID, inputs); err != nil {
+				h.logger.Error("duplicate: clone variants", "err", err)
+				// Parent saved already — return success but log; seller can fix
+				// via the edit page.
+			}
+		}
+	}
+
+	response.JSON(w, http.StatusCreated, map[string]any{
+		"product": toProductDTO(created, nil),
+	})
+}
+
