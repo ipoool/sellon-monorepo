@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Switch } from "@/components/ui/switch";
 import type { OpenHours, DayOfWeek } from "@/lib/types";
 
 const days: { key: DayOfWeek; label: string }[] = [
@@ -62,10 +63,9 @@ export function JamBukaEditor({ initial, name }: Props) {
               <span className="w-20 shrink-0 text-sm font-medium text-neutral-700">
                 {d.label}
               </span>
-              <label className="flex cursor-pointer items-center gap-2 text-sm sm:w-24">
-                <input
-                  type="checkbox"
-                  className="size-4 rounded border-neutral-300 accent-brand-500 focus:ring-brand-500/30"
+              <label className="flex cursor-pointer items-center gap-2.5 text-sm sm:w-24">
+                <Switch
+                  size="sm"
                   checked={!closed}
                   onChange={(e) =>
                     update(d.key, { closed: !e.target.checked })

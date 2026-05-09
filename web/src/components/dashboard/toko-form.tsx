@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Select } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { JamBukaEditor } from "@/components/dashboard/jam-buka-editor";
 import type { OpenHours, Store } from "@/lib/types";
 
@@ -248,11 +249,9 @@ export function TokoForm({ initial }: { initial: Store | null }) {
                 </p>
               </div>
               <label className="flex cursor-pointer items-center gap-3">
-                <input
-                  type="checkbox"
+                <Switch
                   name="is_open"
                   defaultChecked={initial?.is_open ?? true}
-                  className="size-4 rounded border-neutral-300 accent-brand-500 focus:ring-brand-500/30"
                 />
                 <Badge variant="success">Toko buka</Badge>
               </label>
