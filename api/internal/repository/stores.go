@@ -11,23 +11,26 @@ import (
 )
 
 type Store struct {
-	ID             uuid.UUID
-	OwnerID        uuid.UUID
-	Slug           string
-	Name           string
-	Description    string
-	LogoURL        string
-	BannerURL      string
-	Tagline        string
-	Category       string
-	City           string
-	WhatsAppNumber string
-	Instagram      string
-	TikTok         string
-	OpenHours      []byte // raw JSONB
-	IsOpen         bool
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID                         uuid.UUID
+	OwnerID                    uuid.UUID
+	Slug                       string
+	Name                       string
+	Description                string
+	LogoURL                    string
+	BannerURL                  string
+	Tagline                    string
+	Category                   string
+	City                       string
+	WhatsAppNumber             string
+	Instagram                  string
+	TikTok                     string
+	OpenHours                  []byte // raw JSONB
+	IsOpen                     bool
+	ShippingOriginCity         string
+	EnabledCouriers            []string
+	FreeShippingThresholdCents int64
+	CreatedAt                  time.Time
+	UpdatedAt                  time.Time
 }
 
 type StoreRepo struct {
@@ -41,14 +44,18 @@ func NewStoreRepo(pool *pgxpool.Pool) *StoreRepo {
 var ErrStoreNotFound = errors.New("store not found")
 
 const storeColumns = `id, owner_id, slug, name, description, logo_url, banner_url, tagline,
-	category, city, whatsapp_number, instagram, tiktok, open_hours, is_open, created_at, updated_at`
+	category, city, whatsapp_number, instagram, tiktok, open_hours, is_open,
+	shipping_origin_city, enabled_couriers, free_shipping_threshold_cents,
+	created_at, updated_at`
 
 func scanStore(row pgx.Row, s *Store) error {
 	return row.Scan(
 		&s.ID, &s.OwnerID, &s.Slug, &s.Name, &s.Description, &s.LogoURL,
 		&s.BannerURL, &s.Tagline,
 		&s.Category, &s.City, &s.WhatsAppNumber, &s.Instagram, &s.TikTok,
-		&s.OpenHours, &s.IsOpen, &s.CreatedAt, &s.UpdatedAt,
+		&s.OpenHours, &s.IsOpen,
+		&s.ShippingOriginCity, &s.EnabledCouriers, &s.FreeShippingThresholdCents,
+		&s.CreatedAt, &s.UpdatedAt,
 	)
 }
 
@@ -109,6 +116,33 @@ type UpdateStoreInput struct {
 	TikTok         string
 	OpenHoursJSON  []byte // raw JSON; nil = don't update
 	IsOpen         bool
+}
+
+type UpdateShippingInput struct {
+	ShippingOriginCity         string
+	EnabledCouriers            []string
+	FreeShippingThresholdCents int64
+}
+
+// UpdateShipping is a narrow updater for the Pengiriman settings page —
+// callers shouldn't need to round-trip every store field just to flip a
+// courier toggle.
+func (r *StoreRepo) UpdateShipping(ctx context.Context, id uuid.UUID, in UpdateShippingInput) (*Store, error) {
+	q := `
+		UPDATE stores
+		SET shipping_origin_city = $2,
+		    enabled_couriers = $3,
+		    free_shipping_threshold_cents = $4,
+		    updated_at = now()
+		WHERE id = $1
+		RETURNING ` + storeColumns
+	var s Store
+	if err := scanStore(r.pool.QueryRow(ctx, q, id,
+		in.ShippingOriginCity, in.EnabledCouriers, in.FreeShippingThresholdCents,
+	), &s); err != nil {
+		return nil, err
+	}
+	return &s, nil
 }
 
 func (r *StoreRepo) Update(ctx context.Context, id uuid.UUID, in UpdateStoreInput) (*Store, error) {

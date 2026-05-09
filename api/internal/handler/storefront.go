@@ -535,8 +535,9 @@ func (h *StorefrontHandler) ShippingQuote(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Sum weights from line items (best-effort: missing weight defaults to 250g)
+	// Sum weights + subtotal from line items (missing weight defaults to 250g).
 	totalWeightG := 0
+	var subtotalCents int64
 	for _, it := range req.Items {
 		pid, err := uuid.Parse(it.ProductID)
 		if err != nil {
@@ -555,17 +556,50 @@ func (h *StorefrontHandler) ShippingQuote(w http.ResponseWriter, r *http.Request
 			qty = 1
 		}
 		totalWeightG += w * qty
+		subtotalCents += p.PriceCents * int64(qty)
 	}
 	if totalWeightG == 0 {
 		totalWeightG = 250
 	}
 
-	options := shipping.QuoteOptions(req.City, store.City, totalWeightG)
+	originCity := store.ShippingOriginCity
+	if originCity == "" {
+		originCity = store.City
+	}
+	options := shipping.QuoteOptions(req.City, originCity, totalWeightG)
+
+	// Filter to seller-enabled couriers (empty whitelist = all allowed).
+	if len(store.EnabledCouriers) > 0 {
+		allowed := map[string]bool{}
+		for _, c := range store.EnabledCouriers {
+			allowed[c] = true
+		}
+		filtered := options[:0]
+		for _, o := range options {
+			if allowed[o.Code] {
+				filtered = append(filtered, o)
+			}
+		}
+		options = filtered
+	}
+
+	// Apply free-shipping threshold: if subtotal qualifies, override every
+	// option's price to 0 and tag the response so the UI can surface it.
+	freeShipping := store.FreeShippingThresholdCents > 0 &&
+		subtotalCents >= store.FreeShippingThresholdCents
+	if freeShipping {
+		for i := range options {
+			options[i].PriceRpah = 0
+		}
+	}
+
 	response.JSON(w, http.StatusOK, map[string]any{
-		"options":         options,
-		"total_weight_g":  totalWeightG,
-		"buyer_city":      req.City,
-		"seller_city":     store.City,
+		"options":                       options,
+		"total_weight_g":                totalWeightG,
+		"buyer_city":                    req.City,
+		"seller_city":                   originCity,
+		"free_shipping":                 freeShipping,
+		"free_shipping_threshold_cents": store.FreeShippingThresholdCents,
 	})
 }
 

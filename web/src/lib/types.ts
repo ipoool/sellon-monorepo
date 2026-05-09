@@ -17,6 +17,9 @@ export type Store = {
   tiktok: string;
   open_hours: OpenHours;
   is_open: boolean;
+  shipping_origin_city?: string;
+  enabled_couriers?: string[];
+  free_shipping_threshold_cents?: number;
 };
 
 export type BankAccount = {

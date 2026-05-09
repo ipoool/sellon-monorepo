@@ -109,6 +109,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 				r.Get("/", storeHandler.Get)
 				r.Post("/", storeHandler.Create)
 				r.Put("/", storeHandler.Update)
+				r.Put("/shipping", storeHandler.UpdateShipping)
 			})
 
 			r.Route("/products", func(r chi.Router) {

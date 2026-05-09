@@ -415,6 +415,19 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
               </label>
             ))}
           </div>
+
+          <div className="mt-5 flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning/5 px-3 py-2.5 text-xs text-neutral-700">
+            <AlertTriangle
+              className="mt-0.5 size-4 shrink-0 text-warning"
+              aria-hidden
+            />
+            <p>
+              <strong>Catatan keamanan:</strong> Server Key disimpan terenkripsi
+              (AES-GCM, key derivasi dari secret aplikasi). Tim SellOn tidak
+              bisa membaca raw key Anda. Tetap rotate key secara berkala lewat
+              Midtrans dashboard.
+            </p>
+          </div>
         </Card>
 
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -558,17 +571,6 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
         </Card>
       )}
 
-      <Card variant="ghost">
-        <div className="flex items-start gap-3 text-sm text-neutral-600">
-          <AlertTriangle className="size-4 shrink-0 text-warning" aria-hidden />
-          <p>
-            <strong>Catatan keamanan:</strong> Server Key Anda disimpan
-            terenkripsi di database (AES-GCM, key derivasi dari secret
-            aplikasi). Tim SellOn tidak bisa membaca raw key Anda. Tetap
-            rotate key secara berkala lewat Midtrans dashboard.
-          </p>
-        </div>
-      </Card>
 
       {/* Mode-switch confirmation dialog */}
       <dialog

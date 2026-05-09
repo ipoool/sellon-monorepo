@@ -23,20 +23,23 @@ func NewStoreHandler(stores *repository.StoreRepo, logger *slog.Logger) *StoreHa
 }
 
 type storeDTO struct {
-	ID             string          `json:"id"`
-	Slug           string          `json:"slug"`
-	Name           string          `json:"name"`
-	Description    string          `json:"description"`
-	LogoURL        string          `json:"logo_url"`
-	BannerURL      string          `json:"banner_url"`
-	Tagline        string          `json:"tagline"`
-	Category       string          `json:"category"`
-	City           string          `json:"city"`
-	WhatsAppNumber string          `json:"whatsapp_number"`
-	Instagram      string          `json:"instagram"`
-	TikTok         string          `json:"tiktok"`
-	OpenHours      json.RawMessage `json:"open_hours"`
-	IsOpen         bool            `json:"is_open"`
+	ID                         string          `json:"id"`
+	Slug                       string          `json:"slug"`
+	Name                       string          `json:"name"`
+	Description                string          `json:"description"`
+	LogoURL                    string          `json:"logo_url"`
+	BannerURL                  string          `json:"banner_url"`
+	Tagline                    string          `json:"tagline"`
+	Category                   string          `json:"category"`
+	City                       string          `json:"city"`
+	WhatsAppNumber             string          `json:"whatsapp_number"`
+	Instagram                  string          `json:"instagram"`
+	TikTok                     string          `json:"tiktok"`
+	OpenHours                  json.RawMessage `json:"open_hours"`
+	IsOpen                     bool            `json:"is_open"`
+	ShippingOriginCity         string          `json:"shipping_origin_city"`
+	EnabledCouriers            []string        `json:"enabled_couriers"`
+	FreeShippingThresholdCents int64           `json:"free_shipping_threshold_cents"`
 }
 
 func toStoreDTO(s *repository.Store) storeDTO {
@@ -44,12 +47,19 @@ func toStoreDTO(s *repository.Store) storeDTO {
 	if len(openHours) == 0 {
 		openHours = json.RawMessage("{}")
 	}
+	couriers := s.EnabledCouriers
+	if couriers == nil {
+		couriers = []string{}
+	}
 	return storeDTO{
 		ID: s.ID.String(), Slug: s.Slug, Name: s.Name, Description: s.Description,
 		LogoURL: s.LogoURL, BannerURL: s.BannerURL, Tagline: s.Tagline,
 		Category: s.Category, City: s.City,
 		WhatsAppNumber: s.WhatsAppNumber, Instagram: s.Instagram, TikTok: s.TikTok,
 		OpenHours: openHours, IsOpen: s.IsOpen,
+		ShippingOriginCity:         s.ShippingOriginCity,
+		EnabledCouriers:            couriers,
+		FreeShippingThresholdCents: s.FreeShippingThresholdCents,
 	}
 }
 
@@ -158,6 +168,63 @@ func (h *StoreHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.logger.Error("update store", "err", err)
 		response.Error(w, http.StatusInternalServerError, "gagal update toko")
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]any{"store": toStoreDTO(store)})
+}
+
+type updateShippingReq struct {
+	ShippingOriginCity         string   `json:"shipping_origin_city"`
+	EnabledCouriers            []string `json:"enabled_couriers"`
+	FreeShippingThresholdCents int64    `json:"free_shipping_threshold_cents"`
+}
+
+// PUT /api/v1/store/shipping — narrow updater for the Pengiriman page.
+func (h *StoreHandler) UpdateShipping(w http.ResponseWriter, r *http.Request) {
+	uid, _ := auth.UserIDFromContext(r.Context())
+	existing, err := h.stores.FindByOwnerID(r.Context(), uid)
+	if errors.Is(err, repository.ErrStoreNotFound) {
+		response.Error(w, http.StatusNotFound, "toko belum dibuat")
+		return
+	}
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	var req updateShippingReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	if req.FreeShippingThresholdCents < 0 {
+		response.Error(w, http.StatusBadRequest, "minimum belanja tidak boleh negatif")
+		return
+	}
+	// Sanitize: drop empty / unknown courier codes.
+	allowed := map[string]bool{
+		"jne": true, "jnt": true, "sicepat": true,
+		"anteraja": true, "gosend": true, "grabexpress": true,
+	}
+	clean := make([]string, 0, len(req.EnabledCouriers))
+	seen := map[string]bool{}
+	for _, c := range req.EnabledCouriers {
+		c = strings.ToLower(strings.TrimSpace(c))
+		if !allowed[c] || seen[c] {
+			continue
+		}
+		seen[c] = true
+		clean = append(clean, c)
+	}
+
+	store, err := h.stores.UpdateShipping(r.Context(), existing.ID, repository.UpdateShippingInput{
+		ShippingOriginCity:         strings.TrimSpace(req.ShippingOriginCity),
+		EnabledCouriers:            clean,
+		FreeShippingThresholdCents: req.FreeShippingThresholdCents,
+	})
+	if err != nil {
+		h.logger.Error("update shipping", "err", err)
+		response.Error(w, http.StatusInternalServerError, "gagal simpan")
 		return
 	}
 	response.JSON(w, http.StatusOK, map[string]any{"store": toStoreDTO(store)})
