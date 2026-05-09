@@ -234,44 +234,42 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
   return (
     <div className="flex flex-col gap-5">
       <Card>
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="font-semibold text-neutral-900">Midtrans</h2>
-              {isConfigured && lastStatus === "ok" && (
-                <Badge variant="success">
-                  <CheckCircle2 className="size-3" aria-hidden />
-                  Terkoneksi
-                </Badge>
-              )}
-              {isConfigured && lastStatus !== "ok" && (
-                <Badge variant="warning">
-                  <AlertTriangle className="size-3" aria-hidden />
-                  Belum diverifikasi
-                </Badge>
-              )}
-              {!isConfigured && <Badge variant="default">Belum dikonfigurasi</Badge>}
-            </div>
-            <p className="mt-2 text-sm text-neutral-600">
-              Pakai akun Midtrans-mu sendiri. Dana hasil penjualan langsung
-              masuk ke rekeningmu sesuai jadwal settlement Midtrans —
-              kami tidak pernah pegang uang pembeli.
-            </p>
-          </div>
-          <a
-            href={
-              isSandbox
-                ? "https://dashboard.sandbox.midtrans.com/settings/access_keys"
-                : "https://dashboard.midtrans.com/settings/access_keys"
-            }
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hidden shrink-0 whitespace-nowrap text-sm font-medium text-brand-600 hover:text-brand-700 sm:inline-flex sm:items-center sm:gap-1"
-          >
-            Dapatkan API Key
-            <ExternalLink className="size-3.5" aria-hidden />
-          </a>
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="font-semibold text-neutral-900">Midtrans</h2>
+          {isConfigured && lastStatus === "ok" && (
+            <Badge variant="success">
+              <CheckCircle2 className="size-3" aria-hidden />
+              Terkoneksi
+            </Badge>
+          )}
+          {isConfigured && lastStatus !== "ok" && (
+            <Badge variant="warning">
+              <AlertTriangle className="size-3" aria-hidden />
+              Belum diverifikasi
+            </Badge>
+          )}
+          {!isConfigured && (
+            <Badge variant="default">Belum dikonfigurasi</Badge>
+          )}
         </div>
+        <p className="mt-2 text-sm text-neutral-600">
+          Pakai akun Midtrans-mu sendiri. Dana hasil penjualan langsung masuk
+          ke rekeningmu sesuai jadwal settlement Midtrans — kami tidak pernah
+          pegang uang pembeli.
+        </p>
+        <a
+          href={
+            isSandbox
+              ? "https://dashboard.sandbox.midtrans.com/settings/access_keys"
+              : "https://dashboard.midtrans.com/settings/access_keys"
+          }
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-3 inline-flex w-fit items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-sm font-medium text-brand-600 transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-brand-700"
+        >
+          Dapatkan API Key
+          <ExternalLink className="size-3.5" aria-hidden />
+        </a>
       </Card>
 
       <form onSubmit={onSubmit} className="flex flex-col gap-5">
