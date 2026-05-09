@@ -559,6 +559,19 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 // stock change has just made one of the requested items unavailable.
 var ErrStockInsufficient = errors.New("stok tidak cukup")
 
+// CountThisMonth returns the number of orders this calendar month for the
+// given store, used for tier-quota enforcement. Cancelled orders are
+// included — buyers should not be able to bypass the cap by cancelling
+// + re-ordering.
+func (r *OrderRepo) CountThisMonth(ctx context.Context, storeID uuid.UUID) (int, error) {
+	var n int
+	err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM orders
+		WHERE store_id = $1 AND created_at >= date_trunc('month', now())
+	`, storeID).Scan(&n)
+	return n, err
+}
+
 func generateOrderNumber() string {
 	now := time.Now().UTC()
 	rand4 := strings.ToUpper(uuid.New().String()[:4])

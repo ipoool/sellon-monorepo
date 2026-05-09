@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { Inbox, Send, ArrowRight, Download } from "lucide-react";
+import { Inbox, Send, ArrowRight, Download, Crown } from "lucide-react";
 
 import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { Card } from "@/components/ui/card";
@@ -11,7 +11,8 @@ import { Select } from "@/components/ui/select";
 import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import { formatRupiah, formatDateTimeID } from "@/lib/format";
-import type { Order } from "@/lib/types";
+import { cn } from "@/lib/utils";
+import type { Order, Subscription } from "@/lib/types";
 
 export const metadata = { title: "Pesanan — SellOn" };
 
@@ -52,9 +53,22 @@ export default async function PesananPage({
   if (paymentStatus) params.set("payment_status", paymentStatus);
   const qs = params.toString() ? `?${params.toString()}` : "";
 
-  const data = await serverApi<{ orders: Order[] }>(`/api/v1/orders${qs}`);
+  const [data, subRes] = await Promise.all([
+    serverApi<{ orders: Order[] }>(`/api/v1/orders${qs}`),
+    serverApi<{ subscription: Subscription }>("/api/v1/subscription"),
+  ]);
   const orders = data?.orders ?? [];
   const isFiltered = Boolean(q || status || paymentStatus);
+  const orderQuota = subRes?.subscription.quotas?.orders;
+  const isOrderCapped = !!orderQuota && orderQuota.limit > 0;
+  const orderUsedPct = isOrderCapped
+    ? Math.min(100, (orderQuota.used / orderQuota.limit) * 100)
+    : 0;
+  const orderQuotaFull = isOrderCapped && orderQuota.used >= orderQuota.limit;
+  const orderQuotaWarn =
+    isOrderCapped &&
+    !orderQuotaFull &&
+    orderQuota.used >= orderQuota.limit * 0.8;
 
   const exportHref = `${apiBase}/api/v1/orders/export${qs}`;
 
@@ -78,6 +92,59 @@ export default async function PesananPage({
       }
     >
       {/* Filter form */}
+      {/* Free-tier order quota indicator */}
+      {isOrderCapped && (
+        <div
+          className={cn(
+            "mb-5 flex flex-col gap-2 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between",
+            orderQuotaFull
+              ? "border-danger/40 bg-danger/5"
+              : orderQuotaWarn
+                ? "border-warning/40 bg-warning/10"
+                : "border-neutral-200 bg-neutral-50",
+          )}
+        >
+          <div className="flex flex-1 flex-col gap-1.5">
+            <div className="flex items-baseline justify-between gap-3">
+              <p className="text-sm font-medium text-neutral-900">
+                Pesanan bulan ini (tier Gratis)
+              </p>
+              <p className="text-xs font-medium text-neutral-700">
+                {orderQuota.used} / {orderQuota.limit}
+              </p>
+            </div>
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-white">
+              <div
+                className={cn(
+                  "h-full rounded-full transition-all",
+                  orderQuotaFull
+                    ? "bg-danger"
+                    : orderQuotaWarn
+                      ? "bg-warning"
+                      : "bg-brand-500",
+                )}
+                style={{ width: `${orderUsedPct}%` }}
+              />
+            </div>
+            {orderQuotaFull && (
+              <p className="text-xs font-medium text-danger">
+                Limit pesanan tercapai. Toko publikmu sementara menolak order
+                baru sampai bulan berikutnya atau upgrade.
+              </p>
+            )}
+          </div>
+          <Link href="/dasbor/pengaturan/berlangganan" className="sm:shrink-0">
+            <Button
+              size="sm"
+              variant={orderQuotaFull ? "default" : "outline"}
+            >
+              <Crown className="size-4" aria-hidden />
+              Upgrade ke Pro
+            </Button>
+          </Link>
+        </div>
+      )}
+
       <form
         method="GET"
         className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center"

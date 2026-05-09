@@ -26,6 +26,7 @@ type StorefrontHandler struct {
 	categories *repository.CategoryRepo
 	promos     *repository.PromoRepo
 	gateways   *repository.PaymentRepo
+	subs       *repository.SubscriptionRepo
 	logger     *slog.Logger
 }
 
@@ -33,11 +34,12 @@ func NewStorefrontHandler(
 	s *repository.StoreRepo, p *repository.ProductRepo, v *repository.VariantRepo,
 	o *repository.OrderRepo, b *repository.BankAccountRepo, c *repository.CategoryRepo,
 	pr *repository.PromoRepo, gw *repository.PaymentRepo,
+	subs *repository.SubscriptionRepo,
 	logger *slog.Logger,
 ) *StorefrontHandler {
 	return &StorefrontHandler{
 		stores: s, products: p, variants: v, orders: o, banks: b,
-		categories: c, promos: pr, gateways: gw, logger: logger,
+		categories: c, promos: pr, gateways: gw, subs: subs, logger: logger,
 	}
 }
 
@@ -289,6 +291,19 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 	if !store.IsOpen {
 		response.Error(w, http.StatusBadRequest, "toko sedang tutup")
 		return
+	}
+
+	// Tier order-quota: free=50/month, pro/bisnis=unlimited. Fail-open if
+	// the subscription read errors so a transient DB hiccup doesn't block
+	// buyer checkout.
+	if sub, err := h.subs.GetOrCreate(r.Context(), store.ID); err == nil {
+		if limit := orderLimitForPlan(sub.Plan); limit > 0 {
+			if used, err := h.orders.CountThisMonth(r.Context(), store.ID); err == nil && used >= limit {
+				response.Error(w, http.StatusServiceUnavailable,
+					"toko sedang tidak menerima pesanan baru (limit bulanan tercapai). Coba lagi bulan depan.")
+				return
+			}
+		}
 	}
 
 	var req createOrderReq

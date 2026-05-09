@@ -17,11 +17,12 @@ type SubscriptionHandler struct {
 	subs     *repository.SubscriptionRepo
 	stores   *repository.StoreRepo
 	products *repository.ProductRepo
+	orders   *repository.OrderRepo
 	logger   *slog.Logger
 }
 
-func NewSubscriptionHandler(subs *repository.SubscriptionRepo, stores *repository.StoreRepo, products *repository.ProductRepo, logger *slog.Logger) *SubscriptionHandler {
-	return &SubscriptionHandler{subs: subs, stores: stores, products: products, logger: logger}
+func NewSubscriptionHandler(subs *repository.SubscriptionRepo, stores *repository.StoreRepo, products *repository.ProductRepo, orders *repository.OrderRepo, logger *slog.Logger) *SubscriptionHandler {
+	return &SubscriptionHandler{subs: subs, stores: stores, products: products, orders: orders, logger: logger}
 }
 
 // Pricing source-of-truth. Must match landing page tiers
@@ -152,8 +153,10 @@ func (h *SubscriptionHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	dto := toSubDTO(sub)
 	productCount, _ := h.products.CountAll(r.Context(), store.ID)
+	orderCount, _ := h.orders.CountThisMonth(r.Context(), store.ID)
 	dto.Quotas = map[string]quotaUsage{
 		"products": {Used: productCount, Limit: productLimitForPlan(sub.Plan)},
+		"orders":   {Used: orderCount, Limit: orderLimitForPlan(sub.Plan)},
 	}
 
 	response.JSON(w, http.StatusOK, map[string]any{

@@ -39,3 +39,22 @@ func staffLimitForPlan(plan string) int {
 		return freeStaffLimit
 	}
 }
+
+// Orders/month caps for the storefront create flow. -1 = unlimited.
+// "Month" is calendar-month at server-time UTC; close enough for now.
+const (
+	freeOrderLimit   = 50
+	proOrderLimit    = -1
+	bisnisOrderLimit = -1
+)
+
+func orderLimitForPlan(plan string) int {
+	switch plan {
+	case "pro":
+		return proOrderLimit
+	case "bisnis":
+		return bisnisOrderLimit
+	default:
+		return freeOrderLimit
+	}
+}
