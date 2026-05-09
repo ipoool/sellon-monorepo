@@ -241,8 +241,16 @@ export default async function ProdukListPage({
                   </td>
                   <td className="px-5 py-3">
                     <div className="flex items-center gap-2">
-                      <span className="text-neutral-700">{p.stock}</span>
-                      {p.low_stock_threshold > 0 &&
+                      {p.has_variants ? (
+                        <span className="text-neutral-700">
+                          {p.variants_count ?? 0} varian · stok{" "}
+                          {p.variants_stock ?? 0}
+                        </span>
+                      ) : (
+                        <span className="text-neutral-700">{p.stock}</span>
+                      )}
+                      {!p.has_variants &&
+                        p.low_stock_threshold > 0 &&
                         p.stock <= p.low_stock_threshold &&
                         p.stock > 0 && (
                           <Badge variant="warning">Stok rendah</Badge>

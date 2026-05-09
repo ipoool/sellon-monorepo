@@ -87,7 +87,12 @@ type productDTO struct {
 	HasVariants       bool         `json:"has_variants"`
 	IsFeatured        bool         `json:"is_featured"`
 	Variants          []variantDTO `json:"variants"`
-	CreatedAt         string       `json:"created_at"`
+	// VariantsCount + VariantsStock are list-only aggregates so the dashboard
+	// "Stok" column can show "N varian · stok M" instead of the parent's
+	// stale stock cell. Zero when has_variants=false.
+	VariantsCount int    `json:"variants_count"`
+	VariantsStock int    `json:"variants_stock"`
+	CreatedAt     string `json:"created_at"`
 }
 
 func toProductDTO(p *repository.Product, variants []repository.Variant) productDTO {
@@ -146,11 +151,31 @@ func (h *ProductHandler) List(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+	// Roll up variant count + stock per product in one query so the list
+	// "Stok" column reflects per-variant edits (BUG-002). Falls back silently
+	// to zero on error — the parent stock + count of 0 still renders.
+	ids := make([]uuid.UUID, 0, len(items))
+	for i := range items {
+		if items[i].HasVariants {
+			ids = append(ids, items[i].ID)
+		}
+	}
+	aggs, err := h.variants.AggregateByProducts(r.Context(), ids)
+	if err != nil {
+		h.logger.Error("aggregate variants for list", "err", err)
+		aggs = map[uuid.UUID]repository.VariantAggregate{}
+	}
+
 	out := make([]productDTO, 0, len(items))
 	for i := range items {
 		// List view doesn't fetch variants for each row (N+1 avoidance);
 		// callers needing variants use GET /products/{id}.
-		out = append(out, toProductDTO(&items[i], nil))
+		dto := toProductDTO(&items[i], nil)
+		if agg, ok := aggs[items[i].ID]; ok {
+			dto.VariantsCount = agg.Count
+			dto.VariantsStock = agg.StockTotal
+		}
+		out = append(out, dto)
 	}
 	response.JSON(w, http.StatusOK, map[string]any{
 		"products": out, "total": total,

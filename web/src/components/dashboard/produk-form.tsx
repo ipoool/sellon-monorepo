@@ -79,13 +79,40 @@ export function ProdukForm({ initial }: Props) {
     const cleanVariants = hasVariants
       ? variants.filter((v) => v.name.trim().length > 0)
       : [];
+
+    // When variants are active, the parent product's price/stock are
+    // derived (min price across variants, summed stock) so the storefront
+    // "Mulai Rp X" badge and list aggregates can't drift below the real
+    // variant prices. The Harga/Stok inputs above are ignored in this
+    // branch — see the helper text in the form.
+    let priceCents: number;
+    let stock: number;
+    if (hasVariants) {
+      if (cleanVariants.length === 0) {
+        setError("Tambah minimal 1 varian (atau matikan 'Pakai varian').");
+        setPending(false);
+        return;
+      }
+      const pricedVariants = cleanVariants.filter((v) => v.price_cents > 0);
+      if (pricedVariants.length === 0) {
+        setError("Minimal 1 varian harus punya harga > 0.");
+        setPending(false);
+        return;
+      }
+      priceCents = Math.min(...pricedVariants.map((v) => v.price_cents));
+      stock = cleanVariants.reduce((sum, v) => sum + Math.max(0, v.stock), 0);
+    } else {
+      priceCents = Math.round(Number(fd.get("price") ?? 0)) * 100;
+      stock = Math.max(0, Number(fd.get("stock") ?? 0));
+    }
+
     const body = {
       category_id: categoryId,
       name: String(fd.get("name") ?? ""),
       slug: String(fd.get("slug") ?? ""),
       description: String(fd.get("description") ?? ""),
-      price_cents: Math.round(Number(fd.get("price") ?? 0)) * 100,
-      stock: Math.max(0, Number(fd.get("stock") ?? 0)),
+      price_cents: priceCents,
+      stock,
       low_stock_threshold: Math.max(0, Number(fd.get("low_stock_threshold") ?? 0)),
       weight_g: Math.max(0, Number(fd.get("weight_g") ?? 0)),
       length_cm: Math.max(0, Number(fd.get("length_cm") ?? 0)),
@@ -208,27 +235,30 @@ export function ProdukForm({ initial }: Props) {
         </div>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="price">Harga (Rp) *</Label>
+            <Label htmlFor="price">Harga (Rp) {hasVariants ? "" : "*"}</Label>
             <Input
               id="price"
               name="price"
               type="number"
-              required
+              required={!hasVariants}
+              disabled={hasVariants}
               min={0}
               step={500}
               defaultValue={initial ? Math.round(initial.price_cents / 100) : ""}
-              placeholder="35000"
+              placeholder={hasVariants ? "Otomatis dari varian" : "35000"}
             />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="stock">Stok *</Label>
+            <Label htmlFor="stock">Stok {hasVariants ? "" : "*"}</Label>
             <Input
               id="stock"
               name="stock"
               type="number"
-              required
+              required={!hasVariants}
+              disabled={hasVariants}
               min={0}
               defaultValue={initial?.stock ?? 0}
+              placeholder={hasVariants ? "Otomatis dari varian" : ""}
             />
           </div>
           <div className="flex flex-col gap-1.5">

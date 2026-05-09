@@ -39,6 +39,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	promos := repository.NewPromoRepo(pool)
 	reports := repository.NewReportsRepo(pool)
 	subscriptions := repository.NewSubscriptionRepo(pool)
+	memberships := repository.NewMembershipRepo(pool)
 
 	googleVerifier := auth.NewGoogleVerifier(cfg.GoogleClientID)
 	jwtSvc := auth.NewJWTService(cfg.JWTSecret, cfg.JWTTTL)
@@ -50,7 +51,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	midtransClient := payments.NewMidtransClient()
 	storageClient := storage.NewSupabaseClient(cfg.SupabaseURL, cfg.SupabaseServiceKey, cfg.SupabaseBucket)
 
-	authHandler := handler.NewAuthHandler(users, googleVerifier, jwtSvc, logger, cfg.IsProd())
+	authHandler := handler.NewAuthHandler(users, memberships, googleVerifier, jwtSvc, logger, cfg.IsProd())
 	storeHandler := handler.NewStoreHandler(stores, logger)
 	productHandler := handler.NewProductHandler(products, variants, stores, subscriptions, storageClient, logger)
 	uploadHandler := handler.NewUploadHandler(stores, storageClient, logger)
@@ -66,6 +67,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	promoHandler := handler.NewPromoHandler(promos, stores, logger)
 	reportsHandler := handler.NewReportsHandler(stores, reports, logger)
 	subscriptionHandler := handler.NewSubscriptionHandler(subscriptions, stores, products, logger)
+	staffHandler := handler.NewStaffHandler(stores, memberships, users, subscriptions, logger)
 
 	requireAuth := middleware.RequireAuth(jwtSvc)
 
@@ -189,6 +191,14 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 				r.Post("/request-upgrade", subscriptionHandler.RequestUpgrade)
 				r.Post("/cancel", subscriptionHandler.Cancel)
 				r.Post("/resume", subscriptionHandler.Resume)
+			})
+
+			r.Route("/staff", func(r chi.Router) {
+				r.Get("/", staffHandler.List)
+				r.Post("/invite", staffHandler.Invite)
+				r.Delete("/{user_id}", staffHandler.Remove)
+				r.Put("/{user_id}/role", staffHandler.ChangeRole)
+				r.Delete("/invites/{invite_id}", staffHandler.DeleteInvite)
 			})
 		})
 	})

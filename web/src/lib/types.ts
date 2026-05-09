@@ -65,6 +65,10 @@ export type Product = {
   has_variants: boolean;
   is_featured: boolean;
   variants?: Variant[];
+  // Aggregates surfaced by the list endpoint when has_variants=true so the
+  // dashboard "Stok" column reflects per-variant edits. Zero otherwise.
+  variants_count?: number;
+  variants_stock?: number;
   created_at: string;
 };
 
@@ -163,6 +167,32 @@ export type CustomerOrderSummary = {
   payment_status: PaymentStatus;
   total_cents: number;
   created_at: string;
+};
+
+export type StaffRole = "owner" | "admin" | "staff";
+
+export type StaffMember = {
+  user_id: string;
+  email: string;
+  name: string;
+  picture_url: string;
+  role: StaffRole;
+  joined_at: string;
+  is_current: boolean;
+};
+
+export type StaffInvite = {
+  id: string;
+  email: string;
+  role: "admin" | "staff";
+  created_at: string;
+};
+
+export type StaffData = {
+  members: StaffMember[];
+  invites: StaffInvite[];
+  staff_limit: number;
+  members_used: number;
 };
 
 export type PromoType = "percent" | "fixed" | "free_shipping";

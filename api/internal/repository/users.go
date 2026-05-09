@@ -2,11 +2,16 @@ package repository
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+var ErrUserNotFound = errors.New("user not found")
 
 type User struct {
 	ID         uuid.UUID
@@ -59,6 +64,31 @@ func (r *UserRepo) FindByID(ctx context.Context, id uuid.UUID) (*User, error) {
 	err := r.pool.QueryRow(ctx, q, id).Scan(
 		&u.ID, &u.GoogleID, &u.Email, &u.Name, &u.PictureURL, &u.CreatedAt, &u.UpdatedAt,
 	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrUserNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+// FindByEmail looks up a user by lowercased email — used by the staff
+// invite flow to detect when an invitee already has an account.
+func (r *UserRepo) FindByEmail(ctx context.Context, email string) (*User, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	const q = `
+		SELECT id, google_id, email, name, picture_url, created_at, updated_at
+		FROM users WHERE LOWER(email) = $1
+		LIMIT 1
+	`
+	var u User
+	err := r.pool.QueryRow(ctx, q, email).Scan(
+		&u.ID, &u.GoogleID, &u.Email, &u.Name, &u.PictureURL, &u.CreatedAt, &u.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrUserNotFound
+	}
 	if err != nil {
 		return nil, err
 	}

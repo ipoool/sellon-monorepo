@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Store, CreditCard, Truck, MessageCircle, Tag, Crown } from "lucide-react";
+import { Store, CreditCard, Truck, MessageCircle, Tag, Crown, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const tabs = [
@@ -11,6 +11,7 @@ const tabs = [
   { label: "Kategori", href: "/dasbor/pengaturan/kategori", icon: Tag },
   { label: "Pengiriman", href: "/dasbor/pengaturan/pengiriman", icon: Truck },
   { label: "WhatsApp", href: "/dasbor/pengaturan/whatsapp", icon: MessageCircle },
+  { label: "Tim", href: "/dasbor/pengaturan/tim", icon: Users },
   { label: "Berlangganan", href: "/dasbor/pengaturan/berlangganan", icon: Crown },
 ];
 

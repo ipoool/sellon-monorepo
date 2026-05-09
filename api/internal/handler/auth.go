@@ -13,15 +13,17 @@ import (
 
 type AuthHandler struct {
 	users        *repository.UserRepo
+	memberships  *repository.MembershipRepo
 	google       *auth.GoogleVerifier
 	jwt          *auth.JWTService
 	logger       *slog.Logger
 	cookieSecure bool
 }
 
-func NewAuthHandler(users *repository.UserRepo, google *auth.GoogleVerifier, jwt *auth.JWTService, logger *slog.Logger, cookieSecure bool) *AuthHandler {
+func NewAuthHandler(users *repository.UserRepo, memberships *repository.MembershipRepo, google *auth.GoogleVerifier, jwt *auth.JWTService, logger *slog.Logger, cookieSecure bool) *AuthHandler {
 	return &AuthHandler{
 		users:        users,
+		memberships:  memberships,
 		google:       google,
 		jwt:          jwt,
 		logger:       logger,
@@ -60,6 +62,16 @@ func (h *AuthHandler) Google(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("upsert user failed", "err", err)
 		response.Error(w, http.StatusInternalServerError, "failed to create session")
 		return
+	}
+
+	// Auto-accept any pending staff invites that match this user's email.
+	// Best-effort — login succeeds even if this fails.
+	if h.memberships != nil {
+		if accepted, err := h.memberships.AcceptInvitesForEmail(r.Context(), user.ID, user.Email); err != nil {
+			h.logger.Warn("accept invites on login", "err", err, "user", user.ID.String())
+		} else if accepted > 0 {
+			h.logger.Info("invites auto-accepted", "user", user.ID.String(), "count", accepted)
+		}
 	}
 
 	token, exp, err := h.jwt.Issue(user.ID)

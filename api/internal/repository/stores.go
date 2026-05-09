@@ -48,6 +48,13 @@ const storeColumns = `id, owner_id, slug, name, description, logo_url, banner_ur
 	shipping_origin_city, enabled_couriers, free_shipping_threshold_cents,
 	created_at, updated_at`
 
+// Same column list but qualified with the `s.` alias, used in joins.
+const qualifiedStoreColumns = `s.id, s.owner_id, s.slug, s.name, s.description,
+	s.logo_url, s.banner_url, s.tagline, s.category, s.city,
+	s.whatsapp_number, s.instagram, s.tiktok, s.open_hours, s.is_open,
+	s.shipping_origin_city, s.enabled_couriers, s.free_shipping_threshold_cents,
+	s.created_at, s.updated_at`
+
 func scanStore(row pgx.Row, s *Store) error {
 	return row.Scan(
 		&s.ID, &s.OwnerID, &s.Slug, &s.Name, &s.Description, &s.LogoURL,
@@ -71,10 +78,25 @@ func (r *StoreRepo) FindBySlug(ctx context.Context, slug string) (*Store, error)
 	return &s, nil
 }
 
-func (r *StoreRepo) FindByOwnerID(ctx context.Context, ownerID uuid.UUID) (*Store, error) {
-	q := `SELECT ` + storeColumns + ` FROM stores WHERE owner_id = $1`
+// FindByOwnerID is misnamed for legacy reasons — it now returns the store
+// the user is a member of (owner OR staff/admin). Original meaning preserved
+// for the few "owner-only" actions, but those should call FindByMemberID
+// followed by RoleFor() instead.
+func (r *StoreRepo) FindByOwnerID(ctx context.Context, userID uuid.UUID) (*Store, error) {
+	return r.FindByMemberID(ctx, userID)
+}
+
+// FindByMemberID returns the store the user has any membership in. If
+// they're a member of multiple stores (rare), the most recent one wins.
+func (r *StoreRepo) FindByMemberID(ctx context.Context, userID uuid.UUID) (*Store, error) {
+	q := `SELECT ` + qualifiedStoreColumns + `
+	      FROM stores s
+	      JOIN store_members m ON m.store_id = s.id
+	      WHERE m.user_id = $1
+	      ORDER BY (m.role = 'owner') DESC, m.created_at ASC
+	      LIMIT 1`
 	var s Store
-	if err := scanStore(r.pool.QueryRow(ctx, q, ownerID), &s); err != nil {
+	if err := scanStore(r.pool.QueryRow(ctx, q, userID), &s); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrStoreNotFound
 		}

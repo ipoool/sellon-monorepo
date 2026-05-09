@@ -29,6 +29,41 @@ func NewVariantRepo(pool *pgxpool.Pool) *VariantRepo {
 	return &VariantRepo{pool: pool}
 }
 
+// VariantAggregate is a per-product roll-up of its variants. Used by the
+// dashboard product list to surface "N varian · stok M" without an N+1.
+type VariantAggregate struct {
+	Count      int
+	StockTotal int
+}
+
+// AggregateByProducts returns count + summed stock per product for the given
+// product IDs. Products without any variants are simply absent from the map.
+func (r *VariantRepo) AggregateByProducts(ctx context.Context, productIDs []uuid.UUID) (map[uuid.UUID]VariantAggregate, error) {
+	if len(productIDs) == 0 {
+		return map[uuid.UUID]VariantAggregate{}, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT product_id, COUNT(*)::int, COALESCE(SUM(stock), 0)::int
+		FROM product_variants
+		WHERE product_id = ANY($1)
+		GROUP BY product_id
+	`, productIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[uuid.UUID]VariantAggregate, len(productIDs))
+	for rows.Next() {
+		var pid uuid.UUID
+		var agg VariantAggregate
+		if err := rows.Scan(&pid, &agg.Count, &agg.StockTotal); err != nil {
+			return nil, err
+		}
+		out[pid] = agg
+	}
+	return out, rows.Err()
+}
+
 func (r *VariantRepo) ListByProduct(ctx context.Context, productID uuid.UUID) ([]Variant, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, product_id, name, sku, price_cents, stock, sort_order, created_at

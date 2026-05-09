@@ -21,3 +21,21 @@ func productLimitForPlan(plan string) int {
 		return freeProductLimit
 	}
 }
+
+// Staff seat caps (includes the owner). Free=1 means owner only.
+const (
+	freeStaffLimit   = 1
+	proStaffLimit    = 5
+	bisnisStaffLimit = -1
+)
+
+func staffLimitForPlan(plan string) int {
+	switch plan {
+	case "pro":
+		return proStaffLimit
+	case "bisnis":
+		return bisnisStaffLimit
+	default:
+		return freeStaffLimit
+	}
+}
