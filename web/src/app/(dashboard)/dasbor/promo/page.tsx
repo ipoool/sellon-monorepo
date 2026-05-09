@@ -1,11 +1,11 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { Megaphone, Plus } from "lucide-react";
+import { Megaphone } from "lucide-react";
 
 import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { PromoCreateDialog } from "@/components/dashboard/promo-create-dialog";
 import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import { formatRupiah, formatDateID } from "@/lib/format";
@@ -52,14 +52,7 @@ export default async function PromoPage() {
       me={me}
       pageTitle="Promo"
       pageSubtitle={`${promos.length} kupon`}
-      actions={
-        <Link href="/dasbor/promo/baru">
-          <Button size="sm">
-            <Plus className="size-4" aria-hidden />
-            Buat Promo
-          </Button>
-        </Link>
-      }
+      actions={<PromoCreateDialog />}
     >
       {promos.length === 0 ? (
         <Card className="py-16 text-center">
@@ -73,12 +66,9 @@ export default async function PromoPage() {
             Bikin kupon diskon, gratis ongkir, atau potongan nominal untuk
             menarik pelanggan dan boost konversi.
           </p>
-          <Link href="/dasbor/promo/baru" className="mt-5 inline-block">
-            <Button size="sm">
-              <Plus className="size-4" aria-hidden />
-              Buat Promo Pertama
-            </Button>
-          </Link>
+          <div className="mt-5 inline-block">
+            <PromoCreateDialog />
+          </div>
         </Card>
       ) : (
         <div className="overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-card">

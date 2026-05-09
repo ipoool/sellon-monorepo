@@ -15,6 +15,9 @@ const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
 type Props = {
   initial?: Promo;
+  // When set, called instead of the default router.push after save/delete —
+  // dialog hosts use this to close themselves and refresh the parent list.
+  onSuccess?: () => void;
 };
 
 // Convert ISO datetime → "YYYY-MM-DD" for <input type="date">
@@ -23,9 +26,19 @@ function isoToDateInput(iso: string | null | undefined): string {
   return iso.slice(0, 10);
 }
 
-export function PromoForm({ initial }: Props) {
+export function PromoForm({ initial, onSuccess }: Props) {
   const router = useRouter();
   const isEdit = !!initial;
+
+  function done() {
+    if (onSuccess) {
+      onSuccess();
+      router.refresh();
+      return;
+    }
+    router.push("/dasbor/promo");
+    router.refresh();
+  }
 
   const [code, setCode] = useState(initial?.code ?? "");
   const [type, setType] = useState<PromoType>(initial?.type ?? "percent");
@@ -83,8 +96,7 @@ export function PromoForm({ initial }: Props) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || `HTTP ${res.status}`);
       }
-      router.push("/dasbor/promo");
-      router.refresh();
+      done();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Gagal simpan");
       setPending(false);
@@ -108,8 +120,7 @@ export function PromoForm({ initial }: Props) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || `HTTP ${res.status}`);
       }
-      router.push("/dasbor/promo");
-      router.refresh();
+      done();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Gagal hapus");
       setDeleting(false);
