@@ -147,6 +147,14 @@ export default async function OrderDetailPage({
                 <span>Subtotal</span>
                 <span>{formatRupiah(order.subtotal_cents)}</span>
               </div>
+              {order.discount_cents > 0 && (
+                <div className="flex justify-between text-success">
+                  <span>
+                    Diskon{order.promo_code ? ` (${order.promo_code})` : ""}
+                  </span>
+                  <span>−{formatRupiah(order.discount_cents)}</span>
+                </div>
+              )}
               <div className="flex justify-between text-neutral-600">
                 <span>Ongkir{order.courier ? ` (${order.courier})` : ""}</span>
                 <span>{formatRupiah(order.shipping_cents)}</span>

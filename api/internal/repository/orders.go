@@ -21,6 +21,8 @@ type Order struct {
 	PaymentMethod      string
 	SubtotalCents      int64
 	ShippingCents      int64
+	DiscountCents      int64
+	PromoCode          string
 	TotalCents         int64
 	Courier            string
 	CourierService     string
@@ -70,6 +72,9 @@ type CreateOrderInput struct {
 	PaymentMethod   string
 	Notes           string
 	ShippingCents   int64
+	DiscountCents   int64      // applied to subtotal
+	PromoCode       string     // for record-keeping
+	PromoID         *uuid.UUID // FK if redeemed (nil means no promo)
 	Items           []OrderItemInput
 }
 
@@ -192,7 +197,7 @@ var ErrInvalidTransition = errors.New("invalid status transition")
 func (r *OrderRepo) FindByID(ctx context.Context, storeID, id uuid.UUID) (*Order, error) {
 	const q = `
 		SELECT id, store_id, order_number, status, payment_status, payment_method,
-		       subtotal_cents, shipping_cents, total_cents,
+		       subtotal_cents, shipping_cents, discount_cents, promo_code, total_cents,
 		       courier, courier_service, tracking_number,
 		       customer_name, customer_whatsapp, customer_address, customer_city,
 		       notes, seller_notes, payment_url,
@@ -203,7 +208,7 @@ func (r *OrderRepo) FindByID(ctx context.Context, storeID, id uuid.UUID) (*Order
 	var o Order
 	err := r.pool.QueryRow(ctx, q, id, storeID).Scan(
 		&o.ID, &o.StoreID, &o.OrderNumber, &o.Status, &o.PaymentStatus, &o.PaymentMethod,
-		&o.SubtotalCents, &o.ShippingCents, &o.TotalCents,
+		&o.SubtotalCents, &o.ShippingCents, &o.DiscountCents, &o.PromoCode, &o.TotalCents,
 		&o.Courier, &o.CourierService, &o.TrackingNumber,
 		&o.CustomerName, &o.CustomerWhatsApp, &o.CustomerAddress, &o.CustomerCity,
 		&o.Notes, &o.SellerNotes, &o.PaymentURL,
@@ -330,7 +335,7 @@ func (r *OrderRepo) Cancel(ctx context.Context, storeID, id uuid.UUID, reason st
 func (r *OrderRepo) FindByOrderNumber(ctx context.Context, storeID uuid.UUID, orderNumber string) (*Order, error) {
 	const q = `
 		SELECT id, store_id, order_number, status, payment_status, payment_method,
-		       subtotal_cents, shipping_cents, total_cents,
+		       subtotal_cents, shipping_cents, discount_cents, promo_code, total_cents,
 		       courier, courier_service, tracking_number,
 		       customer_name, customer_whatsapp, customer_address, customer_city,
 		       notes, seller_notes, payment_url,
@@ -341,7 +346,7 @@ func (r *OrderRepo) FindByOrderNumber(ctx context.Context, storeID uuid.UUID, or
 	var o Order
 	err := r.pool.QueryRow(ctx, q, storeID, orderNumber).Scan(
 		&o.ID, &o.StoreID, &o.OrderNumber, &o.Status, &o.PaymentStatus, &o.PaymentMethod,
-		&o.SubtotalCents, &o.ShippingCents, &o.TotalCents,
+		&o.SubtotalCents, &o.ShippingCents, &o.DiscountCents, &o.PromoCode, &o.TotalCents,
 		&o.Courier, &o.CourierService, &o.TrackingNumber,
 		&o.CustomerName, &o.CustomerWhatsApp, &o.CustomerAddress, &o.CustomerCity,
 		&o.Notes, &o.SellerNotes, &o.PaymentURL,
@@ -417,7 +422,15 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 	for _, it := range in.Items {
 		subtotal += it.UnitCents * int64(it.Quantity)
 	}
-	total := subtotal + in.ShippingCents
+	// Clamp discount to subtotal so we never go negative.
+	discount := in.DiscountCents
+	if discount > subtotal {
+		discount = subtotal
+	}
+	if discount < 0 {
+		discount = 0
+	}
+	total := subtotal + in.ShippingCents - discount
 
 	// Upsert customer (by store_id + whatsapp_number); atomic order/spend increment.
 	var customerID uuid.UUID
@@ -444,20 +457,22 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 	var o Order
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO orders (store_id, customer_id, order_number, status, payment_status,
-		                   payment_method, subtotal_cents, shipping_cents, total_cents,
+		                   payment_method, subtotal_cents, shipping_cents, discount_cents,
+		                   promo_code, promo_id, total_cents,
 		                   courier, customer_name, customer_whatsapp, customer_address, customer_city,
 		                   notes)
-		VALUES ($1, $2, $3, 'pending', 'unpaid', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		VALUES ($1, $2, $3, 'pending', 'unpaid', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 		RETURNING id, store_id, order_number, status, payment_status, payment_method,
-		          subtotal_cents, shipping_cents, total_cents, courier,
+		          subtotal_cents, shipping_cents, discount_cents, promo_code, total_cents, courier,
 		          customer_name, customer_whatsapp, customer_city, created_at
 	`,
 		in.StoreID, customerID, orderNum,
-		in.PaymentMethod, subtotal, in.ShippingCents, total,
+		in.PaymentMethod, subtotal, in.ShippingCents, discount,
+		in.PromoCode, in.PromoID, total,
 		in.Courier, in.CustomerName, in.CustomerWA, in.CustomerAddress, in.CustomerCity, in.Notes,
 	).Scan(
 		&o.ID, &o.StoreID, &o.OrderNumber, &o.Status, &o.PaymentStatus, &o.PaymentMethod,
-		&o.SubtotalCents, &o.ShippingCents, &o.TotalCents, &o.Courier,
+		&o.SubtotalCents, &o.ShippingCents, &o.DiscountCents, &o.PromoCode, &o.TotalCents, &o.Courier,
 		&o.CustomerName, &o.CustomerWhatsApp, &o.CustomerCity, &o.CreatedAt,
 	); err != nil {
 		return nil, fmt.Errorf("insert order: %w", err)

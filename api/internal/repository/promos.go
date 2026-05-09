@@ -176,6 +176,42 @@ func (r *PromoRepo) Delete(ctx context.Context, storeID, id uuid.UUID) error {
 	return nil
 }
 
+// CheckActive returns nil if the promo is currently usable, otherwise a
+// reason string explaining why it isn't (suitable for buyer-facing messages).
+func (p *Promo) CheckActive(now time.Time) error {
+	if !p.IsActive {
+		return errors.New("kode promo nonaktif")
+	}
+	if p.StartsAt != nil && now.Before(*p.StartsAt) {
+		return errors.New("kode promo belum berlaku")
+	}
+	if p.ExpiresAt != nil && now.After(*p.ExpiresAt) {
+		return errors.New("kode promo sudah kadaluarsa")
+	}
+	if p.MaxUsage > 0 && p.UsedCount >= p.MaxUsage {
+		return errors.New("kuota kode promo sudah habis")
+	}
+	return nil
+}
+
+// ComputeDiscount returns the (subtotal-applicable) discount in cents and
+// whether shipping should be free. Caller is responsible for clamping to
+// subtotal and zeroing shipping_cents if freeShipping.
+func (p *Promo) ComputeDiscount(subtotalCents, shippingCents int64) (discount int64, freeShipping bool) {
+	switch p.Type {
+	case PromoPercent:
+		discount = subtotalCents * p.Value / 100
+	case PromoFixed:
+		discount = p.Value
+		if discount > subtotalCents {
+			discount = subtotalCents
+		}
+	case PromoFreeShipping:
+		freeShipping = true
+	}
+	return
+}
+
 // IncrementUsage is called when an order successfully redeems this promo.
 func (r *PromoRepo) IncrementUsage(ctx context.Context, id uuid.UUID) error {
 	_, err := r.pool.Exec(ctx,

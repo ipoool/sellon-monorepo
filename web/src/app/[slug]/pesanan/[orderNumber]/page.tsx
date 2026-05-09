@@ -29,6 +29,8 @@ type BuyerOrder = {
   payment_method: string;
   subtotal_cents: number;
   shipping_cents: number;
+  discount_cents: number;
+  promo_code: string;
   total_cents: number;
   courier: string;
   customer_name: string;
@@ -214,6 +216,15 @@ export default async function BuyerOrderPage({
                     <dt>Subtotal</dt>
                     <dd>{formatRupiah(order.subtotal_cents)}</dd>
                   </div>
+                  {order.discount_cents > 0 && (
+                    <div className="flex justify-between text-success">
+                      <dt>
+                        Diskon
+                        {order.promo_code ? ` (${order.promo_code})` : ""}
+                      </dt>
+                      <dd>−{formatRupiah(order.discount_cents)}</dd>
+                    </div>
+                  )}
                   <div className="flex justify-between text-neutral-600">
                     <dt>Ongkir{order.courier ? ` (${order.courier})` : ""}</dt>
                     <dd>{formatRupiah(order.shipping_cents)}</dd>

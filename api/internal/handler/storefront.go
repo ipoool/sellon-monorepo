@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -22,16 +23,19 @@ type StorefrontHandler struct {
 	orders     *repository.OrderRepo
 	banks      *repository.BankAccountRepo
 	categories *repository.CategoryRepo
+	promos     *repository.PromoRepo
 	logger     *slog.Logger
 }
 
 func NewStorefrontHandler(
 	s *repository.StoreRepo, p *repository.ProductRepo, v *repository.VariantRepo,
 	o *repository.OrderRepo, b *repository.BankAccountRepo, c *repository.CategoryRepo,
+	pr *repository.PromoRepo,
 	logger *slog.Logger,
 ) *StorefrontHandler {
 	return &StorefrontHandler{
-		stores: s, products: p, variants: v, orders: o, banks: b, categories: c, logger: logger,
+		stores: s, products: p, variants: v, orders: o, banks: b,
+		categories: c, promos: pr, logger: logger,
 	}
 }
 
@@ -195,6 +199,7 @@ type createOrderReq struct {
 	PaymentMethod   string         `json:"payment_method"`
 	Notes           string         `json:"notes"`
 	ShippingCents   int64          `json:"shipping_cents"`
+	PromoCode       string         `json:"promo_code"`
 	Items           []orderItemReq `json:"items"`
 }
 
@@ -298,6 +303,43 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 		})
 	}
 
+	// Resolve promo (if any). We re-validate server-side rather than trusting
+	// the client's discount calculation.
+	var (
+		promoID       *uuid.UUID
+		promoCode     string
+		discountCents int64
+		shippingCents = req.ShippingCents
+	)
+	if code := strings.TrimSpace(req.PromoCode); code != "" {
+		var subtotal int64
+		for _, it := range items {
+			subtotal += it.UnitCents * int64(it.Quantity)
+		}
+		promo, err := h.promos.FindByCode(r.Context(), store.ID, code)
+		if err != nil {
+			response.Error(w, http.StatusBadRequest, "kode promo tidak ditemukan")
+			return
+		}
+		if err := promo.CheckActive(time.Now()); err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if promo.MinPurchaseCents > 0 && subtotal < promo.MinPurchaseCents {
+			response.Error(w, http.StatusBadRequest,
+				"minimum belanja kode promo belum terpenuhi")
+			return
+		}
+		d, freeShipping := promo.ComputeDiscount(subtotal, shippingCents)
+		discountCents = d
+		if freeShipping {
+			shippingCents = 0
+		}
+		promoCode = promo.Code
+		pid := promo.ID
+		promoID = &pid
+	}
+
 	order, err := h.orders.Create(r.Context(), repository.CreateOrderInput{
 		StoreID:         store.ID,
 		CustomerName:    req.CustomerName,
@@ -307,7 +349,10 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 		Courier:         req.Courier,
 		PaymentMethod:   req.PaymentMethod,
 		Notes:           req.Notes,
-		ShippingCents:   req.ShippingCents,
+		ShippingCents:   shippingCents,
+		DiscountCents:   discountCents,
+		PromoCode:       promoCode,
+		PromoID:         promoID,
 		Items:           items,
 	})
 	if err != nil {
@@ -316,10 +361,66 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Bump promo usage AFTER the order is committed. Failure to bump shouldn't
+	// fail the order — log and move on.
+	if promoID != nil {
+		if err := h.promos.IncrementUsage(r.Context(), *promoID); err != nil {
+			h.logger.Error("increment promo usage", "err", err, "promo_id", promoID.String())
+		}
+	}
+
 	response.JSON(w, http.StatusCreated, map[string]any{
 		"order_id":     order.ID.String(),
 		"order_number": order.OrderNumber,
 		"total_cents":  order.TotalCents,
+	})
+}
+
+// POST /api/v1/storefront/{slug}/promos/validate — buyer-entered code check.
+type validatePromoReq struct {
+	Code          string `json:"code"`
+	SubtotalCents int64  `json:"subtotal_cents"`
+	ShippingCents int64  `json:"shipping_cents"`
+}
+
+func (h *StorefrontHandler) ValidatePromo(w http.ResponseWriter, r *http.Request) {
+	slug := chi.URLParam(r, "slug")
+	store, err := h.stores.FindBySlug(r.Context(), slug)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "toko tidak ditemukan")
+		return
+	}
+	var req validatePromoReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	code := strings.TrimSpace(req.Code)
+	if code == "" {
+		response.Error(w, http.StatusBadRequest, "kode wajib diisi")
+		return
+	}
+	promo, err := h.promos.FindByCode(r.Context(), store.ID, code)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "kode promo tidak ditemukan")
+		return
+	}
+	if err := promo.CheckActive(time.Now()); err != nil {
+		response.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if promo.MinPurchaseCents > 0 && req.SubtotalCents < promo.MinPurchaseCents {
+		response.Error(w, http.StatusBadRequest,
+			"minimum belanja belum terpenuhi untuk pakai kode ini")
+		return
+	}
+	discount, freeShipping := promo.ComputeDiscount(req.SubtotalCents, req.ShippingCents)
+	response.JSON(w, http.StatusOK, map[string]any{
+		"code":               promo.Code,
+		"type":               string(promo.Type),
+		"discount_cents":     discount,
+		"free_shipping":      freeShipping,
+		"min_purchase_cents": promo.MinPurchaseCents,
 	})
 }
 
@@ -384,6 +485,8 @@ func (h *StorefrontHandler) GetOrder(w http.ResponseWriter, r *http.Request) {
 			"payment_method":   order.PaymentMethod,
 			"subtotal_cents":   order.SubtotalCents,
 			"shipping_cents":   order.ShippingCents,
+			"discount_cents":   order.DiscountCents,
+			"promo_code":       order.PromoCode,
 			"total_cents":      order.TotalCents,
 			"courier":          order.Courier,
 			"tracking_number":  order.TrackingNumber,

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { ShoppingCart, MessageCircle, Truck } from "lucide-react";
+import { ShoppingCart, MessageCircle, Truck, Tag, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -47,6 +47,13 @@ type ShippingOption = {
   zone: string;
 };
 
+type AppliedPromo = {
+  code: string;
+  type: "percent" | "fixed" | "free_shipping";
+  discount_cents: number;
+  free_shipping: boolean;
+};
+
 const paymentMethods = [
   { value: "qris", label: "QRIS / Virtual Account" },
   { value: "transfer", label: "Transfer Bank Manual" },
@@ -83,6 +90,10 @@ export function CheckoutForm({
   const [shipping, setShipping] = useState<ShippingOption[]>([]);
   const [shippingLoading, setShippingLoading] = useState(false);
   const [pickedShipping, setPickedShipping] = useState<string>(""); // "code|service"
+  const [promoInput, setPromoInput] = useState("");
+  const [appliedPromo, setAppliedPromo] = useState<AppliedPromo | null>(null);
+  const [promoLoading, setPromoLoading] = useState(false);
+  const [promoError, setPromoError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -146,8 +157,86 @@ export function CheckoutForm({
   const pickedOption = shipping.find(
     (o) => `${o.code}|${o.service}` === pickedShipping,
   );
-  const shippingCents = pickedOption ? pickedOption.price_rpah * 100 : 0;
-  const grandTotal = subtotal + shippingCents;
+  const baseShippingCents = pickedOption ? pickedOption.price_rpah * 100 : 0;
+  const shippingCents = appliedPromo?.free_shipping ? 0 : baseShippingCents;
+  const discountCents = appliedPromo?.discount_cents ?? 0;
+  const grandTotal = Math.max(0, subtotal - discountCents) + shippingCents;
+
+  // Re-validate applied promo when subtotal/shipping changes — the rule
+  // (e.g. min purchase) might no longer hold.
+  useEffect(() => {
+    if (!appliedPromo) return;
+    const ctrl = new AbortController();
+    void fetch(`${apiBase}/api/v1/storefront/${storeSlug}/promos/validate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        code: appliedPromo.code,
+        subtotal_cents: subtotal,
+        shipping_cents: baseShippingCents,
+      }),
+      signal: ctrl.signal,
+    })
+      .then(async (r) => {
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          setAppliedPromo(null);
+          setPromoError(d.error || "Promo tidak valid lagi");
+          return;
+        }
+        setAppliedPromo({
+          code: d.code,
+          type: d.type,
+          discount_cents: d.discount_cents,
+          free_shipping: d.free_shipping,
+        });
+      })
+      .catch(() => {});
+    return () => ctrl.abort();
+    // appliedPromo intentionally excluded — we re-run only when totals change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subtotal, baseShippingCents, storeSlug]);
+
+  async function applyPromo() {
+    const code = promoInput.trim();
+    if (!code) return;
+    setPromoLoading(true);
+    setPromoError(null);
+    try {
+      const res = await fetch(
+        `${apiBase}/api/v1/storefront/${storeSlug}/promos/validate`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            code,
+            subtotal_cents: subtotal,
+            shipping_cents: baseShippingCents,
+          }),
+        },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || "Kode promo tidak berlaku");
+      }
+      setAppliedPromo({
+        code: data.code,
+        type: data.type,
+        discount_cents: data.discount_cents,
+        free_shipping: data.free_shipping,
+      });
+      setPromoInput("");
+    } catch (err) {
+      setPromoError(err instanceof Error ? err.message : "Kode promo tidak berlaku");
+    } finally {
+      setPromoLoading(false);
+    }
+  }
+
+  function removePromo() {
+    setAppliedPromo(null);
+    setPromoError(null);
+  }
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -181,7 +270,8 @@ export function CheckoutForm({
           courier: courierLabel,
           payment_method: paymentLabel,
           notes,
-          shipping_cents: shippingCents,
+          shipping_cents: baseShippingCents,
+          promo_code: appliedPromo?.code ?? "",
           items: [
             {
               product_id: product.id,
@@ -424,16 +514,90 @@ export function CheckoutForm({
           </div>
         </div>
 
+        {/* Promo code */}
+        <div className="mt-5 flex flex-col gap-2 border-t border-neutral-200 pt-4">
+          <Label className="flex items-center gap-1.5">
+            <Tag className="size-3.5 text-neutral-500" aria-hidden />
+            Kode Promo
+          </Label>
+          {appliedPromo ? (
+            <div className="flex items-center justify-between rounded-lg border border-success/40 bg-success/10 px-3 py-2.5">
+              <div>
+                <p className="font-mono text-sm font-semibold uppercase text-neutral-900">
+                  {appliedPromo.code}
+                </p>
+                <p className="text-xs text-neutral-600">
+                  {appliedPromo.free_shipping
+                    ? "Gratis ongkir"
+                    : `Hemat ${formatRupiah(appliedPromo.discount_cents)}`}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={removePromo}
+                className="inline-flex size-7 items-center justify-center rounded-md text-neutral-500 hover:bg-white hover:text-neutral-900"
+                aria-label="Hapus kode promo"
+              >
+                <X className="size-4" aria-hidden />
+              </button>
+            </div>
+          ) : (
+            <div className="flex gap-2">
+              <Input
+                value={promoInput}
+                onChange={(e) => setPromoInput(e.target.value.toUpperCase())}
+                placeholder="HEMAT10"
+                disabled={disabled || promoLoading}
+                className="font-mono uppercase"
+              />
+              <Button
+                type="button"
+                size="md"
+                variant="outline"
+                onClick={applyPromo}
+                disabled={disabled || promoLoading || !promoInput.trim()}
+              >
+                {promoLoading ? "…" : "Pakai"}
+              </Button>
+            </div>
+          )}
+          {promoError && !appliedPromo && (
+            <p className="text-xs font-medium text-danger">{promoError}</p>
+          )}
+        </div>
+
         {/* Total */}
         <dl className="mt-5 flex flex-col gap-1.5 border-t border-neutral-200 pt-4 text-sm">
           <div className="flex justify-between text-neutral-600">
             <dt>Subtotal</dt>
             <dd>{formatRupiah(subtotal)}</dd>
           </div>
+          {appliedPromo && discountCents > 0 && (
+            <div className="flex justify-between text-success">
+              <dt>Diskon ({appliedPromo.code})</dt>
+              <dd>−{formatRupiah(discountCents)}</dd>
+            </div>
+          )}
           <div className="flex justify-between text-neutral-600">
-            <dt>Ongkir</dt>
+            <dt>
+              Ongkir
+              {appliedPromo?.free_shipping && (
+                <span className="ml-1 text-xs text-success">(Gratis!)</span>
+              )}
+            </dt>
             <dd>
-              {pickedOption ? formatRupiah(shippingCents) : (
+              {pickedOption ? (
+                appliedPromo?.free_shipping ? (
+                  <span>
+                    <span className="text-neutral-400 line-through">
+                      {formatRupiah(baseShippingCents)}
+                    </span>{" "}
+                    {formatRupiah(0)}
+                  </span>
+                ) : (
+                  formatRupiah(shippingCents)
+                )
+              ) : (
                 <span className="text-neutral-400">— belum dipilih</span>
               )}
             </dd>

@@ -110,6 +110,8 @@ export type OrderDetail = {
   payment_method: string;
   subtotal_cents: number;
   shipping_cents: number;
+  discount_cents: number;
+  promo_code: string;
   total_cents: number;
   courier: string;
   courier_service: string;

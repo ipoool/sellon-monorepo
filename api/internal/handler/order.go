@@ -65,6 +65,8 @@ type orderDetailDTO struct {
 	PaymentMethod      string         `json:"payment_method"`
 	SubtotalCents      int64          `json:"subtotal_cents"`
 	ShippingCents      int64          `json:"shipping_cents"`
+	DiscountCents      int64          `json:"discount_cents"`
+	PromoCode          string         `json:"promo_code"`
 	TotalCents         int64          `json:"total_cents"`
 	Courier            string         `json:"courier"`
 	CourierService     string         `json:"courier_service"`
@@ -232,7 +234,9 @@ func orderDetailToDTO(o *repository.Order, items []orderItemDTO) orderDetailDTO 
 	return orderDetailDTO{
 		ID: o.ID.String(), OrderNumber: o.OrderNumber,
 		Status: o.Status, PaymentStatus: o.PaymentStatus, PaymentMethod: o.PaymentMethod,
-		SubtotalCents: o.SubtotalCents, ShippingCents: o.ShippingCents, TotalCents: o.TotalCents,
+		SubtotalCents: o.SubtotalCents, ShippingCents: o.ShippingCents,
+		DiscountCents: o.DiscountCents, PromoCode: o.PromoCode,
+		TotalCents: o.TotalCents,
 		Courier: o.Courier, CourierService: o.CourierService, TrackingNumber: o.TrackingNumber,
 		CustomerName: o.CustomerName, CustomerWhatsApp: o.CustomerWhatsApp,
 		CustomerAddress: o.CustomerAddress, CustomerCity: o.CustomerCity,
