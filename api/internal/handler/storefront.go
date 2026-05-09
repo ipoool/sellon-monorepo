@@ -66,6 +66,7 @@ type publicProductDTO struct {
 	Stock       int      `json:"stock"`
 	PhotoURLs   []string `json:"photo_urls"`
 	IsFeatured  bool     `json:"is_featured"`
+	HasVariants bool     `json:"has_variants"`
 }
 
 type publicCategoryDTO struct {
@@ -103,7 +104,7 @@ func toPublicProduct(p *repository.Product) publicProductDTO {
 		ID: p.ID.String(), CategoryID: categoryID,
 		Name: p.Name, Slug: p.Slug, Description: p.Description,
 		PriceCents: p.PriceCents, Stock: p.Stock, PhotoURLs: p.PhotoURLs,
-		IsFeatured: p.IsFeatured,
+		IsFeatured: p.IsFeatured, HasVariants: p.HasVariants,
 	}
 }
 
