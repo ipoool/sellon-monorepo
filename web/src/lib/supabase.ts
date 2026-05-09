@@ -1,16 +1,26 @@
-// Browser-side helpers for product photo uploads. The actual upload
-// happens on the Go API (which holds the Supabase service key); this
-// module only POSTs the file as multipart/form-data and surfaces any
-// configuration / size / mime errors.
+// Browser-side helpers for image uploads. The actual upload happens on
+// the Go API (which holds the Supabase service key); this module only
+// POSTs the file as multipart/form-data and surfaces any configuration /
+// size / mime errors.
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+
+export type UploadKind =
+  | "product"
+  | "logo"
+  | "banner"
+  | "qris"
+  | "general";
 
 export type UploadResult = {
   url: string;
   path: string;
 };
 
-export async function uploadProductPhoto(file: File): Promise<UploadResult> {
+export async function uploadImage(
+  file: File,
+  kind: UploadKind = "general",
+): Promise<UploadResult> {
   if (!file.type.startsWith("image/")) {
     throw new Error("File harus berupa gambar (JPG/PNG/WebP)");
   }
@@ -19,8 +29,9 @@ export async function uploadProductPhoto(file: File): Promise<UploadResult> {
   }
   const fd = new FormData();
   fd.append("file", file);
+  fd.append("kind", kind);
 
-  const res = await fetch(`${apiBase}/api/v1/products/upload-photo`, {
+  const res = await fetch(`${apiBase}/api/v1/uploads/image`, {
     method: "POST",
     credentials: "include",
     body: fd,
@@ -36,3 +47,6 @@ export async function uploadProductPhoto(file: File): Promise<UploadResult> {
   }
   return { url: data.url, path: data.path };
 }
+
+// Backwards-compatible alias for the previous product-photo helper.
+export const uploadProductPhoto = (file: File) => uploadImage(file, "product");

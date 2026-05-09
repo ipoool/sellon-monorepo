@@ -52,6 +52,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	authHandler := handler.NewAuthHandler(users, googleVerifier, jwtSvc, logger, cfg.IsProd())
 	storeHandler := handler.NewStoreHandler(stores, logger)
 	productHandler := handler.NewProductHandler(products, variants, stores, storageClient, logger)
+	uploadHandler := handler.NewUploadHandler(stores, storageClient, logger)
 	orderHandler := handler.NewOrderHandler(orders, stores, gateways, encryptor, midtransClient, logger)
 	customerHandler := handler.NewCustomerHandler(customers, orders, stores, logger)
 	paymentHandler := handler.NewPaymentHandler(gateways, stores, encryptor, midtransClient, logger, cfg.WebhookBaseURL)
@@ -119,11 +120,12 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 				r.Post("/", productHandler.Create)
 				r.Get("/bulk/template", productHandler.BulkTemplate)
 				r.Post("/bulk", productHandler.BulkUpload)
-				r.Post("/upload-photo", productHandler.UploadPhoto)
 				r.Get("/{id}", productHandler.Get)
 				r.Put("/{id}", productHandler.Update)
 				r.Delete("/{id}", productHandler.Delete)
 			})
+
+			r.Post("/uploads/image", uploadHandler.Image)
 
 			r.Route("/orders", func(r chi.Router) {
 				r.Get("/", orderHandler.List)

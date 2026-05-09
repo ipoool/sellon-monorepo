@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Trash2, Save, ArrowLeft, Plus, X, Image as ImageIcon, Layers, Star } from "lucide-react";
+import { Trash2, Save, ArrowLeft, Plus, X, Layers, Star } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,7 +33,6 @@ export function ProdukForm({ initial }: Props) {
   const isEditing = !!initial;
 
   const [photoUrls, setPhotoUrls] = useState<string[]>(initial?.photo_urls ?? []);
-  const [photoInput, setPhotoInput] = useState("");
   const [pending, setPending] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -65,18 +64,6 @@ export function ProdukForm({ initial }: Props) {
       }
     })();
   }, []);
-
-  function addPhoto() {
-    const url = photoInput.trim();
-    if (!url) return;
-    if (photoUrls.length >= 5) {
-      setError("Maks. 5 foto per produk");
-      return;
-    }
-    setPhotoUrls([...photoUrls, url]);
-    setPhotoInput("");
-    setError(null);
-  }
 
   function removePhoto(idx: number) {
     setPhotoUrls(photoUrls.filter((_, i) => i !== idx));
@@ -294,7 +281,7 @@ export function ProdukForm({ initial }: Props) {
         <div className="mb-4">
           <h2 className="font-semibold text-neutral-900">Foto Produk</h2>
           <p className="mt-0.5 text-sm text-neutral-500">
-            Maks. 5 foto. Upload langsung dari device atau tempel URL gambar.
+            Maks. 5 foto. Upload langsung dari device.
           </p>
         </div>
 
@@ -327,48 +314,14 @@ export function ProdukForm({ initial }: Props) {
           </div>
         )}
 
-        <div className="flex flex-col gap-3">
-          <PhotoUploader
-            disabled={photoUrls.length >= 5}
-            onUploaded={(url) =>
-              setPhotoUrls((prev) =>
-                prev.length >= 5 ? prev : [...prev, url],
-              )
-            }
-          />
-          <div className="flex gap-2">
-            <div className="relative flex-1">
-              <span
-                aria-hidden
-                className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-neutral-400"
-              >
-                <ImageIcon className="size-4" />
-              </span>
-              <Input
-                type="url"
-                value={photoInput}
-                onChange={(e) => setPhotoInput(e.target.value)}
-                placeholder="…atau tempel URL gambar"
-                className="pl-9"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    addPhoto();
-                  }
-                }}
-              />
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={addPhoto}
-              disabled={!photoInput.trim() || photoUrls.length >= 5}
-            >
-              <Plus className="size-4" aria-hidden />
-              Tambah URL
-            </Button>
-          </div>
-        </div>
+        <PhotoUploader
+          disabled={photoUrls.length >= 5}
+          onUploaded={(url) =>
+            setPhotoUrls((prev) =>
+              prev.length >= 5 ? prev : [...prev, url],
+            )
+          }
+        />
       </Card>
 
       <Card>

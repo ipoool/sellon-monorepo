@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { JamBukaEditor } from "@/components/dashboard/jam-buka-editor";
+import { ImageUploadInput } from "@/components/dashboard/image-upload-input";
 import type { OpenHours, Store } from "@/lib/types";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -33,6 +34,8 @@ export function TokoForm({ initial }: { initial: Store | null }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [logoUrl, setLogoUrl] = useState(initial?.logo_url ?? "");
+  const [bannerUrl, setBannerUrl] = useState(initial?.banner_url ?? "");
 
   const isCreating = !initial;
 
@@ -54,8 +57,8 @@ export function TokoForm({ initial }: { initial: Store | null }) {
       name: String(fd.get("name") ?? ""),
       slug: String(fd.get("slug") ?? ""),
       description: String(fd.get("description") ?? ""),
-      logo_url: String(fd.get("logo_url") ?? ""),
-      banner_url: String(fd.get("banner_url") ?? ""),
+      logo_url: logoUrl,
+      banner_url: bannerUrl,
       tagline: String(fd.get("tagline") ?? ""),
       category: String(fd.get("category") ?? ""),
       city: String(fd.get("city") ?? ""),
@@ -161,17 +164,15 @@ export function TokoForm({ initial }: { initial: Store | null }) {
             />
           </div>
           <div className="flex flex-col gap-1.5 sm:col-span-2">
-            <Label htmlFor="logo_url">URL Logo</Label>
-            <Input
-              id="logo_url"
-              name="logo_url"
-              type="url"
-              defaultValue={initial?.logo_url ?? ""}
-              placeholder="https://example.com/logo.png"
+            <Label>Logo Toko</Label>
+            <ImageUploadInput
+              value={logoUrl}
+              onChange={setLogoUrl}
+              kind="logo"
+              shape="square"
             />
             <p className="text-xs text-neutral-500">
-              Tempel link gambar (PNG/JPG, kotak ~512×512). Upload langsung akan
-              hadir saat integrasi storage selesai.
+              PNG/JPG kotak (~512×512) untuk avatar toko.
             </p>
           </div>
           <div className="flex flex-col gap-1.5 sm:col-span-2">
@@ -188,17 +189,16 @@ export function TokoForm({ initial }: { initial: Store | null }) {
             </p>
           </div>
           <div className="flex flex-col gap-1.5 sm:col-span-2">
-            <Label htmlFor="banner_url">URL Banner</Label>
-            <Input
-              id="banner_url"
-              name="banner_url"
-              type="url"
-              defaultValue={initial?.banner_url ?? ""}
-              placeholder="https://example.com/banner.jpg"
+            <Label>Banner Toko</Label>
+            <ImageUploadInput
+              value={bannerUrl}
+              onChange={setBannerUrl}
+              kind="banner"
+              shape="wide"
             />
             <p className="text-xs text-neutral-500">
-              Gambar landscape (~1600×500) untuk hero halaman toko. Kosongkan jika
-              tidak pakai.
+              Gambar landscape (~1600×500) untuk hero halaman toko. Kosongkan
+              jika tidak pakai.
             </p>
           </div>
         </div>

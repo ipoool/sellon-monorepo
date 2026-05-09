@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { ImageUploadInput } from "@/components/dashboard/image-upload-input";
 import type { BankAccount } from "@/lib/types";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -24,6 +25,7 @@ export function BankAccountsManager() {
   const [editing, setEditing] = useState<EditState>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [qrisUrl, setQrisUrl] = useState("");
 
   async function refresh() {
     try {
@@ -42,6 +44,16 @@ export function BankAccountsManager() {
     void refresh();
   }, []);
 
+  // Seed the QRIS upload state when the form opens for new/edit so the
+  // controlled <ImageUploadInput> shows the existing image.
+  useEffect(() => {
+    if (!editing) {
+      setQrisUrl("");
+      return;
+    }
+    setQrisUrl(editing.mode === "edit" ? editing.account.qris_url : "");
+  }, [editing]);
+
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!editing) return;
@@ -54,7 +66,7 @@ export function BankAccountsManager() {
       holder_name: String(fd.get("holder_name") ?? "").trim(),
       account_no: String(fd.get("account_no") ?? "").trim(),
       is_primary: fd.get("is_primary") === "on",
-      qris_url: String(fd.get("qris_url") ?? "").trim(),
+      qris_url: qrisUrl.trim(),
     };
 
     try {
@@ -246,16 +258,16 @@ export function BankAccountsManager() {
               />
             </div>
             <div className="flex flex-col gap-1.5 sm:col-span-2">
-              <Label htmlFor="qris_url">URL Gambar QRIS Statis (opsional)</Label>
-              <Input
-                id="qris_url"
-                name="qris_url"
-                type="url"
-                defaultValue={editing.mode === "edit" ? editing.account.qris_url : ""}
-                placeholder="https://example.com/qris-toko.png"
+              <Label>Gambar QRIS Statis (opsional)</Label>
+              <ImageUploadInput
+                value={qrisUrl}
+                onChange={setQrisUrl}
+                kind="qris"
+                shape="square"
               />
               <p className="text-xs text-neutral-500">
-                Tempel URL gambar QR-nya. Pembeli scan QR ini saat checkout. Upload langsung akan tersedia setelah integrasi storage.
+                Upload screenshot/foto QR-nya. Pembeli akan scan QR ini saat
+                checkout.
               </p>
             </div>
           </div>
