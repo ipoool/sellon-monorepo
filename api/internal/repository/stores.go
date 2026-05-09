@@ -29,6 +29,10 @@ type Store struct {
 	ShippingOriginCity         string
 	EnabledCouriers            []string
 	FreeShippingThresholdCents int64
+	ThemeHue                   int
+	ShowHoursPublic            bool
+	ShowSocialPublic           bool
+	FooterText                 string
 	CreatedAt                  time.Time
 	UpdatedAt                  time.Time
 }
@@ -46,6 +50,7 @@ var ErrStoreNotFound = errors.New("store not found")
 const storeColumns = `id, owner_id, slug, name, description, logo_url, banner_url, tagline,
 	category, city, whatsapp_number, instagram, tiktok, open_hours, is_open,
 	shipping_origin_city, enabled_couriers, free_shipping_threshold_cents,
+	theme_hue, show_hours_public, show_social_public, footer_text,
 	created_at, updated_at`
 
 // Same column list but qualified with the `s.` alias, used in joins.
@@ -53,6 +58,7 @@ const qualifiedStoreColumns = `s.id, s.owner_id, s.slug, s.name, s.description,
 	s.logo_url, s.banner_url, s.tagline, s.category, s.city,
 	s.whatsapp_number, s.instagram, s.tiktok, s.open_hours, s.is_open,
 	s.shipping_origin_city, s.enabled_couriers, s.free_shipping_threshold_cents,
+	s.theme_hue, s.show_hours_public, s.show_social_public, s.footer_text,
 	s.created_at, s.updated_at`
 
 func scanStore(row pgx.Row, s *Store) error {
@@ -62,6 +68,7 @@ func scanStore(row pgx.Row, s *Store) error {
 		&s.Category, &s.City, &s.WhatsAppNumber, &s.Instagram, &s.TikTok,
 		&s.OpenHours, &s.IsOpen,
 		&s.ShippingOriginCity, &s.EnabledCouriers, &s.FreeShippingThresholdCents,
+		&s.ThemeHue, &s.ShowHoursPublic, &s.ShowSocialPublic, &s.FooterText,
 		&s.CreatedAt, &s.UpdatedAt,
 	)
 }
@@ -138,6 +145,42 @@ type UpdateStoreInput struct {
 	TikTok         string
 	OpenHoursJSON  []byte // raw JSON; nil = don't update
 	IsOpen         bool
+}
+
+type UpdateStorefrontInput struct {
+	LogoURL          string
+	BannerURL        string
+	Tagline          string
+	ThemeHue         int
+	ShowHoursPublic  bool
+	ShowSocialPublic bool
+	FooterText       string
+}
+
+// UpdateStorefront is a narrow updater for the Pengaturan → Storefront page
+// (logo + banner + tagline + theme hue + visibility toggles + footer).
+func (r *StoreRepo) UpdateStorefront(ctx context.Context, id uuid.UUID, in UpdateStorefrontInput) (*Store, error) {
+	hue := in.ThemeHue
+	if hue < 0 || hue > 360 {
+		hue = 145
+	}
+	q := `
+		UPDATE stores
+		SET logo_url = $2, banner_url = $3, tagline = $4,
+		    theme_hue = $5, show_hours_public = $6, show_social_public = $7,
+		    footer_text = $8,
+		    updated_at = now()
+		WHERE id = $1
+		RETURNING ` + storeColumns
+	var s Store
+	if err := scanStore(r.pool.QueryRow(ctx, q, id,
+		in.LogoURL, in.BannerURL, in.Tagline,
+		hue, in.ShowHoursPublic, in.ShowSocialPublic,
+		in.FooterText,
+	), &s); err != nil {
+		return nil, err
+	}
+	return &s, nil
 }
 
 type UpdateShippingInput struct {

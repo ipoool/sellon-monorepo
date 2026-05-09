@@ -36,6 +36,13 @@ type Props = {
   };
   variants?: StorefrontVariant[];
   isOpen: boolean;
+  payment?: {
+    has_midtrans: boolean;
+    midtrans_methods: string[];
+    has_manual_bank: boolean;
+    has_qris_static: boolean;
+    bank_count: number;
+  };
 };
 
 type ShippingOption = {
@@ -54,11 +61,37 @@ type AppliedPromo = {
   free_shipping: boolean;
 };
 
-const paymentMethods = [
-  { value: "qris", label: "QRIS / Virtual Account" },
-  { value: "transfer", label: "Transfer Bank Manual" },
-  { value: "cod", label: "Bayar di Tempat (COD)" },
-];
+type PaymentOption = { value: string; label: string };
+
+// Build the dropdown options from what the seller actually configured in
+// Pengaturan → Pembayaran. Falls back to Transfer Manual when nothing is
+// configured so the page still functions.
+function buildPaymentOptions(
+  payment: Props["payment"] | undefined,
+): PaymentOption[] {
+  const out: PaymentOption[] = [];
+  if (payment?.has_midtrans) {
+    const m = payment.midtrans_methods ?? [];
+    if (m.includes("qris")) out.push({ value: "qris", label: "QRIS" });
+    if (m.includes("bank_transfer"))
+      out.push({ value: "va", label: "Virtual Account / Bank Transfer" });
+    if (m.includes("gopay")) out.push({ value: "gopay", label: "GoPay" });
+    if (m.includes("shopeepay"))
+      out.push({ value: "shopeepay", label: "ShopeePay" });
+    if (m.includes("credit_card"))
+      out.push({ value: "credit_card", label: "Kartu Kredit/Debit" });
+  }
+  if (payment?.has_manual_bank) {
+    out.push({ value: "transfer", label: "Transfer Bank Manual" });
+  }
+  if (payment?.has_qris_static && !payment?.has_midtrans) {
+    out.push({ value: "qris_static", label: "QRIS (scan foto)" });
+  }
+  if (out.length === 0) {
+    out.push({ value: "transfer", label: "Transfer Bank Manual" });
+  }
+  return out;
+}
 
 const orderTemplate = `Halo {nama_toko}, saya mau order:
 
@@ -82,8 +115,10 @@ export function CheckoutForm({
   product,
   variants = [],
   isOpen,
+  payment,
 }: Props) {
   const router = useRouter();
+  const paymentMethods = buildPaymentOptions(payment);
   const [qty, setQty] = useState(1);
   const [variantId, setVariantId] = useState<string>("");
   const [city, setCity] = useState("");

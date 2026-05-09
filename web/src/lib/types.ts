@@ -20,6 +20,10 @@ export type Store = {
   shipping_origin_city?: string;
   enabled_couriers?: string[];
   free_shipping_threshold_cents?: number;
+  theme_hue?: number;
+  show_hours_public?: boolean;
+  show_social_public?: boolean;
+  footer_text?: string;
 };
 
 export type BankAccount = {

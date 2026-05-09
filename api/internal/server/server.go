@@ -59,7 +59,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	customerHandler := handler.NewCustomerHandler(customers, orders, stores, logger)
 	paymentHandler := handler.NewPaymentHandler(gateways, stores, encryptor, midtransClient, logger, cfg.WebhookBaseURL)
 	dashHandler := handler.NewDashboardHandler(stores, products, orders, customers, logger)
-	storefrontHandler := handler.NewStorefrontHandler(stores, products, variants, orders, bankAccounts, categories, promos, logger)
+	storefrontHandler := handler.NewStorefrontHandler(stores, products, variants, orders, bankAccounts, categories, promos, gateways, logger)
 	waTemplateHandler := handler.NewWATemplateHandler(waTemplates, stores, logger)
 	webhookHandler := handler.NewWebhookHandler(gateways, orders, encryptor, logger)
 	bankAccountHandler := handler.NewBankAccountHandler(bankAccounts, stores, logger)
@@ -117,6 +117,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 				r.Post("/", storeHandler.Create)
 				r.Put("/", storeHandler.Update)
 				r.Put("/shipping", storeHandler.UpdateShipping)
+				r.Put("/storefront", storeHandler.UpdateStorefront)
 			})
 
 			r.Route("/products", func(r chi.Router) {

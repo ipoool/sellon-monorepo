@@ -36,7 +36,31 @@ type StorefrontStore = {
   tiktok: string;
   open_hours: OpenHours;
   is_open: boolean;
+  theme_hue?: number;
+  show_hours_public?: boolean;
+  show_social_public?: boolean;
+  footer_text?: string;
 };
+
+// Map an OKLCH hue (0-360) into the 11-shade brand palette as inline CSS
+// custom properties. Used by the public toko page so each store can have
+// its own brand color without a global theme rebuild.
+function themeStyleForHue(hue: number | undefined): React.CSSProperties {
+  const h = typeof hue === "number" && hue >= 0 && hue <= 360 ? hue : 145;
+  return {
+    "--color-brand-50": `oklch(0.97 0.025 ${h})`,
+    "--color-brand-100": `oklch(0.94 0.06 ${h})`,
+    "--color-brand-200": `oklch(0.88 0.11 ${h})`,
+    "--color-brand-300": `oklch(0.81 0.15 ${h})`,
+    "--color-brand-400": `oklch(0.76 0.17 ${h})`,
+    "--color-brand-500": `oklch(0.71 0.18 ${h})`,
+    "--color-brand-600": `oklch(0.61 0.17 ${h})`,
+    "--color-brand-700": `oklch(0.51 0.15 ${h})`,
+    "--color-brand-800": `oklch(0.41 0.12 ${h})`,
+    "--color-brand-900": `oklch(0.31 0.09 ${h})`,
+    "--color-brand-950": `oklch(0.21 0.06 ${h})`,
+  } as React.CSSProperties;
+}
 
 type StorefrontProduct = {
   id: string;
@@ -135,9 +159,14 @@ export default async function StorefrontPage({
   const todayHours = store.open_hours?.[todayKey()];
   const openNow = store.is_open && isCurrentlyOpen(store.open_hours) !== false;
   const showClosedBanner = !store.is_open || openNow === false;
+  const showHours = store.show_hours_public !== false; // default true
+  const showSocial = store.show_social_public !== false;
 
   return (
-    <div className="min-h-svh bg-neutral-50">
+    <div
+      className="min-h-svh bg-neutral-50"
+      style={themeStyleForHue(store.theme_hue)}
+    >
       {store.banner_url && (
         <div className="relative h-44 w-full overflow-hidden bg-neutral-100 sm:h-56 lg:h-64">
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -217,13 +246,13 @@ export default async function StorefrontPage({
                     {store.category}
                   </span>
                 )}
-                {todayHours && !todayHours.closed && (
+                {showHours && todayHours && !todayHours.closed && (
                   <span className="inline-flex items-center gap-1">
                     <Clock className="size-3.5" aria-hidden />
                     Hari ini {todayHours.open} – {todayHours.close} WIB
                   </span>
                 )}
-                {todayHours?.closed && (
+                {showHours && todayHours?.closed && (
                   <span className="inline-flex items-center gap-1 text-warning">
                     <Clock className="size-3.5" aria-hidden />
                     Tutup hari ini
@@ -243,7 +272,7 @@ export default async function StorefrontPage({
                     Chat WhatsApp
                   </a>
                 )}
-                {store.instagram && (
+                {showSocial && store.instagram && (
                   <a
                     href={`https://instagram.com/${store.instagram.replace(/^@/, "")}`}
                     target="_blank"
@@ -254,7 +283,7 @@ export default async function StorefrontPage({
                     Instagram {store.instagram}
                   </a>
                 )}
-                {store.tiktok && (
+                {showSocial && store.tiktok && (
                   <a
                     href={`https://tiktok.com/@${store.tiktok.replace(/^@/, "")}`}
                     target="_blank"
@@ -268,7 +297,7 @@ export default async function StorefrontPage({
               </div>
 
               {/* Full week hours collapsed */}
-              {store.open_hours && Object.keys(store.open_hours).length > 0 && (
+              {showHours && store.open_hours && Object.keys(store.open_hours).length > 0 && (
                 <details className="mt-3 max-w-md text-xs text-neutral-600">
                   <summary className="cursor-pointer font-medium text-neutral-700 hover:text-neutral-900">
                     Lihat jadwal lengkap
@@ -317,6 +346,11 @@ export default async function StorefrontPage({
 
       <footer className="border-t border-neutral-200 bg-white py-6">
         <Container>
+          {store.footer_text && (
+            <p className="mb-2 text-center text-sm text-neutral-700">
+              {store.footer_text}
+            </p>
+          )}
           <p className="text-center text-xs text-neutral-500">
             Toko ini ditenagai oleh{" "}
             <Link

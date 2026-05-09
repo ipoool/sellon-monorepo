@@ -2,11 +2,21 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Store, CreditCard, Truck, MessageCircle, Tag, Crown, Users } from "lucide-react";
+import {
+  Store,
+  CreditCard,
+  Truck,
+  MessageCircle,
+  Tag,
+  Crown,
+  Users,
+  Palette,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const tabs = [
   { label: "Profil Toko", href: "/dasbor/pengaturan/toko", icon: Store },
+  { label: "Storefront", href: "/dasbor/pengaturan/storefront", icon: Palette },
   { label: "Pembayaran", href: "/dasbor/pengaturan/pembayaran", icon: CreditCard },
   { label: "Kategori", href: "/dasbor/pengaturan/kategori", icon: Tag },
   { label: "Pengiriman", href: "/dasbor/pengaturan/pengiriman", icon: Truck },

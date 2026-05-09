@@ -38,6 +38,14 @@ type StorefrontVariant = {
   stock: number;
 };
 
+type StorefrontPayment = {
+  has_midtrans: boolean;
+  midtrans_methods: string[];
+  has_manual_bank: boolean;
+  has_qris_static: boolean;
+  bank_count: number;
+};
+
 async function fetchProduct(
   slug: string,
   productSlug: string,
@@ -45,6 +53,7 @@ async function fetchProduct(
   store: Store;
   product: Product;
   variants: StorefrontVariant[];
+  payment?: StorefrontPayment;
 } | null> {
   try {
     const res = await fetch(
@@ -80,7 +89,7 @@ export default async function ProductDetailPage({
   const { slug, productSlug } = await params;
   const data = await fetchProduct(slug, productSlug);
   if (!data) notFound();
-  const { store, product, variants = [] } = data;
+  const { store, product, variants = [], payment } = data;
   const totalStock = product.has_variants
     ? variants.reduce((sum, v) => sum + v.stock, 0)
     : product.stock;
@@ -197,6 +206,7 @@ export default async function ProductDetailPage({
                   }}
                   variants={variants}
                   isOpen={store.is_open}
+                  payment={payment}
                 />
               </div>
             </div>

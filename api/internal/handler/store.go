@@ -40,6 +40,10 @@ type storeDTO struct {
 	ShippingOriginCity         string          `json:"shipping_origin_city"`
 	EnabledCouriers            []string        `json:"enabled_couriers"`
 	FreeShippingThresholdCents int64           `json:"free_shipping_threshold_cents"`
+	ThemeHue                   int             `json:"theme_hue"`
+	ShowHoursPublic            bool            `json:"show_hours_public"`
+	ShowSocialPublic           bool            `json:"show_social_public"`
+	FooterText                 string          `json:"footer_text"`
 }
 
 func toStoreDTO(s *repository.Store) storeDTO {
@@ -60,6 +64,10 @@ func toStoreDTO(s *repository.Store) storeDTO {
 		ShippingOriginCity:         s.ShippingOriginCity,
 		EnabledCouriers:            couriers,
 		FreeShippingThresholdCents: s.FreeShippingThresholdCents,
+		ThemeHue:                   s.ThemeHue,
+		ShowHoursPublic:            s.ShowHoursPublic,
+		ShowSocialPublic:           s.ShowSocialPublic,
+		FooterText:                 s.FooterText,
 	}
 }
 
@@ -168,6 +176,50 @@ func (h *StoreHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.logger.Error("update store", "err", err)
 		response.Error(w, http.StatusInternalServerError, "gagal update toko")
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]any{"store": toStoreDTO(store)})
+}
+
+type updateStorefrontReq struct {
+	LogoURL          string `json:"logo_url"`
+	BannerURL        string `json:"banner_url"`
+	Tagline          string `json:"tagline"`
+	ThemeHue         int    `json:"theme_hue"`
+	ShowHoursPublic  bool   `json:"show_hours_public"`
+	ShowSocialPublic bool   `json:"show_social_public"`
+	FooterText       string `json:"footer_text"`
+}
+
+// PUT /api/v1/store/storefront — narrow updater for the Storefront page.
+func (h *StoreHandler) UpdateStorefront(w http.ResponseWriter, r *http.Request) {
+	uid, _ := auth.UserIDFromContext(r.Context())
+	existing, err := h.stores.FindByOwnerID(r.Context(), uid)
+	if errors.Is(err, repository.ErrStoreNotFound) {
+		response.Error(w, http.StatusNotFound, "toko belum dibuat")
+		return
+	}
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	var req updateStorefrontReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	store, err := h.stores.UpdateStorefront(r.Context(), existing.ID, repository.UpdateStorefrontInput{
+		LogoURL:          req.LogoURL,
+		BannerURL:        req.BannerURL,
+		Tagline:          strings.TrimSpace(req.Tagline),
+		ThemeHue:         req.ThemeHue,
+		ShowHoursPublic:  req.ShowHoursPublic,
+		ShowSocialPublic: req.ShowSocialPublic,
+		FooterText:       strings.TrimSpace(req.FooterText),
+	})
+	if err != nil {
+		h.logger.Error("update storefront", "err", err)
+		response.Error(w, http.StatusInternalServerError, "gagal simpan")
 		return
 	}
 	response.JSON(w, http.StatusOK, map[string]any{"store": toStoreDTO(store)})

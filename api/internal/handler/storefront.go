@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -24,36 +25,92 @@ type StorefrontHandler struct {
 	banks      *repository.BankAccountRepo
 	categories *repository.CategoryRepo
 	promos     *repository.PromoRepo
+	gateways   *repository.PaymentRepo
 	logger     *slog.Logger
 }
 
 func NewStorefrontHandler(
 	s *repository.StoreRepo, p *repository.ProductRepo, v *repository.VariantRepo,
 	o *repository.OrderRepo, b *repository.BankAccountRepo, c *repository.CategoryRepo,
-	pr *repository.PromoRepo,
+	pr *repository.PromoRepo, gw *repository.PaymentRepo,
 	logger *slog.Logger,
 ) *StorefrontHandler {
 	return &StorefrontHandler{
 		stores: s, products: p, variants: v, orders: o, banks: b,
-		categories: c, promos: pr, logger: logger,
+		categories: c, promos: pr, gateways: gw, logger: logger,
+	}
+}
+
+// publicPaymentDTO summarizes what the buyer can pay with — used by the
+// checkout form to render only the methods the seller has actually
+// configured in Pengaturan → Pembayaran.
+type publicPaymentDTO struct {
+	HasMidtrans     bool     `json:"has_midtrans"`
+	MidtransMethods []string `json:"midtrans_methods"` // qris, bank_transfer, gopay, etc.
+	HasManualBank   bool     `json:"has_manual_bank"`
+	HasQrisStatic   bool     `json:"has_qris_static"`
+	BankCount       int      `json:"bank_count"`
+}
+
+// publicShippingDTO summarizes courier whitelist + free-ongkir threshold
+// so the checkout form can hint these to the buyer.
+type publicShippingDTO struct {
+	EnabledCouriers            []string `json:"enabled_couriers"`
+	FreeShippingThresholdCents int64    `json:"free_shipping_threshold_cents"`
+}
+
+func (h *StorefrontHandler) buildPaymentDTO(ctx context.Context, storeID uuid.UUID) publicPaymentDTO {
+	out := publicPaymentDTO{}
+	if gw, err := h.gateways.Get(ctx, storeID, "midtrans"); err == nil && gw != nil {
+		out.HasMidtrans = len(gw.ServerKeySandboxEncrypted) > 0 || len(gw.ServerKeyProdEncrypted) > 0
+		out.MidtransMethods = append(out.MidtransMethods, gw.EnabledMethods...)
+	}
+	banks, _ := h.banks.ListByStore(ctx, storeID)
+	for _, b := range banks {
+		if b.AccountNo != "" || b.BankName != "" {
+			out.HasManualBank = true
+			out.BankCount++
+		}
+		if b.QRISURL != "" {
+			out.HasQrisStatic = true
+		}
+	}
+	if out.MidtransMethods == nil {
+		out.MidtransMethods = []string{}
+	}
+	return out
+}
+
+func (h *StorefrontHandler) buildShippingDTO(s *repository.Store) publicShippingDTO {
+	couriers := s.EnabledCouriers
+	if couriers == nil {
+		couriers = []string{}
+	}
+	return publicShippingDTO{
+		EnabledCouriers:            couriers,
+		FreeShippingThresholdCents: s.FreeShippingThresholdCents,
 	}
 }
 
 type publicStoreDTO struct {
-	ID             string          `json:"id"`
-	Slug           string          `json:"slug"`
-	Name           string          `json:"name"`
-	Description    string          `json:"description"`
-	LogoURL        string          `json:"logo_url"`
-	BannerURL      string          `json:"banner_url"`
-	Tagline        string          `json:"tagline"`
-	Category       string          `json:"category"`
-	City           string          `json:"city"`
-	WhatsAppNumber string          `json:"whatsapp_number"`
-	Instagram      string          `json:"instagram"`
-	TikTok         string          `json:"tiktok"`
-	OpenHours      json.RawMessage `json:"open_hours"`
-	IsOpen         bool            `json:"is_open"`
+	ID               string          `json:"id"`
+	Slug             string          `json:"slug"`
+	Name             string          `json:"name"`
+	Description      string          `json:"description"`
+	LogoURL          string          `json:"logo_url"`
+	BannerURL        string          `json:"banner_url"`
+	Tagline          string          `json:"tagline"`
+	Category         string          `json:"category"`
+	City             string          `json:"city"`
+	WhatsAppNumber   string          `json:"whatsapp_number"`
+	Instagram        string          `json:"instagram"`
+	TikTok           string          `json:"tiktok"`
+	OpenHours        json.RawMessage `json:"open_hours"`
+	IsOpen           bool            `json:"is_open"`
+	ThemeHue         int             `json:"theme_hue"`
+	ShowHoursPublic  bool            `json:"show_hours_public"`
+	ShowSocialPublic bool            `json:"show_social_public"`
+	FooterText       string          `json:"footer_text"`
 }
 
 type publicProductDTO struct {
@@ -92,6 +149,10 @@ func toPublicStore(s *repository.Store) publicStoreDTO {
 		Category: s.Category, City: s.City,
 		WhatsAppNumber: s.WhatsAppNumber, Instagram: s.Instagram, TikTok: s.TikTok,
 		OpenHours: openHours, IsOpen: s.IsOpen,
+		ThemeHue:         s.ThemeHue,
+		ShowHoursPublic:  s.ShowHoursPublic,
+		ShowSocialPublic: s.ShowSocialPublic,
+		FooterText:       s.FooterText,
 	}
 }
 
@@ -143,6 +204,8 @@ func (h *StorefrontHandler) GetStore(w http.ResponseWriter, r *http.Request) {
 		"store":      toPublicStore(store),
 		"products":   out,
 		"categories": catsOut,
+		"payment":    h.buildPaymentDTO(r.Context(), store.ID),
+		"shipping":   h.buildShippingDTO(store),
 	})
 }
 
@@ -187,6 +250,8 @@ func (h *StorefrontHandler) GetProduct(w http.ResponseWriter, r *http.Request) {
 		"store":    toPublicStore(store),
 		"product":  toPublicProduct(p),
 		"variants": vOut,
+		"payment":  h.buildPaymentDTO(r.Context(), store.ID),
+		"shipping": h.buildShippingDTO(store),
 	})
 }
 
