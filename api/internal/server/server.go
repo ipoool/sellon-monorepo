@@ -16,6 +16,7 @@ import (
 	"github.com/sellon/sellon/api/internal/middleware"
 	"github.com/sellon/sellon/api/internal/payments"
 	"github.com/sellon/sellon/api/internal/repository"
+	"github.com/sellon/sellon/api/internal/storage"
 )
 
 type Server struct {
@@ -46,10 +47,11 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	}
 
 	midtransClient := payments.NewMidtransClient()
+	storageClient := storage.NewSupabaseClient(cfg.SupabaseURL, cfg.SupabaseServiceKey, cfg.SupabaseBucket)
 
 	authHandler := handler.NewAuthHandler(users, googleVerifier, jwtSvc, logger, cfg.IsProd())
 	storeHandler := handler.NewStoreHandler(stores, logger)
-	productHandler := handler.NewProductHandler(products, variants, stores, logger)
+	productHandler := handler.NewProductHandler(products, variants, stores, storageClient, logger)
 	orderHandler := handler.NewOrderHandler(orders, stores, gateways, encryptor, midtransClient, logger)
 	customerHandler := handler.NewCustomerHandler(customers, orders, stores, logger)
 	paymentHandler := handler.NewPaymentHandler(gateways, stores, encryptor, midtransClient, logger, cfg.WebhookBaseURL)
@@ -117,6 +119,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 				r.Post("/", productHandler.Create)
 				r.Get("/bulk/template", productHandler.BulkTemplate)
 				r.Post("/bulk", productHandler.BulkUpload)
+				r.Post("/upload-photo", productHandler.UploadPhoto)
 				r.Get("/{id}", productHandler.Get)
 				r.Put("/{id}", productHandler.Update)
 				r.Delete("/{id}", productHandler.Delete)

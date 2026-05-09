@@ -30,6 +30,13 @@ type Config struct {
 	// Public base URL for webhooks (no trailing slash). Sellers paste
 	// {WebhookBaseURL}/webhooks/midtrans/{token} into Midtrans dashboard.
 	WebhookBaseURL string
+
+	// Supabase Storage — used by the API to host uploaded product photos.
+	// All three are optional; without them the upload endpoint returns 503
+	// and the frontend falls back to URL-only input.
+	SupabaseURL        string
+	SupabaseServiceKey string
+	SupabaseBucket     string
 }
 
 func Load() (*Config, error) {
@@ -43,6 +50,7 @@ func Load() (*Config, error) {
 	v.SetDefault("jwt_ttl_hours", 24*7)
 	v.SetDefault("web_origin", "http://localhost:3000")
 	v.SetDefault("webhook_base_url", "http://localhost:8080")
+	v.SetDefault("supabase_bucket", "products")
 
 	cfg := &Config{
 		Port:           v.GetString("api_port"),
@@ -59,7 +67,10 @@ func Load() (*Config, error) {
 		JWTSecret:      v.GetString("jwt_secret"),
 		JWTTTL:         time.Duration(v.GetInt("jwt_ttl_hours")) * time.Hour,
 		WebOrigin:      v.GetString("web_origin"),
-		WebhookBaseURL: strings.TrimRight(v.GetString("webhook_base_url"), "/"),
+		WebhookBaseURL:     strings.TrimRight(v.GetString("webhook_base_url"), "/"),
+		SupabaseURL:        strings.TrimRight(v.GetString("supabase_url"), "/"),
+		SupabaseServiceKey: v.GetString("supabase_service_key"),
+		SupabaseBucket:     v.GetString("supabase_bucket"),
 	}
 
 	if cfg.JWTSecret == "" {

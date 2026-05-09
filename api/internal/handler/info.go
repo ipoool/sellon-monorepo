@@ -13,6 +13,14 @@ func Info(cfg *config.Config) http.HandlerFunc {
 			"name":    "sellon-api",
 			"version": "0.1.0",
 			"env":     cfg.Env,
+			"features": map[string]bool{
+				// True when Supabase URL+key+bucket are all configured server
+				// side. The web client uses this to decide whether to surface
+				// the upload button or fall back to URL-only input.
+				"photo_upload": cfg.SupabaseURL != "" &&
+					cfg.SupabaseServiceKey != "" &&
+					cfg.SupabaseBucket != "",
+			},
 		})
 	}
 }

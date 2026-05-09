@@ -3,8 +3,10 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 
@@ -14,17 +16,22 @@ import (
 	"github.com/sellon/sellon/api/internal/auth"
 	"github.com/sellon/sellon/api/internal/pkg/response"
 	"github.com/sellon/sellon/api/internal/repository"
+	"github.com/sellon/sellon/api/internal/storage"
 )
 
 type ProductHandler struct {
 	products *repository.ProductRepo
 	variants *repository.VariantRepo
 	stores   *repository.StoreRepo
+	storage  *storage.SupabaseClient
 	logger   *slog.Logger
 }
 
-func NewProductHandler(products *repository.ProductRepo, variants *repository.VariantRepo, stores *repository.StoreRepo, logger *slog.Logger) *ProductHandler {
-	return &ProductHandler{products: products, variants: variants, stores: stores, logger: logger}
+func NewProductHandler(products *repository.ProductRepo, variants *repository.VariantRepo, stores *repository.StoreRepo, storageCli *storage.SupabaseClient, logger *slog.Logger) *ProductHandler {
+	return &ProductHandler{
+		products: products, variants: variants, stores: stores,
+		storage: storageCli, logger: logger,
+	}
 }
 
 type variantDTO struct {
@@ -345,4 +352,92 @@ func (h *ProductHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response.JSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// POST /api/v1/products/upload-photo (multipart "file")
+//
+// Pushes the uploaded image into Supabase Storage with the API's service
+// key and returns the public URL. Auth-gated so only signed-in sellers
+// can upload, and the body is capped at 5 MB to avoid surprise costs.
+func (h *ProductHandler) UploadPhoto(w http.ResponseWriter, r *http.Request) {
+	if h.storage == nil || !h.storage.IsConfigured() {
+		response.Error(w, http.StatusServiceUnavailable, "upload belum dikonfigurasi")
+		return
+	}
+	// Tenant check — only sellers with a store may upload (keeps anonymous
+	// quota burning down). The path itself is per-store too.
+	store, err := h.requireStore(r)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "toko belum dibuat")
+		return
+	}
+
+	// Cap memory parsing at 6 MB — files >5 MB are rejected below, header
+	// + boundary overhead lives in the spare 1 MB.
+	r.Body = http.MaxBytesReader(w, r.Body, 6*1024*1024)
+	if err := r.ParseMultipartForm(6 * 1024 * 1024); err != nil {
+		response.Error(w, http.StatusBadRequest, "file terlalu besar (maks 5 MB)")
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "file tidak ada di body")
+		return
+	}
+	defer file.Close()
+
+	if header.Size > 5*1024*1024 {
+		response.Error(w, http.StatusBadRequest, "ukuran maks 5 MB")
+		return
+	}
+
+	contentType := header.Header.Get("Content-Type")
+	if !strings.HasPrefix(contentType, "image/") {
+		response.Error(w, http.StatusBadRequest, "harus berupa gambar")
+		return
+	}
+	switch contentType {
+	case "image/jpeg", "image/png", "image/webp", "image/gif":
+		// ok
+	default:
+		response.Error(w, http.StatusBadRequest, "format harus JPG/PNG/WebP/GIF")
+		return
+	}
+
+	body, err := io.ReadAll(file)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "gagal baca file")
+		return
+	}
+
+	ext := strings.ToLower(strings.TrimPrefix(path.Ext(header.Filename), "."))
+	if ext == "" {
+		switch contentType {
+		case "image/png":
+			ext = "png"
+		case "image/webp":
+			ext = "webp"
+		case "image/gif":
+			ext = "gif"
+		default:
+			ext = "jpg"
+		}
+	}
+	key, err := storage.RandomKey(store.ID.String(), ext)
+	if err != nil {
+		h.logger.Error("random key", "err", err)
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	res, err := h.storage.Upload(r.Context(), key, contentType, body)
+	if err != nil {
+		h.logger.Error("supabase upload", "err", err, "store", store.ID.String())
+		response.Error(w, http.StatusBadGateway, "gagal upload ke storage")
+		return
+	}
+	response.JSON(w, http.StatusCreated, map[string]any{
+		"url":  res.PublicURL,
+		"path": res.Path,
+	})
 }

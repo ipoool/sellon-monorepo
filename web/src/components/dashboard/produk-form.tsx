@@ -11,10 +11,7 @@ import { Card } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import {
-  PhotoUploader,
-  isPhotoUploadEnabled,
-} from "@/components/dashboard/photo-uploader";
+import { PhotoUploader } from "@/components/dashboard/photo-uploader";
 import type { Category, Product, Variant } from "@/lib/types";
 
 type VariantDraft = {
@@ -297,10 +294,7 @@ export function ProdukForm({ initial }: Props) {
         <div className="mb-4">
           <h2 className="font-semibold text-neutral-900">Foto Produk</h2>
           <p className="mt-0.5 text-sm text-neutral-500">
-            Maks. 5 foto.{" "}
-            {isPhotoUploadEnabled()
-              ? "Upload langsung dari device atau tempel URL gambar."
-              : "Tempel URL gambar — upload langsung aktif setelah Supabase Storage dikonfigurasi."}
+            Maks. 5 foto. Upload langsung dari device atau tempel URL gambar.
           </p>
         </div>
 
@@ -334,16 +328,14 @@ export function ProdukForm({ initial }: Props) {
         )}
 
         <div className="flex flex-col gap-3">
-          {isPhotoUploadEnabled() && (
-            <PhotoUploader
-              disabled={photoUrls.length >= 5}
-              onUploaded={(url) =>
-                setPhotoUrls((prev) =>
-                  prev.length >= 5 ? prev : [...prev, url],
-                )
-              }
-            />
-          )}
+          <PhotoUploader
+            disabled={photoUrls.length >= 5}
+            onUploaded={(url) =>
+              setPhotoUrls((prev) =>
+                prev.length >= 5 ? prev : [...prev, url],
+              )
+            }
+          />
           <div className="flex gap-2">
             <div className="relative flex-1">
               <span
@@ -356,11 +348,7 @@ export function ProdukForm({ initial }: Props) {
                 type="url"
                 value={photoInput}
                 onChange={(e) => setPhotoInput(e.target.value)}
-                placeholder={
-                  isPhotoUploadEnabled()
-                    ? "…atau tempel URL gambar"
-                    : "https://example.com/foto.jpg"
-                }
+                placeholder="…atau tempel URL gambar"
                 className="pl-9"
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {

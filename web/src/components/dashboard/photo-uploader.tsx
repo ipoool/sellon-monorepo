@@ -3,18 +3,12 @@
 import { useRef, useState } from "react";
 import { Upload, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { isSupabaseConfigured, uploadProductPhoto } from "@/lib/supabase";
+import { uploadProductPhoto } from "@/lib/supabase";
 
 type Props = {
   onUploaded: (url: string) => void;
   disabled?: boolean;
-  // When false (default), the component renders nothing. Caller checks
-  // configured() first and falls back to the URL input.
 };
-
-export function isPhotoUploadEnabled(): boolean {
-  return isSupabaseConfigured();
-}
 
 export function PhotoUploader({ onUploaded, disabled }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -66,9 +60,7 @@ export function PhotoUploader({ onUploaded, disabled }: Props) {
       <p className="text-xs text-neutral-500">
         JPG/PNG/WebP, maks 5 MB per foto. Bisa pilih beberapa sekaligus.
       </p>
-      {error && (
-        <p className="text-xs font-medium text-danger">{error}</p>
-      )}
+      {error && <p className="text-xs font-medium text-danger">{error}</p>}
     </div>
   );
 }
