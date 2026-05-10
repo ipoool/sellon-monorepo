@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ShieldCheck, Zap, Wallet, Quote, Sparkles } from "lucide-react";
+import { ShieldCheck, Zap, Wallet, Sparkles } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Avatar } from "@/components/ui/avatar";
 import { GoogleSignInButton } from "@/components/auth/google-sign-in-button";
+import { MasukTestimonial } from "@/components/auth/masuk-testimonial";
 import { getMe } from "@/lib/server-auth";
 
 const benefits = [
@@ -134,24 +134,7 @@ export default async function MasukPage() {
             Made for UMKM Indonesia
           </Badge>
 
-          <div className="rounded-2xl border border-white/60 bg-white/80 p-8 shadow-popout backdrop-blur">
-            <Quote className="size-8 text-brand-300" aria-hidden />
-            <p className="mt-4 font-display text-xl font-medium leading-relaxed text-neutral-900">
-              &ldquo;Jualan online sekarang sesimpel kirim chat. SellOn bikin saya
-              fokus produksi, bukan bales pesan satu-satu.&rdquo;
-            </p>
-            <div className="mt-6 flex items-center gap-3">
-              <Avatar name="Sari Wulandari" size="md" />
-              <div>
-                <p className="text-sm font-semibold text-neutral-900">
-                  Sari Wulandari
-                </p>
-                <p className="text-xs text-neutral-600">
-                  Pemilik Warung Bu Sari · Yogyakarta
-                </p>
-              </div>
-            </div>
-          </div>
+          <MasukTestimonial />
 
           <div className="grid grid-cols-3 gap-3 text-center">
             {[
