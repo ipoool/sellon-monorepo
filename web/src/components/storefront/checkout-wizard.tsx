@@ -133,7 +133,7 @@ export function CheckoutWizard({
   payment,
 }: Props) {
   const { push, replace } = useRouter();
-  const { items, subtotal, isAllDigital, hasDigital, isHydrated } = useCart();
+  const { items, subtotal, isAllDigital, hasDigital, isHydrated, clear } = useCart();
   const paymentMethods = buildPaymentOptions(payment);
 
   // Cart-empty guard. Cart context exposes isHydrated so we know when
@@ -411,10 +411,8 @@ export function CheckoutWizard({
       });
       const url = waLink(storeWhatsApp || "", message);
       if (url) window.open(url, "_blank", "noopener,noreferrer");
+      clear();
       push(`/${storeSlug}/order/${data.order_number}`);
-      // The cart is intentionally NOT cleared here — the user can still
-      // see what they ordered until the page actually navigates. The
-      // order page can clear later. (Keeps "back" working sanely too.)
     } catch (err) {
       showError(err);
     } finally {
