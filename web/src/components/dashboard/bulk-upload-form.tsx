@@ -132,12 +132,6 @@ export function BulkUploadForm({ isPaid }: Props) {
         throw new Error(msg);
       }
       const started = data as StartedJob;
-      // Beritahu global watcher (BulkJobWatcher di DashboardShell) supaya
-      // dia mulai polling segera tanpa nunggu interval berikutnya. Lebih
-      // cepat dari sekedar reload + UI buat user-nya cepat lihat toast.
-      window.dispatchEvent(
-        new CustomEvent("bulk-job:started", { detail: started }),
-      );
       showSuccess(
         `Upload sedang diproses (${started.total_rows} produk). Kamu bisa pindah halaman — notifikasi progress akan tetap muncul.`,
       );
