@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import Image from "next/image";
 import { notFound } from "next/navigation";
 import {
   Package,
@@ -13,7 +14,9 @@ import { Container } from "@/components/layout/container";
 import { Badge } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
 import { StorefrontCatalog } from "@/components/storefront/storefront-catalog";
+import { StoreHoursPopup } from "@/components/storefront/store-hours-popup";
 import { waLink } from "@/lib/whatsapp";
+import { themeStyleForHue } from "@/lib/storefront-theme";
 import type { OpenHours, DayOfWeek } from "@/lib/types";
 
 const apiBase =
@@ -36,31 +39,20 @@ type StorefrontStore = {
   tiktok: string;
   open_hours: OpenHours;
   is_open: boolean;
+  accepting_orders?: boolean;
+  accepting_orders_reason?: "" | "store_closed" | "order_limit";
   theme_hue?: number;
+  product_layout?:
+    | "grid"
+    | "list"
+    | "showcase"
+    | "compact"
+    | "magazine"
+    | "feed";
   show_hours_public?: boolean;
   show_social_public?: boolean;
   footer_text?: string;
 };
-
-// Map an OKLCH hue (0-360) into the 11-shade brand palette as inline CSS
-// custom properties. Used by the public toko page so each store can have
-// its own brand color without a global theme rebuild.
-function themeStyleForHue(hue: number | undefined): React.CSSProperties {
-  const h = typeof hue === "number" && hue >= 0 && hue <= 360 ? hue : 145;
-  return {
-    "--color-brand-50": `oklch(0.97 0.025 ${h})`,
-    "--color-brand-100": `oklch(0.94 0.06 ${h})`,
-    "--color-brand-200": `oklch(0.88 0.11 ${h})`,
-    "--color-brand-300": `oklch(0.81 0.15 ${h})`,
-    "--color-brand-400": `oklch(0.76 0.17 ${h})`,
-    "--color-brand-500": `oklch(0.71 0.18 ${h})`,
-    "--color-brand-600": `oklch(0.61 0.17 ${h})`,
-    "--color-brand-700": `oklch(0.51 0.15 ${h})`,
-    "--color-brand-800": `oklch(0.41 0.12 ${h})`,
-    "--color-brand-900": `oklch(0.31 0.09 ${h})`,
-    "--color-brand-950": `oklch(0.21 0.06 ${h})`,
-  } as React.CSSProperties;
-}
 
 type StorefrontProduct = {
   id: string;
@@ -72,6 +64,7 @@ type StorefrontProduct = {
   stock: number;
   photo_urls: string[];
   is_featured: boolean;
+  product_type?: "physical" | "digital";
 };
 
 type StorefrontCategory = { id: string; name: string };
@@ -81,17 +74,6 @@ type StorefrontData = {
   products: StorefrontProduct[];
   categories: StorefrontCategory[];
 };
-
-const dayLabels: Record<DayOfWeek, string> = {
-  mon: "Senin",
-  tue: "Selasa",
-  wed: "Rabu",
-  thu: "Kamis",
-  fri: "Jumat",
-  sat: "Sabtu",
-  sun: "Minggu",
-};
-const dayOrder: DayOfWeek[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
 function todayKey(): DayOfWeek {
   // Day of week in WIB (UTC+7)
@@ -159,6 +141,7 @@ export default async function StorefrontPage({
   const todayHours = store.open_hours?.[todayKey()];
   const openNow = store.is_open && isCurrentlyOpen(store.open_hours) !== false;
   const showClosedBanner = !store.is_open || openNow === false;
+  const orderLimitReached = store.accepting_orders_reason === "order_limit";
   const showHours = store.show_hours_public !== false; // default true
   const showSocial = store.show_social_public !== false;
 
@@ -169,42 +152,25 @@ export default async function StorefrontPage({
     >
       {store.banner_url && (
         <div className="relative h-44 w-full overflow-hidden bg-neutral-100 sm:h-56 lg:h-64">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
+          <Image
             src={store.banner_url}
             alt={`Banner ${store.name}`}
-            className="size-full object-cover"
+            fill
+            sizes="100vw"
+            className="object-cover"
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-black/0 to-black/0" />
-          {store.tagline && (
-            <Container>
-              <p className="absolute inset-x-0 bottom-4 mx-auto max-w-3xl px-6 font-display text-lg font-medium text-white drop-shadow sm:bottom-6 sm:text-xl">
-                {store.tagline}
-              </p>
-            </Container>
-          )}
         </div>
       )}
 
-      <header
-        className={
-          "border-b border-neutral-200 bg-white" +
-          (store.banner_url ? "" : "")
-        }
-      >
+      <header className="border-b border-neutral-200 bg-white">
         <Container>
-          <div
-            className={
-              "flex flex-col gap-5 py-8 sm:flex-row sm:items-center sm:gap-6" +
-              (store.banner_url ? " sm:-mt-10" : "")
-            }
-          >
+          <div className="flex flex-col gap-5 py-8 sm:flex-row sm:items-center sm:gap-6">
             <Avatar
               src={store.logo_url}
               name={store.name}
               size="lg"
               className={
-                "size-16 text-xl" +
+                "size-20 text-2xl sm:size-24 sm:text-3xl" +
                 (store.banner_url
                   ? " ring-4 ring-white shadow-card"
                   : "")
@@ -217,13 +183,15 @@ export default async function StorefrontPage({
                 </h1>
                 {!store.is_open ? (
                   <Badge variant="warning">Toko Tutup</Badge>
-                ) : openNow ? (
-                  <Badge variant="success">Buka Sekarang</Badge>
-                ) : (
-                  <Badge variant="warning">Tutup Sekarang</Badge>
-                )}
+                ) : showHours ? (
+                  openNow ? (
+                    <Badge variant="success">Buka Sekarang</Badge>
+                  ) : (
+                    <Badge variant="warning">Tutup Sekarang</Badge>
+                  )
+                ) : null}
               </div>
-              {store.tagline && !store.banner_url && (
+              {store.tagline && (
                 <p className="mt-1 text-sm font-medium text-brand-700">
                   {store.tagline}
                 </p>
@@ -296,28 +264,12 @@ export default async function StorefrontPage({
                 )}
               </div>
 
-              {/* Full week hours collapsed */}
+              {/* Full week hours — opens as popup on click */}
               {showHours && store.open_hours && Object.keys(store.open_hours).length > 0 && (
-                <details className="mt-3 max-w-md text-xs text-neutral-600">
-                  <summary className="cursor-pointer font-medium text-neutral-700 hover:text-neutral-900">
-                    Lihat jadwal lengkap
-                  </summary>
-                  <ul className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-3">
-                    {dayOrder.map((d) => {
-                      const h = store.open_hours[d];
-                      return (
-                        <li key={d} className="flex justify-between">
-                          <span>{dayLabels[d]}</span>
-                          <span className="font-mono">
-                            {!h || h.closed
-                              ? "Tutup"
-                              : `${h.open}–${h.close}`}
-                          </span>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </details>
+                <StoreHoursPopup
+                  openHours={store.open_hours}
+                  storeName={store.name}
+                />
               )}
             </div>
           </div>
@@ -326,20 +278,44 @@ export default async function StorefrontPage({
 
       <main className="py-8 lg:py-12">
         <Container>
-          {showClosedBanner && (
+          {orderLimitReached ? (
+            <div className="mb-6 flex flex-col gap-3 rounded-xl border border-warning/40 bg-warning/10 p-4 text-sm text-neutral-800 sm:flex-row sm:items-center sm:justify-between">
+              <p>
+                <strong>
+                  Penjual sementara tidak menerima pesanan baru.
+                </strong>{" "}
+                Untuk info lebih lanjut atau pemesanan khusus, silakan
+                hubungi langsung admin toko.
+              </p>
+              {store.whatsapp_number && (
+                <a
+                  href={waLink(
+                    store.whatsapp_number,
+                    `Halo ${store.name}, saya mau tanya soal pemesanan.`,
+                  )}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-success px-3 py-1.5 text-xs font-semibold text-white transition-opacity hover:opacity-90"
+                >
+                  Chat Admin Toko
+                </a>
+              )}
+            </div>
+          ) : showClosedBanner ? (
             <div className="mb-6 rounded-xl border border-warning/40 bg-warning/10 p-4 text-sm text-neutral-800">
               <strong>
-                {!store.is_open ? "Toko sedang tutup." : "Tutup di luar jam operasional."}
+                {!store.is_open ? "Toko sedang tutup." : "Di luar jam operasional."}
               </strong>{" "}
-              Anda masih bisa lihat produk, tapi pesanan baru sementara tidak
-              diterima.
+              Pesanan tetap bisa kamu kirim — akan diproses saat toko buka
+              kembali.
             </div>
-          )}
+          ) : null}
 
           <StorefrontCatalog
             storeSlug={slug}
             products={products}
             categories={categories}
+            layout={store.product_layout ?? "grid"}
           />
         </Container>
       </main>
