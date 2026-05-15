@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import { showError, showSuccess } from "@/lib/toast";
 import { useRouter } from "next/navigation";
 import { Save, Truck, Info } from "lucide-react";
 
@@ -39,18 +40,18 @@ type Props = {
 };
 
 export function PengirimanForm({ initial }: Props) {
-  const router = useRouter();
+  const { refresh } = useRouter();
   const [originCityID, setOriginCityID] = useState(
     initial.shipping_origin_city_id ?? "",
   );
   const [originCityName, setOriginCityName] = useState(
-    initial.shipping_origin_city_name ?? "",
+    initial.shipping_origin_city_name || initial.shipping_origin_city || "",
   );
   const [originCityFallback, setOriginCityFallback] = useState(
     initial.shipping_origin_city ?? "",
   );
   const [enabled, setEnabled] = useState<Set<string>>(() => {
-    const list = initial.enabled_couriers ?? [];
+    const list = Array.isArray(initial.enabled_couriers) ? initial.enabled_couriers : [];
     if (list.length === 0) return new Set(couriers.map((c) => c.code));
     return new Set(list);
   });
@@ -60,9 +61,6 @@ export function PengirimanForm({ initial }: Props) {
       : "0",
   );
   const [pending, setPending] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
   function toggle(code: string, on: boolean) {
     setEnabled((prev) => {
       const next = new Set(prev);
@@ -75,10 +73,7 @@ export function PengirimanForm({ initial }: Props) {
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setPending(true);
-    setSaved(false);
-    setError(null);
-
-    // Empty list means "all" — keeps DB cleaner + future-proofs courier
+    // Empty list means "all" - keeps DB cleaner + future-proofs courier
     // additions.
     const list =
       enabled.size === couriers.length ? [] : Array.from(enabled.values());
@@ -101,11 +96,9 @@ export function PengirimanForm({ initial }: Props) {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-      router.refresh();
+      showSuccess("Tersimpan");      refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal simpan");
+      showError(err);
     } finally {
       setPending(false);
     }
@@ -155,7 +148,7 @@ export function PengirimanForm({ initial }: Props) {
           <div className="mt-4 flex items-start gap-2 rounded-lg border border-success/30 bg-success/10 p-3 text-xs text-neutral-800">
             <Info className="mt-0.5 size-4 shrink-0 text-success" aria-hidden />
             <p>
-              Asal terhubung ke RajaOngkir (id <code>{originCityID}</code>) —
+              Asal terhubung ke RajaOngkir (id <code>{originCityID}</code>) -
               ongkir JNE/TIKI/POS akan dihitung real-time saat pembeli pilih
               kota tujuan.
             </p>
@@ -208,6 +201,7 @@ export function PengirimanForm({ initial }: Props) {
                   size="sm"
                   checked={active}
                   onChange={(e) => toggle(c.code, e.target.checked)}
+                  aria-label={`Aktifkan kurir ${c.label}`}
                 />
               </li>
             );
@@ -215,7 +209,7 @@ export function PengirimanForm({ initial }: Props) {
         </ul>
         {enabled.size === 0 && (
           <p className="mt-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-neutral-700">
-            Tidak ada kurir aktif — pembeli tidak bisa pilih ongkir di checkout.
+            Tidak ada kurir aktif - pembeli tidak bisa pilih ongkir di checkout.
           </p>
         )}
       </Card>
@@ -244,11 +238,7 @@ export function PengirimanForm({ initial }: Props) {
 
       <div className="flex items-center justify-between gap-3">
         <span className="text-sm">
-          {saved && (
-            <span className="font-medium text-success">✓ Tersimpan</span>
-          )}
-          {error && <span className="font-medium text-danger">{error}</span>}
-        </span>
+                            </span>
         <Button type="submit" disabled={pending}>
           <Save className="size-4" aria-hidden />
           {pending ? "Menyimpan…" : "Simpan"}
