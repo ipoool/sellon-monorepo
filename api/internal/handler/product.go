@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -11,7 +12,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/sellon/sellon/api/internal/audit"
 	"github.com/sellon/sellon/api/internal/auth"
+	"github.com/sellon/sellon/api/internal/events"
 	"github.com/sellon/sellon/api/internal/pkg/response"
 	"github.com/sellon/sellon/api/internal/repository"
 	"github.com/sellon/sellon/api/internal/storage"
@@ -22,21 +25,48 @@ type ProductHandler struct {
 	variants *repository.VariantRepo
 	stores   *repository.StoreRepo
 	subs     *repository.SubscriptionRepo
+	plans    *repository.PlanRepo
+	bulkJobs *repository.BulkJobRepo
 	storage  *storage.SupabaseClient
+	broker   *events.Broker
+	audit    *audit.Logger
 	logger   *slog.Logger
+	// pool buat goroutine background — Context dari request dibuang
+	// karena req sudah balas 202 sebelum job selesai. Worker punya
+	// context.Background() sendiri yang independen.
+	bulkPool *bulkJobRunner
 }
 
-func NewProductHandler(products *repository.ProductRepo, variants *repository.VariantRepo, stores *repository.StoreRepo, subs *repository.SubscriptionRepo, storageCli *storage.SupabaseClient, logger *slog.Logger) *ProductHandler {
-	return &ProductHandler{
+func NewProductHandler(
+	products *repository.ProductRepo,
+	variants *repository.VariantRepo,
+	stores *repository.StoreRepo,
+	subs *repository.SubscriptionRepo,
+	plans *repository.PlanRepo,
+	bulkJobs *repository.BulkJobRepo,
+	storageCli *storage.SupabaseClient,
+	broker *events.Broker,
+	audit *audit.Logger,
+	logger *slog.Logger,
+) *ProductHandler {
+	h := &ProductHandler{
 		products: products, variants: variants, stores: stores,
-		subs:    subs,
-		storage: storageCli, logger: logger,
+		subs:     subs,
+		plans:    plans,
+		bulkJobs: bulkJobs,
+		storage:  storageCli,
+		broker:   broker,
+		audit:    audit,
+		logger:   logger,
 	}
+	h.bulkPool = newBulkJobRunner(h)
+	return h
 }
 
 // quotaCheck returns a non-nil error message string if creating `wantCount`
 // new products would exceed the seller's tier limit. Caller surfaces with
-// HTTP 402 Payment Required.
+// HTTP 402 Payment Required. Uses a bounded existence probe (HasAtLeast)
+// so the check stays O(1) as the store grows.
 func (h *ProductHandler) quotaCheck(r *http.Request, storeID uuid.UUID, wantCount int) (string, bool) {
 	sub, err := h.subs.GetOrCreate(r.Context(), storeID)
 	if err != nil {
@@ -44,18 +74,25 @@ func (h *ProductHandler) quotaCheck(r *http.Request, storeID uuid.UUID, wantCoun
 		// than to brick the dashboard. Log handled by repo.
 		return "", true
 	}
-	limit := productLimitForPlan(sub.Plan)
+	limit := productLimitForSub(sub)
 	if limit < 0 {
 		return "", true
 	}
-	current, err := h.products.CountAll(r.Context(), storeID)
+	// Over the cap iff existing rows >= limit - wantCount + 1.
+	threshold := limit - wantCount + 1
+	if threshold <= 0 {
+		// wantCount alone exceeds the cap — block without even probing.
+		return "Limit produk tier " + sub.Plan + " (" + strconv.Itoa(limit) +
+			") tidak cukup untuk menambah " + strconv.Itoa(wantCount) +
+			" produk. Upgrade ke Pro untuk produk tanpa batas.", false
+	}
+	over, err := h.products.HasAtLeast(r.Context(), storeID, threshold)
 	if err != nil {
 		return "", true
 	}
-	if current+wantCount > limit {
-		return "Limit produk tier " + sub.Plan + " sudah tercapai (" +
-			strconv.Itoa(current) + "/" + strconv.Itoa(limit) +
-			"). Upgrade ke Pro untuk produk tanpa batas.", false
+	if over {
+		return "Limit produk tier " + sub.Plan + " (" + strconv.Itoa(limit) +
+			") sudah tercapai. Upgrade ke Pro untuk produk tanpa batas.", false
 	}
 	return "", true
 }
@@ -70,23 +107,27 @@ type variantDTO struct {
 }
 
 type productDTO struct {
-	ID                string       `json:"id"`
-	CategoryID        string       `json:"category_id"`
-	Name              string       `json:"name"`
-	Slug              string       `json:"slug"`
-	Description       string       `json:"description"`
-	PriceCents        int64        `json:"price_cents"`
-	Stock             int          `json:"stock"`
-	LowStockThreshold int          `json:"low_stock_threshold"`
-	WeightG           int          `json:"weight_g"`
-	LengthCm          int          `json:"length_cm"`
-	WidthCm           int          `json:"width_cm"`
-	HeightCm          int          `json:"height_cm"`
-	Status            string       `json:"status"`
-	PhotoURLs         []string     `json:"photo_urls"`
-	HasVariants       bool         `json:"has_variants"`
-	IsFeatured        bool         `json:"is_featured"`
-	Variants          []variantDTO `json:"variants"`
+	ID                  string       `json:"id"`
+	CategoryID          string       `json:"category_id"`
+	Name                string       `json:"name"`
+	Slug                string       `json:"slug"`
+	Description         string       `json:"description"`
+	PriceCents          int64        `json:"price_cents"`
+	Stock               int          `json:"stock"`
+	LowStockThreshold   int          `json:"low_stock_threshold"`
+	WeightG             int          `json:"weight_g"`
+	LengthCm            int          `json:"length_cm"`
+	WidthCm             int          `json:"width_cm"`
+	HeightCm            int          `json:"height_cm"`
+	Status              string       `json:"status"`
+	PhotoURLs           []string     `json:"photo_urls"`
+	HasVariants         bool         `json:"has_variants"`
+	IsFeatured          bool         `json:"is_featured"`
+	ProductType         string       `json:"product_type"`
+	DigitalDeliveryURL  string       `json:"digital_delivery_url"`
+	DigitalFileURL      string       `json:"digital_file_url"`
+	DigitalInstructions string       `json:"digital_instructions"`
+	Variants            []variantDTO `json:"variants"`
 	// VariantsCount + VariantsStock are list-only aggregates so the dashboard
 	// "Stok" column can show "N varian · stok M" instead of the parent's
 	// stale stock cell. Zero when has_variants=false.
@@ -107,6 +148,10 @@ func toProductDTO(p *repository.Product, variants []repository.Variant) productD
 			PriceCents: v.PriceCents, Stock: v.Stock, SortOrder: v.SortOrder,
 		})
 	}
+	productType := p.ProductType
+	if productType == "" {
+		productType = "physical"
+	}
 	return productDTO{
 		ID: p.ID.String(), CategoryID: categoryID,
 		Name: p.Name, Slug: p.Slug, Description: p.Description,
@@ -114,9 +159,13 @@ func toProductDTO(p *repository.Product, variants []repository.Variant) productD
 		LowStockThreshold: p.LowStockThreshold,
 		WeightG: p.WeightG, LengthCm: p.LengthCm, WidthCm: p.WidthCm, HeightCm: p.HeightCm,
 		Status: p.Status, PhotoURLs: p.PhotoURLs, HasVariants: p.HasVariants,
-		IsFeatured: p.IsFeatured,
-		Variants:   vDTOs,
-		CreatedAt:  p.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		IsFeatured:          p.IsFeatured,
+		ProductType:         productType,
+		DigitalDeliveryURL:  p.DigitalDeliveryURL,
+		DigitalFileURL:      p.DigitalFileURL,
+		DigitalInstructions: p.DigitalInstructions,
+		Variants:            vDTOs,
+		CreatedAt:           p.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 }
 
@@ -216,21 +265,25 @@ type variantInput struct {
 }
 
 type productInput struct {
-	CategoryID        string         `json:"category_id"`
-	Name              string         `json:"name"`
-	Slug              string         `json:"slug"`
-	Description       string         `json:"description"`
-	PriceCents        int64          `json:"price_cents"`
-	Stock             int            `json:"stock"`
-	LowStockThreshold int            `json:"low_stock_threshold"`
-	WeightG           int            `json:"weight_g"`
-	LengthCm          int            `json:"length_cm"`
-	WidthCm           int            `json:"width_cm"`
-	HeightCm          int            `json:"height_cm"`
-	Status            string         `json:"status"`
-	PhotoURLs         []string       `json:"photo_urls"`
-	IsFeatured        bool           `json:"is_featured"`
-	Variants          []variantInput `json:"variants"`
+	CategoryID          string         `json:"category_id"`
+	Name                string         `json:"name"`
+	Slug                string         `json:"slug"`
+	Description         string         `json:"description"`
+	PriceCents          int64          `json:"price_cents"`
+	Stock               int            `json:"stock"`
+	LowStockThreshold   int            `json:"low_stock_threshold"`
+	WeightG             int            `json:"weight_g"`
+	LengthCm            int            `json:"length_cm"`
+	WidthCm             int            `json:"width_cm"`
+	HeightCm            int            `json:"height_cm"`
+	Status              string         `json:"status"`
+	PhotoURLs           []string       `json:"photo_urls"`
+	IsFeatured          bool           `json:"is_featured"`
+	ProductType         string         `json:"product_type"` // "physical" | "digital"
+	DigitalDeliveryURL  string         `json:"digital_delivery_url"`
+	DigitalFileURL      string         `json:"digital_file_url"`
+	DigitalInstructions string         `json:"digital_instructions"`
+	Variants            []variantInput `json:"variants"`
 }
 
 func (in productInput) sanitize() (repository.SaveProductInput, error) {
@@ -272,6 +325,33 @@ func (in productInput) sanitize() (repository.SaveProductInput, error) {
 		in.LowStockThreshold = 0
 	}
 
+	productType := strings.ToLower(strings.TrimSpace(in.ProductType))
+	if productType != "digital" {
+		productType = "physical"
+	}
+
+	if productType == "digital" {
+		// At least one delivery channel required (URL, file, or
+		// instructions) — otherwise the buyer's download page would
+		// show nothing useful.
+		hasURL := strings.TrimSpace(in.DigitalDeliveryURL) != ""
+		hasFile := strings.TrimSpace(in.DigitalFileURL) != ""
+		hasInstr := strings.TrimSpace(in.DigitalInstructions) != ""
+		if !hasURL && !hasFile && !hasInstr {
+			return repository.SaveProductInput{}, errors.New(
+				"produk digital butuh minimal salah satu dari: link, file upload, atau instruksi pengiriman")
+		}
+		// Stock for digital is meaningless; pin to a generous value so
+		// the existing stock decrement code is fully short-circuited
+		// by ProductType=digital but the DB still has a sensible value.
+		in.Stock = 0
+		// Ditto physical dimensions — zero them out.
+		in.WeightG = 0
+		in.LengthCm = 0
+		in.WidthCm = 0
+		in.HeightCm = 0
+	}
+
 	return repository.SaveProductInput{
 		CategoryID: categoryID,
 		Name: in.Name, Slug: in.Slug, Description: in.Description,
@@ -279,7 +359,11 @@ func (in productInput) sanitize() (repository.SaveProductInput, error) {
 		LowStockThreshold: in.LowStockThreshold,
 		WeightG: in.WeightG, LengthCm: in.LengthCm, WidthCm: in.WidthCm, HeightCm: in.HeightCm,
 		Status: in.Status, PhotoURLs: in.PhotoURLs,
-		IsFeatured: in.IsFeatured,
+		IsFeatured:          in.IsFeatured,
+		ProductType:         productType,
+		DigitalDeliveryURL:  strings.TrimSpace(in.DigitalDeliveryURL),
+		DigitalFileURL:      strings.TrimSpace(in.DigitalFileURL),
+		DigitalInstructions: strings.TrimSpace(in.DigitalInstructions),
 	}, nil
 }
 
@@ -322,6 +406,19 @@ func (h *ProductHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if p2 != nil {
 		p = p2
 	}
+	h.audit.Log(r.Context(), store.ID, audit.Event{
+		Action:     "product.created",
+		EntityType: "product",
+		EntityID:   p.ID.String(),
+		Summary:    "Tambah produk " + p.Name,
+		Metadata: map[string]any{
+			"product_name": p.Name,
+			"slug":         p.Slug,
+			"price_cents":  p.PriceCents,
+			"stock":        p.Stock,
+			"status":       p.Status,
+		},
+	})
 	response.JSON(w, http.StatusCreated, map[string]any{"product": toProductDTO(p, variants)})
 }
 
@@ -367,6 +464,18 @@ func (h *ProductHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if p2 != nil {
 		p = p2
 	}
+	h.audit.Log(r.Context(), store.ID, audit.Event{
+		Action:     "product.updated",
+		EntityType: "product",
+		EntityID:   p.ID.String(),
+		Summary:    "Update produk " + p.Name,
+		Metadata: map[string]any{
+			"product_name": p.Name,
+			"price_cents":  p.PriceCents,
+			"stock":        p.Stock,
+			"status":       p.Status,
+		},
+	})
 	response.JSON(w, http.StatusOK, map[string]any{"product": toProductDTO(p, variants)})
 }
 
@@ -387,6 +496,98 @@ func (h *ProductHandler) syncVariants(r *http.Request, p *repository.Product, in
 	return h.variants.ReplaceForProduct(r.Context(), p.ID, clean)
 }
 
+// POST /api/v1/products/bulk-delete
+//
+// Body: {"ids": ["uuid1", "uuid2", ...]}. Deletes all products yang
+// match `ids` dan milik toko si seller. FE wajib show ConfirmDialog
+// dengan typed phrase "DELETE ALL" — backend hanya guard sederhana
+// (validasi UUID + ownership). Mengembalikan {deleted: N, failed: N}.
+func (h *ProductHandler) BulkDelete(w http.ResponseWriter, r *http.Request) {
+	store, err := h.requireStore(r)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "toko belum dibuat")
+		return
+	}
+	var body struct {
+		IDs []string `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	if len(body.IDs) == 0 {
+		response.Error(w, http.StatusBadRequest, "tidak ada produk dipilih")
+		return
+	}
+	if len(body.IDs) > 200 {
+		response.Error(w, http.StatusBadRequest, "maksimal 200 produk per bulk delete")
+		return
+	}
+	deleted := 0
+	failed := 0
+	names := make([]string, 0, len(body.IDs))
+	// Kumpulkan semua object path Supabase dari produk yang berhasil
+	// dihapus. Storage cleanup dijalankan setelah DB delete selesai
+	// agar kalau cleanup gagal (mis. Supabase 5xx) DB tetap konsisten.
+	photoPaths := make([]string, 0)
+	for _, raw := range body.IDs {
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			failed++
+			continue
+		}
+		// Capture name + photo URLs before delete (cascade akan hapus
+		// rows; URL-nya bukan FK ke storage jadi harus di-snapshot dulu).
+		preName := ""
+		var preURLs []string
+		if existing, _ := h.products.FindByID(r.Context(), store.ID, id); existing != nil {
+			preName = existing.Name
+			preURLs = existing.PhotoURLs
+		}
+		if err := h.products.Delete(r.Context(), store.ID, id); err != nil {
+			failed++
+			continue
+		}
+		deleted++
+		if preName != "" {
+			names = append(names, preName)
+		}
+		for _, u := range preURLs {
+			if p := h.storage.PathFromPublicURL(u); p != "" {
+				photoPaths = append(photoPaths, p)
+			}
+		}
+	}
+
+	// Async storage cleanup — DB sudah committed, gambar yang gagal
+	// dihapus jadi orphan tapi tidak break UX. Pakai context.Background
+	// karena request ctx bisa cancel saat respons keburu balik.
+	if len(photoPaths) > 0 && h.storage != nil && h.storage.IsConfigured() {
+		paths := photoPaths
+		go func() {
+			if err := h.storage.DeleteObjects(context.Background(), paths); err != nil {
+				h.logger.Warn("supabase delete objects (bulk)", "err", err, "count", len(paths))
+			}
+		}()
+	}
+	if deleted > 0 {
+		h.audit.Log(r.Context(), store.ID, audit.Event{
+			Action:     "product.bulk_deleted",
+			EntityType: "product",
+			Summary:    "Bulk delete produk: " + strconv.Itoa(deleted) + " dihapus",
+			Metadata: map[string]any{
+				"deleted":       deleted,
+				"failed":        failed,
+				"product_names": names,
+			},
+		})
+	}
+	response.JSON(w, http.StatusOK, map[string]any{
+		"deleted": deleted,
+		"failed":  failed,
+	})
+}
+
 // DELETE /api/v1/products/{id}
 func (h *ProductHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	store, err := h.requireStore(r)
@@ -399,6 +600,14 @@ func (h *ProductHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusBadRequest, "invalid id")
 		return
 	}
+	// Capture name + photo URLs before delete (cascade akan hapus rows;
+	// gambar di Supabase Storage harus di-cleanup manual).
+	preName := ""
+	var preURLs []string
+	if existing, _ := h.products.FindByID(r.Context(), store.ID, id); existing != nil {
+		preName = existing.Name
+		preURLs = existing.PhotoURLs
+	}
 	if err := h.products.Delete(r.Context(), store.ID, id); err != nil {
 		if errors.Is(err, repository.ErrProductNotFound) {
 			response.Error(w, http.StatusNotFound, "produk tidak ditemukan")
@@ -407,12 +616,42 @@ func (h *ProductHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, "gagal hapus")
 		return
 	}
+	// Async storage cleanup — gambar yang gagal dihapus jadi orphan
+	// tapi tidak block UX. Pakai context.Background karena request ctx
+	// bisa cancel saat respons sudah balik.
+	if len(preURLs) > 0 && h.storage != nil && h.storage.IsConfigured() {
+		paths := make([]string, 0, len(preURLs))
+		for _, u := range preURLs {
+			if p := h.storage.PathFromPublicURL(u); p != "" {
+				paths = append(paths, p)
+			}
+		}
+		if len(paths) > 0 {
+			go func() {
+				if err := h.storage.DeleteObjects(context.Background(), paths); err != nil {
+					h.logger.Warn("supabase delete objects", "err", err, "count", len(paths))
+				}
+			}()
+		}
+	}
+	summary := "Hapus produk"
+	if preName != "" {
+		summary = "Hapus produk " + preName
+	}
+	h.audit.Log(r.Context(), store.ID, audit.Event{
+		Action:     "product.deleted",
+		EntityType: "product",
+		EntityID:   id.String(),
+		Summary:    summary,
+		Metadata:   map[string]any{"product_name": preName},
+	})
 	response.JSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 // POST /api/v1/products/{id}/duplicate — clone a product (incl. variants).
-// Name suffix: " (Copy)"; slug suffix: -copy / -copy-2 / -copy-3 to avoid
-// the unique (store_id, slug) constraint.
+// Name suffix: " (Salinan)"; slug suffix: -salinan / -salinan-2 / -salinan-3
+// to avoid the unique (store_id, slug) constraint. Bahasa per project
+// convention (BUG-033).
 func (h *ProductHandler) Duplicate(w http.ResponseWriter, r *http.Request) {
 	store, err := h.requireStore(r)
 	if err != nil {
@@ -434,8 +673,8 @@ func (h *ProductHandler) Duplicate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Find a free slug. Try "{slug}-copy", then "-copy-2", -copy-3, …
-	newSlug := src.Slug + "-copy"
+	// Find a free slug. Try "{slug}-salinan", then "-salinan-2", "-salinan-3", …
+	newSlug := src.Slug + "-salinan"
 	for n := 2; ; n++ {
 		_, err := h.products.FindBySlug(r.Context(), store.ID, newSlug)
 		if errors.Is(err, repository.ErrProductNotFound) {
@@ -446,7 +685,7 @@ func (h *ProductHandler) Duplicate(w http.ResponseWriter, r *http.Request) {
 			response.Error(w, http.StatusInternalServerError, "internal error")
 			return
 		}
-		newSlug = src.Slug + "-copy-" + strconv.Itoa(n)
+		newSlug = src.Slug + "-salinan-" + strconv.Itoa(n)
 		if n > 50 {
 			response.Error(w, http.StatusConflict, "tidak bisa generate slug unik untuk salinan")
 			return
@@ -459,7 +698,7 @@ func (h *ProductHandler) Duplicate(w http.ResponseWriter, r *http.Request) {
 	copyIn := repository.SaveProductInput{
 		StoreID:           store.ID,
 		CategoryID:        src.CategoryID,
-		Name:              src.Name + " (Copy)",
+		Name:              src.Name + " (Salinan)",
 		Slug:              newSlug,
 		Description:       src.Description,
 		PriceCents:        src.PriceCents,
@@ -472,8 +711,12 @@ func (h *ProductHandler) Duplicate(w http.ResponseWriter, r *http.Request) {
 		Status:            "inactive",
 		// Force a non-nil slice so the NOT NULL photo_urls column accepts
 		// the INSERT even when the source had no photos.
-		PhotoURLs: append([]string{}, src.PhotoURLs...),
-		IsFeatured:        false,
+		PhotoURLs:           append([]string{}, src.PhotoURLs...),
+		IsFeatured:          false,
+		ProductType:         src.ProductType,
+		DigitalDeliveryURL:  src.DigitalDeliveryURL,
+		DigitalFileURL:      src.DigitalFileURL,
+		DigitalInstructions: src.DigitalInstructions,
 	}
 	created, err := h.products.Create(r.Context(), copyIn)
 	if err != nil {
@@ -504,6 +747,18 @@ func (h *ProductHandler) Duplicate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	h.audit.Log(r.Context(), store.ID, audit.Event{
+		Action:     "product.duplicated",
+		EntityType: "product",
+		EntityID:   created.ID.String(),
+		Summary:    "Duplikat produk " + src.Name,
+		Metadata: map[string]any{
+			"source_product_id": src.ID.String(),
+			"source_name":       src.Name,
+			"new_name":          created.Name,
+			"new_slug":          created.Slug,
+		},
+	})
 	response.JSON(w, http.StatusCreated, map[string]any{
 		"product": toProductDTO(created, nil),
 	})
