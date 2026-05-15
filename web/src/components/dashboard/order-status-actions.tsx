@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState, useEffect, useRef, type ReactNode } from "react";
 import { showError, showSuccess } from "@/lib/toast";
 import { useRouter } from "next/navigation";
 import {
@@ -441,6 +441,18 @@ export function OrderStatusActions({ order, paymentGateway, className }: Props) 
     }
   })();
 
+  const shipFormRef = useRef<HTMLDivElement>(null);
+
+  // Scroll the ship form into view and focus its first input when it opens.
+  // Without this the form renders below the button bar and is easy to miss,
+  // especially on shorter viewports or when the order detail page is long.
+  useEffect(() => {
+    if (openForm === "ship" && shipFormRef.current) {
+      shipFormRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      shipFormRef.current.querySelector<HTMLSelectElement>("select")?.focus();
+    }
+  }, [openForm]);
+
   // Toggle helper: opening one form auto-closes the others, and clicking
   // the same button again closes the form.
   function toggleForm(name: NonNullable<OpenForm>) {
@@ -590,7 +602,7 @@ export function OrderStatusActions({ order, paymentGateway, className }: Props) 
       {/* Inline ship form — submit opens a confirm dialog with the
           inputs as args. */}
       {openForm === "ship" && (
-        <div className="flex flex-col gap-3 rounded-lg border border-neutral-200 bg-neutral-50 p-4">
+        <div ref={shipFormRef} className="flex flex-col gap-3 rounded-lg border border-neutral-200 bg-neutral-50 p-4">
           <div>
             <p className="text-sm font-semibold text-neutral-900">
               Input Detail Pengiriman
