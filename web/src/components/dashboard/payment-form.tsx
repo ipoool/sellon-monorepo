@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { showError, showSuccess } from "@/lib/toast";
 import { useRouter } from "next/navigation";
 import {
   Lock,
@@ -22,6 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   BankAccountsManager,
   type BankAccountsManagerHandle,
@@ -40,23 +42,23 @@ const methodOptions = [
 ];
 
 export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
-  const router = useRouter();
+  const { refresh } = useRouter();
   const [isSandbox, setIsSandbox] = useState(initial?.is_sandbox ?? true);
   const [pending, setPending] = useState(false);
   const [verifying, setVerifying] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [savedFlash, setSavedFlash] = useState(false);
   const [verifyMsg, setVerifyMsg] = useState<string | null>(null);
 
   const [webhookURL, setWebhookURL] = useState(initial?.webhook_url ?? "");
   const [webhookCopied, setWebhookCopied] = useState(false);
   const [rotating, setRotating] = useState(false);
+  // Buka ConfirmDialog typed-phrase "GENERATE" sebelum rotate.
+  const [showRotateConfirm, setShowRotateConfirm] = useState(false);
 
-  // Confirm dialog state — opens at SAVE time when the mode in the form
+  // Confirm dialog state - opens at SAVE time when the mode in the form
   // differs from what's stored in the DB.
   const [pendingMode, setPendingMode] = useState<"sandbox" | "production" | null>(null);
   const [confirmInput, setConfirmInput] = useState("");
-  const [pendingPayload, setPendingPayload] = useState<Record<string, unknown> | null>(null);
+  const pendingPayloadRef = useRef<Record<string, unknown> | null>(null);
   const banksRef = useRef<BankAccountsManagerHandle>(null);
   const switchDialogRef = useRef<HTMLDialogElement>(null);
 
@@ -74,7 +76,7 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
     if (!dialog) return;
     const cancel = () => {
       setPendingMode(null);
-      setPendingPayload(null);
+      pendingPayloadRef.current = null;
       setConfirmInput("");
     };
     const onClick = (e: MouseEvent) => {
@@ -110,13 +112,12 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
 
   function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setError(null);
-    setSavedFlash(false);
 
     const fd = new FormData(e.currentTarget);
-    const enabledMethods = methodOptions
-      .filter((m) => fd.get(`method_${m.id}`) === "on")
-      .map((m) => m.id);
+    const enabledMethods = methodOptions.reduce<string[]>((acc, m) => {
+      if (fd.get(`method_${m.id}`) === "on") acc.push(m.id);
+      return acc;
+    }, []);
 
     const submittedServerKey = String(fd.get("server_key") ?? "").trim();
     const submittedClientKey = String(fd.get("client_key") ?? "").trim();
@@ -144,7 +145,7 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
 
     if (modeIsChanging) {
       setPendingMode(isSandbox ? "sandbox" : "production");
-      setPendingPayload(body);
+      pendingPayloadRef.current = body;
       setConfirmInput("");
       return;
     }
@@ -168,10 +169,10 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
       if (banksRef.current) {
         await banksRef.current.flush();
       }
-      setSavedFlash(true);
-      router.refresh();
+      showSuccess("Konfigurasi pembayaran tersimpan");
+      refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal menyimpan");
+      showError(err);
     } finally {
       setPending(false);
     }
@@ -189,35 +190,40 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
   }
 
   async function rotateWebhookURL() {
-    if (
-      !confirm(
-        "Generate URL webhook baru? URL lama akan langsung non-aktif — kamu harus update di dashboard Midtrans.",
-      )
-    )
-      return;
     setRotating(true);
     try {
       const res = await fetch(
         `${apiBase}/api/v1/payments/midtrans/rotate-webhook`,
         { method: "POST", credentials: "include" },
       );
-      const data = await res.json().catch(() => ({}));
+      const data = (await res.json().catch(() => ({}))) as {
+        webhook_url?: string;
+        old_webhook_url?: string;
+        store_set_offline?: boolean;
+        error?: string;
+      };
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       if (data.webhook_url) setWebhookURL(data.webhook_url);
-      router.refresh();
+      showSuccess(
+        data.store_set_offline
+          ? "URL webhook baru ter-generate. Toko di-set offline — paste URL baru di Midtrans lalu buka kembali toko."
+          : "URL webhook baru ter-generate. Jangan lupa update di dashboard Midtrans.",
+      );
+      setShowRotateConfirm(false);
+      refresh();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Gagal rotate token");
+      showError(err);
     } finally {
       setRotating(false);
     }
   }
 
   async function confirmModeSwitchAndSave() {
-    if (!canConfirmSwitch || !pendingPayload) return;
-    const payload = pendingPayload;
+    const payload = pendingPayloadRef.current;
+    if (!canConfirmSwitch || !payload) return;
     // Close dialog optimistically; doSave handles error state.
     setPendingMode(null);
-    setPendingPayload(null);
+    pendingPayloadRef.current = null;
     setConfirmInput("");
     await doSave(payload);
   }
@@ -233,7 +239,7 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       setVerifyMsg(data.message || "Koneksi OK");
-      router.refresh();
+      refresh();
     } catch (err) {
       setVerifyMsg(err instanceof Error ? err.message : "Gagal verify");
     } finally {
@@ -264,7 +270,7 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
         </div>
         <p className="mt-2 text-sm text-neutral-600">
           Pakai akun Midtrans-mu sendiri. Dana hasil penjualan langsung masuk
-          ke rekeningmu sesuai jadwal settlement Midtrans — kami tidak pernah
+          ke rekeningmu sesuai jadwal settlement Midtrans - kami tidak pernah
           pegang uang pembeli.
         </p>
         <a
@@ -297,7 +303,6 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
             className="mt-4 grid grid-cols-2 gap-2"
           >
             <ModeOption
-              role="tab"
               icon={FlaskConical}
               label="Sandbox"
               description="Uji coba dengan akun sandbox Midtrans"
@@ -306,7 +311,6 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
               onClick={() => setIsSandbox(true)}
             />
             <ModeOption
-              role="tab"
               icon={Rocket}
               label="Production"
               description="Pembayaran asli dari pembeli"
@@ -323,7 +327,7 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="font-semibold text-neutral-900">
-                  API Keys —{" "}
+                  API Keys -{" "}
                   <span className="text-brand-700">
                     {isSandbox ? "Sandbox" : "Production"}
                   </span>
@@ -334,7 +338,7 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
               </div>
               <p className="mt-0.5 text-sm text-neutral-500">
                 Server Key disimpan terenkripsi (AES-GCM). Tidak ditampilkan
-                ulang setelah disimpan — kamu bisa overwrite kapan saja.
+                ulang setelah disimpan - kamu bisa overwrite kapan saja.
                 {!activeHasStoredKey && (
                   <>
                     {" "}
@@ -371,7 +375,7 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
               </div>
               {activeHasStoredKey && (
                 <p className="text-xs text-neutral-500">
-                  Sudah tersimpan — kosongkan field ini untuk pakai key yang
+                  Sudah tersimpan - kosongkan field ini untuk pakai key yang
                   ada, atau isi nilai baru untuk overwrite.
                 </p>
               )}
@@ -444,12 +448,6 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
 
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2 text-sm">
-            {savedFlash && (
-              <span className="font-medium text-success">
-                ✓ Konfigurasi tersimpan
-              </span>
-            )}
-            {error && <span className="font-medium text-danger">{error}</span>}
             {verifyMsg && (
               <span className="font-medium text-neutral-700">{verifyMsg}</span>
             )}
@@ -475,7 +473,7 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
         </div>
       </form>
 
-      {/* Webhook URL — only after first save (token exists) */}
+      {/* Webhook URL - only after first save (token exists) */}
       {webhookURL && (
         <Card>
           <div className="mb-4 flex items-start justify-between gap-3">
@@ -572,7 +570,7 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
               type="button"
               variant="ghost"
               size="sm"
-              onClick={rotateWebhookURL}
+              onClick={() => setShowRotateConfirm(true)}
               disabled={rotating}
               className="text-danger hover:bg-danger/10"
             >
@@ -632,7 +630,7 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
               </>
             ) : (
               <>
-                Mode <strong>Sandbox</strong> hanya untuk uji coba — pembayaran
+                Mode <strong>Sandbox</strong> hanya untuk uji coba - pembayaran
                 tidak akan diproses sungguhan. Pembeli yang sedang checkout
                 bisa terdampak.
               </>
@@ -646,7 +644,7 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
             </Label>
             <Input
               id="mode-confirm-input"
-              autoFocus
+
               autoComplete="off"
               autoCorrect="off"
               autoCapitalize="characters"
@@ -674,7 +672,7 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
               size="md"
               onClick={() => {
                 setPendingMode(null);
-                setPendingPayload(null);
+                pendingPayloadRef.current = null;
                 setConfirmInput("");
               }}
               disabled={pending}
@@ -700,6 +698,39 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
           </div>
         </div>
       </dialog>
+
+      {/* Generate URL webhook baru — typed-phrase "GENERATE" untuk
+          force seller membaca konsekuensinya (toko di-offline-kan
+          sampai mereka paste URL baru di Midtrans). */}
+      <ConfirmDialog
+        open={showRotateConfirm}
+        onClose={() => !rotating && setShowRotateConfirm(false)}
+        onConfirm={rotateWebhookURL}
+        title="Generate URL Webhook Baru?"
+        kind="danger"
+        confirmLabel="Generate URL baru"
+        cancelLabel="Batal"
+        busy={rotating}
+        confirmIcon={<RefreshCw className="size-4" aria-hidden />}
+        requireTypedPhrase="GENERATE"
+        description={
+          <div className="space-y-2">
+            <p>
+              URL webhook lama akan <strong>langsung non-aktif</strong>.
+              Notifikasi pembayaran dari Midtrans tidak akan sampai ke SellOn
+              sampai kamu paste URL baru di dashboard Midtrans.
+            </p>
+            <p>
+              Untuk mencegah pembeli order saat webhook patah,{" "}
+              <strong className="text-danger">
+                toko akan otomatis di-set offline
+              </strong>
+              . Buka kembali toko setelah URL baru sudah ter-update di
+              Midtrans dan kamu sudah test <em>Send Test Notification</em>.
+            </p>
+          </div>
+        }
+      />
     </div>
   );
 }
@@ -711,7 +742,6 @@ function ModeOption({
   active,
   hasKey,
   onClick,
-  role,
 }: {
   icon: typeof FlaskConical;
   label: string;
@@ -719,12 +749,11 @@ function ModeOption({
   active: boolean;
   hasKey: boolean;
   onClick: () => void;
-  role?: string;
 }) {
   return (
     <button
       type="button"
-      role={role}
+      role="tab"
       aria-selected={active}
       onClick={onClick}
       className={cn(

@@ -1,49 +1,51 @@
-import { Star } from "lucide-react";
+import { ShieldCheck, Wallet, Zap } from "lucide-react";
 import { Container } from "@/components/layout/container";
 
-const placeholderBrands = [
-  "Warung Bu Sari",
-  "Toko Pakaian Aria",
-  "Kopi Senja",
-  "Hijab Lestari",
-  "Snack Mama Eka",
+// Replaced fake user-count + brand logos with factual product claims.
+// Real social proof goes in <Testimonials />; this row is for fast
+// "why trust us" signals that are true on day one.
+const trustPoints = [
+  {
+    icon: Wallet,
+    title: "Uang langsung ke rekening kamu",
+    description: "Bukan ditahan platform - kamu pegang penuh kendalinya.",
+  },
+  {
+    icon: Zap,
+    title: "Setup kurang dari 5 menit",
+    description: "Login Google, foto produk, link toko langsung jadi.",
+  },
+  {
+    icon: ShieldCheck,
+    title: "Tanpa kontrak, bisa stop kapan saja",
+    description: "Bulanan & tahunan - tidak ada penalti kalau berhenti.",
+  },
 ];
 
 export function TrustBar() {
   return (
     <div className="border-y border-neutral-200 bg-neutral-50 py-10">
       <Container>
-        <div className="flex flex-col items-center gap-8 lg:flex-row lg:items-center lg:justify-between lg:gap-6">
-          <div className="flex flex-col items-center gap-3 text-center lg:flex-row lg:gap-6 lg:text-left">
-            <div>
-              <p className="font-display text-2xl font-semibold tracking-tight text-neutral-900">
-                1.000+ UMKM
-              </p>
-              <p className="text-sm text-neutral-600">jualan di SellOn</p>
-            </div>
-            <div className="hidden h-10 w-px bg-neutral-200 lg:block" />
-            <div className="flex items-center gap-1.5">
-              {[0, 1, 2, 3, 4].map((i) => (
-                <Star
-                  key={i}
-                  className="size-5 fill-warning text-warning"
-                  aria-hidden
-                />
-              ))}
-              <span className="ml-2 text-sm font-medium text-neutral-700">
-                4.9 dari 200+ ulasan
+        <ul className="grid gap-6 sm:grid-cols-3">
+          {trustPoints.map(({ icon: Icon, title, description }) => (
+            <li
+              key={title}
+              className="flex items-start gap-3 text-left"
+            >
+              <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
+                <Icon className="size-5" aria-hidden />
               </span>
-            </div>
-          </div>
-
-          <ul className="flex flex-wrap items-center justify-center gap-x-8 gap-y-2 text-sm font-medium text-neutral-400">
-            {placeholderBrands.map((b) => (
-              <li key={b} className="whitespace-nowrap">
-                {b}
-              </li>
-            ))}
-          </ul>
-        </div>
+              <div>
+                <p className="text-sm font-semibold text-neutral-900">
+                  {title}
+                </p>
+                <p className="mt-0.5 text-xs leading-relaxed text-neutral-600">
+                  {description}
+                </p>
+              </div>
+            </li>
+          ))}
+        </ul>
       </Container>
     </div>
   );

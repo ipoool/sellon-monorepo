@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -100,4 +101,66 @@ func (c *SupabaseClient) Upload(ctx context.Context, path, contentType string, b
 
 	publicURL := fmt.Sprintf("%s/storage/v1/object/public/%s/%s", c.baseURL, c.bucket, path)
 	return &UploadResult{Path: path, PublicURL: publicURL}, nil
+}
+
+// PathFromPublicURL extracts the bucket-relative object key from a
+// Supabase public URL. Returns "" jika URL bukan dari bucket yang
+// di-configure — caller harus skip silently agar gambar dari domain
+// lain (mis. CDN external) tidak salah dipotong.
+func (c *SupabaseClient) PathFromPublicURL(rawURL string) string {
+	if rawURL == "" || c == nil || c.bucket == "" {
+		return ""
+	}
+	// Format: {baseURL}/storage/v1/object/public/{bucket}/{path}
+	marker := "/storage/v1/object/public/" + c.bucket + "/"
+	idx := strings.Index(rawURL, marker)
+	if idx < 0 {
+		return ""
+	}
+	return rawURL[idx+len(marker):]
+}
+
+// DeleteObjects removes a batch of objects from the bucket. Supabase
+// expects DELETE /storage/v1/object/{bucket} with body
+// `{"prefixes": [...]}`. Paths bucket-relative. Empty list = no-op.
+// Errors don't propagate per-object — call returns first transport-
+// level error.
+func (c *SupabaseClient) DeleteObjects(ctx context.Context, paths []string) error {
+	if !c.IsConfigured() {
+		return errors.New("supabase storage tidak dikonfigurasi")
+	}
+	// Filter out blanks.
+	clean := make([]string, 0, len(paths))
+	for _, p := range paths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		clean = append(clean, p)
+	}
+	if len(clean) == 0 {
+		return nil
+	}
+	url := fmt.Sprintf("%s/storage/v1/object/%s", c.baseURL, c.bucket)
+	body, err := json.Marshal(map[string]any{"prefixes": clean})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.serviceKey)
+	req.Header.Set("apikey", c.serviceKey)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("supabase delete: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return fmt.Errorf("supabase delete status %d: %s", resp.StatusCode, string(errBody))
+	}
+	return nil
 }

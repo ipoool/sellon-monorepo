@@ -1,17 +1,19 @@
 "use client";
 
 import {
-  forwardRef,
   useEffect,
   useImperativeHandle,
   useState,
+  type Ref,
 } from "react";
+import { showError, showSuccess } from "@/lib/toast";
 import { Plus, Trash2, Star, QrCode } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Tooltip } from "@/components/ui/tooltip";
 import { ImageUploadInput } from "@/components/dashboard/image-upload-input";
 import type { BankAccount } from "@/lib/types";
 
@@ -79,8 +81,11 @@ export type BankAccountsManagerHandle = {
 // Imperative-handle pattern lets the parent PaymentForm trigger a sync
 // from its own submit handler — the user only sees one Simpan button for
 // the whole Pembayaran page.
-export const BankAccountsManager = forwardRef<BankAccountsManagerHandle>(
-  function BankAccountsManager(_props, ref) {
+export function BankAccountsManager({
+  ref,
+}: {
+  ref?: Ref<BankAccountsManagerHandle>;
+}) {
     const [drafts, setDrafts] = useState<Draft[]>([]);
     const [loading, setLoading] = useState(true);
 
@@ -186,19 +191,22 @@ export const BankAccountsManager = forwardRef<BankAccountsManagerHandle>(
           }
         }
         const responses = await Promise.all(ops);
-        for (const r of responses) {
-          if (!r.ok) {
-            const data = await r.json().catch(() => ({}));
-            throw new Error(data.error || `HTTP ${r.status}`);
-          }
+        const failed = responses.find((r) => !r.ok);
+        if (failed) {
+          const data = await failed.json().catch(() => ({}));
+          throw new Error(data.error || `HTTP ${failed.status}`);
         }
         await refresh();
       },
     }));
 
-    const visibleDrafts = drafts
-      .map((d, i) => ({ d, i }))
-      .filter(({ d }) => !d._deleted);
+    const visibleDrafts = drafts.reduce<Array<{ d: Draft; i: number }>>(
+      (acc, d, i) => {
+        if (!d._deleted) acc.push({ d, i });
+        return acc;
+      },
+      [],
+    );
 
     return (
       <section className="mt-6 border-t border-neutral-200 pt-6">
@@ -250,15 +258,16 @@ export const BankAccountsManager = forwardRef<BankAccountsManagerHandle>(
                       </span>
                     )}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => remove(i)}
-                    className="inline-flex size-8 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-danger/10 hover:text-danger"
-                    aria-label="Hapus rekening"
-                    title="Hapus"
-                  >
-                    <Trash2 className="size-4" aria-hidden />
-                  </button>
+                  <Tooltip label="Hapus rekening" align="end">
+                    <button
+                      type="button"
+                      onClick={() => remove(i)}
+                      className="inline-flex size-8 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-danger/10 hover:text-danger"
+                      aria-label="Hapus rekening"
+                    >
+                      <Trash2 className="size-4" aria-hidden />
+                    </button>
+                  </Tooltip>
                 </div>
 
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -325,7 +334,10 @@ export const BankAccountsManager = forwardRef<BankAccountsManagerHandle>(
                   </div>
                 </div>
 
-                <label className="mt-4 flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-neutral-200 bg-white px-3 py-2.5 text-sm">
+                <label
+                  htmlFor={`bank-primary-${d.key}`}
+                  className="mt-4 flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-neutral-200 bg-white px-3 py-2.5 text-sm"
+                >
                   <div>
                     <p className="font-medium text-neutral-900">
                       Jadikan rekening utama
@@ -335,6 +347,7 @@ export const BankAccountsManager = forwardRef<BankAccountsManagerHandle>(
                     </p>
                   </div>
                   <Switch
+                    id={`bank-primary-${d.key}`}
                     size="sm"
                     checked={d.is_primary}
                     onChange={(e) =>
@@ -348,5 +361,4 @@ export const BankAccountsManager = forwardRef<BankAccountsManagerHandle>(
         )}
       </section>
     );
-  },
-);
+}

@@ -1,14 +1,25 @@
 package handler
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/xuri/excelize/v2"
 
+	"github.com/sellon/sellon/api/internal/audit"
+	"github.com/sellon/sellon/api/internal/auth"
+	"github.com/sellon/sellon/api/internal/events"
 	"github.com/sellon/sellon/api/internal/pkg/response"
 	"github.com/sellon/sellon/api/internal/repository"
 )
@@ -187,10 +198,23 @@ type bulkResultDTO struct {
 }
 
 // POST /api/v1/products/bulk — multipart/form-data with field "file" (xlsx)
+//
+// Async: parses XLSX synchronously (small data; cheap), creates a
+// bulk_jobs row, then spawns a goroutine to insert rows. Responds 202
+// with {job_id} immediately so the client can navigate away and watch
+// progress via GET /products/bulk/jobs/active.
 func (h *ProductHandler) BulkUpload(w http.ResponseWriter, r *http.Request) {
 	store, err := h.requireStore(r)
 	if err != nil {
 		response.Error(w, http.StatusBadRequest, "toko belum dibuat — buat dulu di Pengaturan")
+		return
+	}
+
+	// Plan gate: bulk upload hanya untuk Pro / Bisnis.
+	sub, _ := h.subs.GetOrCreate(r.Context(), store.ID)
+	if sub == nil || sub.Plan == "free" {
+		response.Error(w, http.StatusPaymentRequired,
+			"Upload massal hanya tersedia untuk paket Pro & Bisnis. Upgrade dulu untuk akses fitur ini.")
 		return
 	}
 
@@ -213,7 +237,16 @@ func (h *ProductHandler) BulkUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	xlsx, err := excelize.OpenReader(file)
+	// Buffer file isi-nya supaya goroutine masih bisa baca setelah
+	// request handler return — `file` di-close otomatis saat handler
+	// exit.
+	raw, err := io.ReadAll(file)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "gagal baca file")
+		return
+	}
+
+	xlsx, err := excelize.OpenReader(bytes.NewReader(raw))
 	if err != nil {
 		h.logger.Warn("xlsx open", "err", err)
 		response.Error(w, http.StatusBadRequest, "file Excel tidak valid")
@@ -253,72 +286,294 @@ func (h *ProductHandler) BulkUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Refuse the whole upload up front if it would push the seller past
-	// their tier quota — partial saves leave the seller in a confusing
-	// half-state.
+	// Pro+ has unlimited products, but we keep this guard as a defensive
+	// no-op for future tier changes.
 	if msg, ok := h.quotaCheck(r, store.ID, len(dataRows)); !ok {
 		response.Error(w, http.StatusPaymentRequired, msg)
 		return
 	}
 
-	result := bulkResultDTO{TotalRows: len(dataRows)}
-	seenSlugs := map[string]int{} // slug -> row number where first seen
+	// Create job row + spawn worker.
+	var actorID *uuid.UUID
+	if uid, ok := auth.UserIDFromContext(r.Context()); ok {
+		u := uid
+		actorID = &u
+	}
+	jobID, err := h.bulkJobs.Create(r.Context(), repository.CreateBulkJobInput{
+		StoreID:     store.ID,
+		ActorUserID: actorID,
+		Kind:        "products",
+		Filename:    header.Filename,
+		TotalRows:   len(dataRows),
+	})
+	if err != nil {
+		h.logger.Error("bulk job create", "err", err)
+		response.Error(w, http.StatusInternalServerError, "gagal mulai job")
+		return
+	}
 
-	for i, row := range dataRows {
-		excelRow := i + 2 // +2 because header is row 1 and arrays are 0-indexed
+	h.bulkPool.start(bulkJobTask{
+		JobID:    jobID,
+		StoreID:  store.ID,
+		DataRows: dataRows,
+	})
 
-		input, variantInputs, validationErr := parseBulkRow(row)
-		if validationErr != nil {
-			result.Failed++
-			result.Errors = append(result.Errors, bulkRowError{
-				Row: excelRow, Field: validationErr.field, Message: validationErr.msg,
+	response.JSON(w, http.StatusAccepted, map[string]any{
+		"job_id":     jobID.String(),
+		"total_rows": len(dataRows),
+	})
+}
+
+// GET /api/v1/products/bulk/jobs/active
+//
+// Returns running jobs + recently-finished jobs (last 5 min) for the
+// current store. The dashboard watcher polls this every few seconds to
+// keep a persistent progress toast in sync across page navigation.
+func (h *ProductHandler) BulkJobsActive(w http.ResponseWriter, r *http.Request) {
+	store, err := h.requireStore(r)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "toko belum dibuat")
+		return
+	}
+	jobs, err := h.bulkJobs.ListActive(r.Context(), store.ID, 5)
+	if err != nil {
+		h.logger.Error("bulk jobs active", "err", err)
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	out := make([]bulkJobDTO, 0, len(jobs))
+	for _, j := range jobs {
+		out = append(out, toBulkJobDTO(j))
+	}
+	response.JSON(w, http.StatusOK, map[string]any{"jobs": out})
+}
+
+// GET /api/v1/products/bulk/jobs/{id}
+func (h *ProductHandler) BulkJobGet(w http.ResponseWriter, r *http.Request) {
+	store, err := h.requireStore(r)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "toko belum dibuat")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	j, err := h.bulkJobs.Get(r.Context(), store.ID, id)
+	if err != nil {
+		if errors.Is(err, repository.ErrBulkJobNotFound) {
+			response.Error(w, http.StatusNotFound, "job tidak ditemukan")
+			return
+		}
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]any{"job": toBulkJobDTO(*j)})
+}
+
+type bulkJobDTO struct {
+	ID            string         `json:"id"`
+	Kind          string         `json:"kind"`
+	Filename      string         `json:"filename"`
+	Status        string         `json:"status"`
+	TotalRows     int            `json:"total_rows"`
+	ProcessedRows int            `json:"processed_rows"`
+	Succeeded     int            `json:"succeeded"`
+	Failed        int            `json:"failed"`
+	Errors        []bulkRowError `json:"errors"`
+	ErrorMessage  string         `json:"error_message"`
+	CreatedAt     string         `json:"created_at"`
+	UpdatedAt     string         `json:"updated_at"`
+	CompletedAt   string         `json:"completed_at,omitempty"`
+}
+
+func toBulkJobDTO(j repository.BulkJob) bulkJobDTO {
+	errs := make([]bulkRowError, 0, len(j.Errors))
+	for _, e := range j.Errors {
+		errs = append(errs, bulkRowError{Row: e.Row, Field: e.Field, Message: e.Message})
+	}
+	out := bulkJobDTO{
+		ID:            j.ID.String(),
+		Kind:          j.Kind,
+		Filename:      j.Filename,
+		Status:        j.Status,
+		TotalRows:     j.TotalRows,
+		ProcessedRows: j.ProcessedRows,
+		Succeeded:     j.Succeeded,
+		Failed:        j.Failed,
+		Errors:        errs,
+		ErrorMessage:  j.ErrorMessage,
+		CreatedAt:     j.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:     j.UpdatedAt.Format(time.RFC3339),
+	}
+	if j.CompletedAt != nil {
+		out.CompletedAt = j.CompletedAt.Format(time.RFC3339)
+	}
+	return out
+}
+
+// === Background job runner ===
+
+type bulkJobTask struct {
+	JobID    uuid.UUID
+	StoreID  uuid.UUID
+	DataRows [][]string
+}
+
+// bulkJobRunner manages goroutines for bulk product upload. Simple
+// fire-and-go model; no queue limit per se beyond goroutine scheduler.
+// One handler instance per process.
+type bulkJobRunner struct {
+	h      *ProductHandler
+	logger *slog.Logger
+}
+
+func newBulkJobRunner(h *ProductHandler) *bulkJobRunner {
+	return &bulkJobRunner{h: h, logger: h.logger}
+}
+
+func (r *bulkJobRunner) start(task bulkJobTask) {
+	go r.run(task)
+}
+
+func (r *bulkJobRunner) run(task bulkJobTask) {
+	// New background context — request ctx is gone by the time this fires.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	defer func() {
+		if rec := recover(); rec != nil {
+			r.logger.Error("bulk job panic", "job_id", task.JobID, "panic", rec)
+			_ = r.h.bulkJobs.Fail(ctx, task.JobID, fmt.Sprintf("internal panic: %v", rec))
+		}
+	}()
+
+	succeeded := 0
+	failed := 0
+	errs := make([]repository.BulkJobRowError, 0)
+	seenSlugs := map[string]int{}
+
+	// Throttle DB updates: write progress max every ~200ms or every 5
+	// rows, whichever comes first. Keeps cost down on big imports.
+	lastFlush := time.Now()
+	flush := func(processed int) {
+		if err := r.h.bulkJobs.UpdateProgress(ctx, task.JobID, processed, succeeded, failed, errs); err != nil {
+			r.logger.Warn("bulk job progress update", "err", err, "job_id", task.JobID)
+		}
+		lastFlush = time.Now()
+	}
+
+	for i, row := range task.DataRows {
+		excelRow := i + 2
+		input, variantInputs, vErr := parseBulkRow(row)
+		if vErr != nil {
+			failed++
+			errs = append(errs, repository.BulkJobRowError{
+				Row: excelRow, Field: vErr.field, Message: vErr.msg,
 			})
+			r.maybeFlush(ctx, task.StoreID, task.JobID, i+1, succeeded, failed, errs, &lastFlush)
 			continue
 		}
 
-		// Local-batch slug duplicate check
 		if firstRow, dup := seenSlugs[input.Slug]; dup {
-			result.Failed++
-			result.Errors = append(result.Errors, bulkRowError{
+			failed++
+			errs = append(errs, repository.BulkJobRowError{
 				Row: excelRow, Field: "URL Slug",
 				Message: fmt.Sprintf("slug '%s' duplikat dengan baris %d di file ini", input.Slug, firstRow),
 			})
+			r.maybeFlush(ctx, task.StoreID, task.JobID, i+1, succeeded, failed, errs, &lastFlush)
 			continue
 		}
 		seenSlugs[input.Slug] = excelRow
 
-		input.StoreID = store.ID
-		created, err := h.products.Create(r.Context(), input)
+		input.StoreID = task.StoreID
+		created, err := r.h.products.Create(ctx, input)
 		if err != nil {
-			result.Failed++
+			failed++
 			msg := "gagal simpan ke database"
 			if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "unique constraint") {
 				msg = "slug sudah dipakai produk lain di toko-mu"
 			}
-			result.Errors = append(result.Errors, bulkRowError{
+			errs = append(errs, repository.BulkJobRowError{
 				Row: excelRow, Field: "URL Slug", Message: msg,
 			})
+			r.maybeFlush(ctx, task.StoreID, task.JobID, i+1, succeeded, failed, errs, &lastFlush)
 			continue
 		}
 
-		// Sync variants if the row supplied any. ReplaceForProduct also flips
-		// products.has_variants for us. Failure here is reported but doesn't
-		// retroactively delete the parent — the seller can re-edit via the UI.
 		if len(variantInputs) > 0 {
-			if err := h.variants.ReplaceForProduct(r.Context(), created.ID, variantInputs); err != nil {
-				h.logger.Error("bulk variants sync", "err", err, "product", created.ID.String())
-				result.Errors = append(result.Errors, bulkRowError{
+			if err := r.h.variants.ReplaceForProduct(ctx, created.ID, variantInputs); err != nil {
+				r.logger.Error("bulk variants sync", "err", err, "product", created.ID.String())
+				errs = append(errs, repository.BulkJobRowError{
 					Row: excelRow, Field: "Varian",
 					Message: "produk tersimpan tapi varian gagal disinkronkan: " + err.Error(),
 				})
-				// Count as succeeded (parent saved); don't increment Failed —
-				// seller already has a draft product to fix.
 			}
 		}
-		result.Succeeded++
+		succeeded++
+		r.maybeFlush(ctx, task.StoreID, task.JobID, i+1, succeeded, failed, errs, &lastFlush)
 	}
 
-	response.JSON(w, http.StatusOK, result)
+	// Final flush + complete.
+	_ = flush // referenced via maybeFlush; explicit final completion below.
+	if err := r.h.bulkJobs.Complete(ctx, task.JobID, succeeded, failed, errs); err != nil {
+		r.logger.Error("bulk job complete", "err", err, "job_id", task.JobID)
+	}
+	// Push event terminal: state akhir job. FE watcher dapat sinyal
+	// langsung untuk swap toast running → success/done state.
+	r.publishJob(ctx, task.StoreID, task.JobID)
+
+	// Audit log: same shape as before, just sourced from job state.
+	if succeeded > 0 || failed > 0 {
+		r.h.audit.Log(ctx, task.StoreID, audit.Event{
+			Action:     "product.bulk_uploaded",
+			EntityType: "product",
+			EntityID:   task.JobID.String(),
+			Summary: fmt.Sprintf("Bulk upload produk: %d berhasil, %d gagal",
+				succeeded, failed),
+			Metadata: map[string]any{
+				"succeeded": succeeded,
+				"failed":    failed,
+				"total":     succeeded + failed,
+				"job_id":    task.JobID.String(),
+			},
+		})
+	}
+}
+
+func (r *bulkJobRunner) maybeFlush(ctx context.Context, storeID, jobID uuid.UUID, processed, succeeded, failed int, errs []repository.BulkJobRowError, lastFlush *time.Time) {
+	if processed%5 == 0 || time.Since(*lastFlush) >= 200*time.Millisecond {
+		if err := r.h.bulkJobs.UpdateProgress(ctx, jobID, processed, succeeded, failed, errs); err != nil {
+			r.logger.Warn("bulk job progress update", "err", err, "job_id", jobID)
+		}
+		*lastFlush = time.Now()
+		// Push event ke SSE subscribers — FE watcher update real-time
+		// tanpa polling.
+		if job, err := r.h.bulkJobs.Get(ctx, storeID, jobID); err == nil {
+			r.h.broker.Publish(storeID, events.Event{
+				Type:    "bulk_job.progress",
+				Payload: map[string]any{"job": toBulkJobDTO(*job)},
+			})
+		}
+	}
+}
+
+// publishJob fetches the current state of a job and broadcasts terminal
+// state event. Dipanggil dari run() setelah Complete()/Fail().
+func (r *bulkJobRunner) publishJob(ctx context.Context, storeID, jobID uuid.UUID) {
+	job, err := r.h.bulkJobs.Get(ctx, storeID, jobID)
+	if err != nil {
+		return
+	}
+	evType := "bulk_job.completed"
+	if job.Status == "failed" {
+		evType = "bulk_job.failed"
+	}
+	r.h.broker.Publish(storeID, events.Event{
+		Type:    evType,
+		Payload: map[string]any{"job": toBulkJobDTO(*job)},
+	})
 }
 
 type bulkValidationErr struct {
@@ -493,3 +748,77 @@ func rowIsBlank(row []string) bool {
 
 // Reserve to silence unused-import warning when we add a bulk error helper.
 var _ = errors.New
+
+// GET /api/v1/products/bulk/jobs/stream
+//
+// Long-lived Server-Sent Events stream — pengganti polling /bulk/jobs/
+// active tiap 2.5s. FE subscribe sekali per session, dapat push real-
+// time tiap kali runner flush progress + saat job terminal. Pattern
+// sama dengan /orders/stream.
+func (h *ProductHandler) BulkJobsStream(w http.ResponseWriter, r *http.Request) {
+	store, err := h.requireStore(r)
+	if err != nil {
+		http.Error(w, "no store", http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache, no-transform")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	rc := http.NewResponseController(w)
+	_ = rc.SetWriteDeadline(time.Time{})
+
+	ch := h.broker.Subscribe(store.ID)
+	defer h.broker.Unsubscribe(store.ID, ch)
+
+	// Initial snapshot — kirim active jobs yang sudah running supaya
+	// FE bisa render toast langsung tanpa nunggu event berikutnya.
+	if jobs, err := h.bulkJobs.ListActive(r.Context(), store.ID, 5); err == nil {
+		out := make([]bulkJobDTO, 0, len(jobs))
+		for _, j := range jobs {
+			out = append(out, toBulkJobDTO(j))
+		}
+		if payload, err := json.Marshal(map[string]any{"jobs": out}); err == nil {
+			fmt.Fprintf(w, "event: bulk_job.snapshot\ndata: %s\n\n", payload)
+			flusher.Flush()
+		}
+	}
+
+	ping := time.NewTicker(25 * time.Second)
+	defer ping.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ping.C:
+			fmt.Fprint(w, ": ping\n\n")
+			flusher.Flush()
+		case ev, ok := <-ch:
+			if !ok {
+				return
+			}
+			// Hanya bulk_job.* event yang relevan untuk stream ini.
+			// Event lain (mis. order.created) di-skip — same broker,
+			// beda concern.
+			if !strings.HasPrefix(ev.Type, "bulk_job.") {
+				continue
+			}
+			payload, err := json.Marshal(ev.Payload)
+			if err != nil {
+				h.logger.Warn("bulk sse marshal", "err", err)
+				continue
+			}
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Type, payload)
+			flusher.Flush()
+		}
+	}
+}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { showError, showSuccess } from "@/lib/toast";
 import { Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -12,16 +13,10 @@ type Props = {
 };
 
 export function OrderSellerNotes({ orderId, initialNotes }: Props) {
-  const [value, setValue] = useState(initialNotes);
+  const [value, setValue] = useState(() => initialNotes);
   const [pending, setPending] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
   async function save() {
-    setPending(true);
-    setSaved(false);
-    setError(null);
-    try {
+    setPending(true);    try {
       const res = await fetch(`${apiBase}/api/v1/orders/${orderId}/notes`, {
         method: "PATCH",
         credentials: "include",
@@ -32,10 +27,8 @@ export function OrderSellerNotes({ orderId, initialNotes }: Props) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || `HTTP ${res.status}`);
       }
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal simpan");
+      showSuccess("Tersimpan");    } catch (err) {
+      showError(err);
     } finally {
       setPending(false);
     }
@@ -52,9 +45,7 @@ export function OrderSellerNotes({ orderId, initialNotes }: Props) {
       />
       <div className="flex items-center justify-between">
         <span className="text-xs">
-          {saved && <span className="font-medium text-success">✓ Tersimpan</span>}
-          {error && <span className="font-medium text-danger">{error}</span>}
-        </span>
+                            </span>
         <Button size="sm" onClick={save} disabled={pending}>
           <Save className="size-4" aria-hidden />
           {pending ? "Menyimpan…" : "Simpan"}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import { showError, showSuccess } from "@/lib/toast";
 import { useRouter } from "next/navigation";
 import { Save, Trash2 } from "lucide-react";
 
@@ -27,17 +28,17 @@ function isoToDateInput(iso: string | null | undefined): string {
 }
 
 export function PromoForm({ initial, onSuccess }: Props) {
-  const router = useRouter();
+  const { push, refresh } = useRouter();
   const isEdit = !!initial;
 
   function done() {
     if (onSuccess) {
       onSuccess();
-      router.refresh();
+      refresh();
       return;
     }
-    router.push("/dasbor/promo");
-    router.refresh();
+    push("/promos");
+    refresh();
   }
 
   const [code, setCode] = useState(initial?.code ?? "");
@@ -51,17 +52,19 @@ export function PromoForm({ initial, onSuccess }: Props) {
   const [maxUsage, setMaxUsage] = useState<string>(
     initial ? String(initial.max_usage) : "0",
   );
-  const [startsAt, setStartsAt] = useState(isoToDateInput(initial?.starts_at));
-  const [expiresAt, setExpiresAt] = useState(isoToDateInput(initial?.expires_at));
+  const [startsAt, setStartsAt] = useState(() =>
+    isoToDateInput(initial?.starts_at),
+  );
+  const [expiresAt, setExpiresAt] = useState(() =>
+    isoToDateInput(initial?.expires_at),
+  );
   const [isActive, setIsActive] = useState(initial?.is_active ?? true);
   const [pending, setPending] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setPending(true);
-    setError(null);
 
     // For percent: value is integer 1-100. For fixed: rupiah → cents.
     let valueOut = 0;
@@ -98,7 +101,7 @@ export function PromoForm({ initial, onSuccess }: Props) {
       }
       done();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal simpan");
+      showError(err);
       setPending(false);
     }
   }
@@ -110,7 +113,6 @@ export function PromoForm({ initial, onSuccess }: Props) {
     );
     if (!ok) return;
     setDeleting(true);
-    setError(null);
     try {
       const res = await fetch(`${apiBase}/api/v1/promos/${initial.id}`, {
         method: "DELETE",
@@ -122,7 +124,7 @@ export function PromoForm({ initial, onSuccess }: Props) {
       }
       done();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal hapus");
+      showError(err);
       setDeleting(false);
     }
   }
@@ -178,9 +180,9 @@ export function PromoForm({ initial, onSuccess }: Props) {
                 type="number"
                 value={value}
                 onChange={(e) => setValue(e.target.value)}
-                min={type === "percent" ? 1 : 1}
+                min={1}
                 max={type === "percent" ? 100 : undefined}
-                step={type === "percent" ? 1 : 1000}
+                step={1}
                 placeholder={type === "percent" ? "10" : "10000"}
                 required
               />
@@ -195,7 +197,7 @@ export function PromoForm({ initial, onSuccess }: Props) {
               value={minPurchase}
               onChange={(e) => setMinPurchase(e.target.value)}
               min={0}
-              step={1000}
+              step={1}
               placeholder="0"
             />
             <p className="text-xs text-neutral-500">
@@ -261,12 +263,7 @@ export function PromoForm({ initial, onSuccess }: Props) {
         </div>
       </Card>
 
-      {error && (
-        <p className="rounded-lg border border-danger/30 bg-danger/5 px-3 py-2 text-sm font-medium text-danger">
-          {error}
-        </p>
-      )}
-
+      
       <div className="flex items-center justify-between gap-3">
         {isEdit ? (
           <Button

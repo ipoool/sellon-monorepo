@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import { showError, showSuccess } from "@/lib/toast";
 import { useRouter } from "next/navigation";
-import { Save, Info } from "lucide-react";
+import { Save, Info, Lock } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -16,17 +17,52 @@ type TemplateSpec = {
   description: string;
   defaultBody: string;
   placeholders: string[];
+  // "paid" = Pro/Bisnis only (server auto-sends, billable on Twilio).
+  // "free" = anyone can edit; consumer is a manual "buka WhatsApp" link
+  // that the seller clicks from the order detail page.
+  tier: "paid" | "free";
 };
 
+// Only templates with a real runtime consumer live here. Each entry
+// must be wired to something that actually reads it from
+// /api/v1/whatsapp-templates — don't add aspirational templates.
 const templates: TemplateSpec[] = [
   {
-    key: "order_confirmation",
-    title: "Konfirmasi Pesanan",
+    key: "new_order_alert",
+    title: "Alert Pesanan Baru (Owner)",
     description:
-      "Dikirim ke pembeli setelah pesanan masuk. Konfirmasi detail + total + cara bayar.",
+      "Otomatis dikirim ke nomor notifikasi di atas setiap kali ada order masuk via storefront. Placeholder pakai {{kurawal_dobel}} karena sistem yang mengisi otomatis.",
+    defaultBody: `🛒 *Pesanan baru!*
+
+No: *{{order_number}}*
+Dari: {{customer_name}} ({{customer_whatsapp}})
+Total: *Rp {{total}}*
+Metode bayar: {{payment_method}}
+
+Lihat detail: {{order_link}}`,
+    placeholders: [
+      "order_number",
+      "customer_name",
+      "customer_whatsapp",
+      "customer_email",
+      "customer_city",
+      "total",
+      "subtotal",
+      "shipping",
+      "payment_method",
+      "store_name",
+      "order_link",
+    ],
+    tier: "paid",
+  },
+  {
+    key: "order_confirmation",
+    title: "Konfirmasi Pesanan (buyer)",
+    description:
+      "Dipakai saat seller klik \"Konfirmasi Pesanan\" di halaman detail pesanan. WhatsApp terbuka dengan pesan sudah terisi, tinggal kirim.",
     defaultBody: `Hai {nama_pembeli}! 👋
 
-Terima kasih sudah pesan di {nama_toko}. Pesananmu sudah masuk:
+Pesananmu sudah masuk:
 
 📦 Pesanan: {nomor_pesanan}
 {ringkasan_produk}
@@ -34,7 +70,7 @@ Terima kasih sudah pesan di {nama_toko}. Pesananmu sudah masuk:
 💰 Total: {total}
 🚚 Kurir: {kurir}
 
-Silakan transfer/bayar ke link yang akan saya kirim selanjutnya. Kalau ada pertanyaan, balas chat ini ya.`,
+Terima kasih sudah pesan di {nama_toko}.`,
     placeholders: [
       "nama_pembeli",
       "nama_toko",
@@ -43,84 +79,77 @@ Silakan transfer/bayar ke link yang akan saya kirim selanjutnya. Kalau ada perta
       "total",
       "kurir",
     ],
+    tier: "free",
   },
   {
     key: "payment_link",
-    title: "Link Pembayaran",
+    title: "Kirim Link Pembayaran (buyer)",
     description:
-      "Dikirim setelah seller generate payment link Midtrans / kasih nomor rekening.",
+      "Dipakai saat seller klik \"Kirim Link Pembayaran\" di halaman detail pesanan.",
     defaultBody: `Halo {nama_pembeli}, ini link pembayaran untuk pesanan {nomor_pesanan}:
 
 {link_pembayaran}
 
-Total: {total}
-
-Pembayaran berlaku sampai {batas_waktu}. Kalau sudah bayar, balas "OK" ya — saya akan langsung proses.`,
+Total: {total}`,
     placeholders: [
       "nama_pembeli",
       "nomor_pesanan",
       "link_pembayaran",
       "total",
-      "batas_waktu",
     ],
+    tier: "free",
   },
   {
     key: "shipping_update",
-    title: "Update Resi & Pengiriman",
+    title: "Update Resi (buyer)",
     description:
-      "Dikirim saat seller input nomor resi. Kasih buyer info tracking.",
+      "Dipakai saat seller klik \"Kirim Update Resi\" di halaman detail pesanan setelah input nomor resi.",
     defaultBody: `Halo {nama_pembeli}! Pesananmu {nomor_pesanan} sudah saya kirim. 📦
 
 🚚 Kurir: {kurir}
 📋 Nomor Resi: {nomor_resi}
 
-Lacak: {link_tracking}
-
-Estimasi sampai {estimasi_sampai}. Kalau sudah terima, jangan lupa balas "Sudah sampai" ya, biar saya tahu. Makasih! 🙏`,
+Estimasi sampai 2-4 hari. Makasih! 🙏`,
     placeholders: [
       "nama_pembeli",
       "nomor_pesanan",
       "kurir",
       "nomor_resi",
-      "link_tracking",
-      "estimasi_sampai",
     ],
-  },
-  {
-    key: "thank_you",
-    title: "Terima Kasih (Pasca Selesai)",
-    description:
-      "Opsional. Dikirim setelah buyer konfirmasi pesanan diterima — bangun loyalitas + minta review.",
-    defaultBody: `Halo {nama_pembeli}, terima kasih banyak sudah belanja di {nama_toko}! ❤️
-
-Senang banget pesananmu sudah sampai dengan baik. Kalau ada feedback atau saran, langsung balas chat ini ya.
-
-🎁 Sebagai apresiasi, ada kode diskon 10% untuk pesanan berikutnya: SELLON10
-
-Sampai ketemu di pesanan berikutnya!`,
-    placeholders: ["nama_pembeli", "nama_toko"],
+    tier: "free",
   },
 ];
 
+type Plan = "free" | "pro" | "bisnis";
+
 export function WhatsAppTemplatesForm({
   initial,
+  plan,
 }: {
   initial: Record<string, string>;
+  // Same plan gate as the notification form: Free tier can preview the
+  // template body for transparency, but textarea + save are disabled
+  // since nothing will fire until they upgrade.
+  plan: Plan;
 }) {
-  const router = useRouter();
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
+  const { refresh } = useRouter();
+  const [pending, setPending] = useState(false);  // Whole feature is Pro/Bisnis. Free tier still sees the templates
+  // (so they know what they'd get on upgrade), but textareas + Save
+  // are locked. The notification card above this form already carries
+  // the upgrade CTA, so we don't duplicate it here — just visual locks.
+  const locked = plan !== "pro" && plan !== "bisnis";
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setPending(true);
-    setError(null);
-    setSaved(false);
-
     const fd = new FormData(e.currentTarget);
     const body: Record<string, string> = {};
     for (const t of templates) {
+      // Disabled textareas don't appear in FormData; skipping them
+      // entirely also means the locked-tier seller can't accidentally
+      // clobber a stored value with empty string. (Save button itself
+      // is disabled for Free, so this branch is belt + suspenders.)
+      if (locked) continue;
       body[t.key] = String(fd.get(t.key) ?? "");
     }
 
@@ -133,10 +162,10 @@ export function WhatsAppTemplatesForm({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-      setSaved(true);
-      router.refresh();
+      showSuccess("Tersimpan");
+      refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal menyimpan");
+      showError(err);
     } finally {
       setPending(false);
     }
@@ -149,13 +178,19 @@ export function WhatsAppTemplatesForm({
           <Info className="size-4 shrink-0 text-brand-600" aria-hidden />
           <div>
             <p>
-              <strong>Cara kerja:</strong> Template ini akan diisi otomatis oleh
-              SellOn dengan data pesanan saat seller klik &ldquo;Kirim WhatsApp&rdquo;
-              dari halaman pesanan. Pakai variabel{" "}
+              <strong>Cara kerja:</strong> Template di bawah dipakai dua tempat
+              — auto-alert ke owner (otomatis terkirim oleh sistem), dan
+              tombol &ldquo;Kirim WhatsApp&rdquo; di halaman detail pesanan
+              (manual, seller klik). Placeholder seperti{" "}
               <code className="rounded bg-neutral-100 px-1 py-0.5 text-xs">
-                &#123;nama_variable&#125;
+                &#123;nama_pembeli&#125;
               </code>{" "}
-              — akan di-replace otomatis. Variabel yang tidak dikenal akan dibiarkan apa adanya.
+              atau{" "}
+              <code className="rounded bg-neutral-100 px-1 py-0.5 text-xs">
+                &#123;&#123;order_number&#125;&#125;
+              </code>{" "}
+              akan diganti dengan data pesanan asli. Kosongkan body untuk pakai
+              template default.
             </p>
           </div>
         </div>
@@ -180,8 +215,15 @@ export function WhatsAppTemplatesForm({
               Variabel:
             </span>
             {t.placeholders.map((p) => (
-              <Badge key={p} variant="outline" className="font-mono text-xs">
-                {`{${p}}`}
+              <Badge
+                key={p}
+                variant="outline"
+                className="font-mono text-xs"
+              >
+                {/* Placeholder syntax matches how the consumer reads
+                    it: paid auto-templates use {{double}}, free buyer
+                    templates use {single}. */}
+                {t.tier === "paid" ? `{{${p}}}` : `{${p}}`}
               </Badge>
             ))}
           </div>
@@ -192,19 +234,23 @@ export function WhatsAppTemplatesForm({
             rows={9}
             defaultValue={initial[t.key] ?? t.defaultBody}
             aria-labelledby={`${t.key}-title`}
-            className="w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 font-mono text-xs leading-relaxed text-neutral-900 placeholder:text-neutral-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+            disabled={locked}
+            className="w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 font-mono text-xs leading-relaxed text-neutral-900 placeholder:text-neutral-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 disabled:cursor-not-allowed disabled:bg-neutral-50 disabled:text-neutral-500"
           />
         </Card>
       ))}
 
-      <div className="flex items-center justify-between">
+      {/* One global Save bar. Locked for Free — feature is Pro/Bisnis. */}
+      <div className="flex items-center justify-between gap-3">
         <div className="text-sm">
-          {saved && <span className="font-medium text-success">✓ Tersimpan</span>}
-          {error && <span className="font-medium text-danger">{error}</span>}
-        </div>
-        <Button type="submit" size="md" disabled={pending}>
-          <Save className="size-4" aria-hidden />
-          {pending ? "Menyimpan…" : "Simpan Template"}
+                            </div>
+        <Button type="submit" size="md" disabled={pending || locked}>
+          {locked ? (
+            <Lock className="size-4" aria-hidden />
+          ) : (
+            <Save className="size-4" aria-hidden />
+          )}
+          {pending ? "Menyimpan…" : "Simpan"}
         </Button>
       </div>
     </form>

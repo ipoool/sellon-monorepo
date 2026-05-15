@@ -10,7 +10,7 @@ type BrowserMockupProps = {
 // Stylized browser frame for fake screenshots — top bar with traffic light
 // dots and a URL pill, body slot for any content. No real screenshots needed.
 export function BrowserMockup({
-  url = "sellon.id/dasbor",
+  url = "sellon.id/dashboard",
   className,
   children,
 }: BrowserMockupProps) {

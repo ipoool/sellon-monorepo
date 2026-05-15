@@ -1,9 +1,11 @@
 import * as React from "react";
+import Image from "next/image";
 import { cn } from "@/lib/utils";
 
-type Size = "sm" | "md" | "lg";
+type Size = "xs" | "sm" | "md" | "lg";
 
 const sizeClasses: Record<Size, string> = {
+  xs: "size-5 text-[10px]",
   sm: "size-7 text-xs",
   md: "size-8 text-sm",
   lg: "size-10 text-base",
@@ -21,8 +23,7 @@ export function Avatar({ src, name, size = "md", className }: AvatarProps) {
 
   if (src) {
     return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
+      <Image
         src={src}
         alt={name}
         width={40}

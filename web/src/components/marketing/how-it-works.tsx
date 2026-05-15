@@ -9,7 +9,7 @@ const steps = [
     icon: UserPlus,
     title: "Daftar dalam 1 menit",
     description:
-      "Login dengan Google, akun langsung jadi. Tidak perlu isi formulir panjang.",
+      "Login pakai akun Google. Tidak perlu isi formulir panjang, langsung punya akun.",
     duration: "~1 menit",
     highlight: "Login → langsung jadi.",
   },
@@ -17,7 +17,7 @@ const steps = [
     icon: ImagePlus,
     title: "Bikin katalog",
     description:
-      "Upload foto produk, atur harga, dan dapatkan link katalog WhatsApp untuk dibagikan.",
+      "Tambah foto produk, atur harga, dapat link katalog yang siap kamu bagi di WhatsApp.",
     duration: "~3 menit",
     highlight: "sellon.id/toko-mu",
   },
@@ -25,9 +25,9 @@ const steps = [
     icon: Send,
     title: "Terima pesanan",
     description:
-      "Pembeli klik link, bayar via QRIS, dana langsung masuk ke rekeningmu. Selesai.",
-    duration: "Real-time",
-    highlight: "Bayar → notif langsung.",
+      "Pembeli klik link, pilih produk, bayar lewat QRIS - dana langsung masuk ke rekening kamu. Selesai.",
+    duration: "Langsung",
+    highlight: "Bayar → notifikasi masuk.",
   },
 ];
 
@@ -35,18 +35,17 @@ export function HowItWorks() {
   return (
     <Section id="cara-kerja" bg="alt">
       <Container>
-        <div className="mx-auto max-w-2xl text-center">
+        <div className="mx-auto max-w-4xl text-center">
           <span className="inline-flex items-center gap-1.5 rounded-full border border-brand-200 bg-brand-50 px-3 py-1 text-xs font-medium text-brand-700">
             <Sparkles className="size-3.5" aria-hidden />
             Cara Kerja
           </span>
           <h2 className="mt-3 font-display text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
-            Dari nol ke jualan online dalam{" "}
+            Dari nol ke jualan online cuma{" "}
             <span className="text-gradient-brand">5 menit</span>
           </h2>
-          <p className="mt-4 text-lg text-neutral-600">
-            Tiga langkah, tanpa proses panjang. Cocok untuk yang baru pertama
-            kali jualan online.
+          <p className="mt-4 text-lg text-neutral-600 lg:whitespace-nowrap">
+            Tiga langkah singkat, tanpa istilah teknis yang bikin pusing.
           </p>
         </div>
 
@@ -107,14 +106,14 @@ export function HowItWorks() {
         </div>
 
         <div className="mt-12 flex flex-col items-center gap-3">
-          <Link href="/masuk">
+          <Link href="/login">
             <Button size="lg">
               Mulai Gratis Sekarang
               <ArrowRight className="size-4" aria-hidden />
             </Button>
           </Link>
           <p className="text-xs text-neutral-500">
-            Tidak butuh kartu kredit · Akun siap dalam 60 detik
+            Tanpa kartu kredit · Akun siap dalam 60 detik
           </p>
         </div>
       </Container>

@@ -59,7 +59,7 @@ function chime(): () => void {
 }
 
 export function OrderNotifier() {
-  const router = useRouter();
+  const { refresh } = useRouter();
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   useEffect(() => {
@@ -84,7 +84,7 @@ export function OrderNotifier() {
           playChime();
           // Refresh server components on the current page so list views
           // reflect the new order without manual reload.
-          router.refresh();
+          refresh();
         } catch {
           // ignore
         }
@@ -103,7 +103,7 @@ export function OrderNotifier() {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       es?.close();
     };
-  }, [router]);
+  }, [refresh]);
 
   // Auto-dismiss each toast after 8 seconds.
   useEffect(() => {
@@ -145,7 +145,7 @@ export function OrderNotifier() {
               {formatRupiah(t.total_cents)}
             </p>
             <Link
-              href={`/dasbor/pesanan/${t.order_id}`}
+              href={`/orders/${t.order_id}`}
               className="mt-1 inline-flex text-xs font-medium text-brand-600 hover:text-brand-700"
               onClick={() => dismiss(t.ts)}
             >

@@ -1,16 +1,21 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Search, MessageCircle } from "lucide-react";
 
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Tooltip } from "@/components/ui/tooltip";
 import { formatRupiah, formatDateID } from "@/lib/format";
 import { waLink } from "@/lib/whatsapp";
 import { cn } from "@/lib/utils";
 import type { Customer } from "@/lib/types";
+import {
+  TABLE_PAGE_SIZE,
+  TablePagination,
+} from "@/components/dashboard/table-pagination";
 
 type Segment = "all" | "vip" | "loyal" | "reguler" | "baru" | "blacklist";
 
@@ -43,6 +48,14 @@ const filterTabs: { key: Segment; label: string }[] = [
 export function CustomersTable({ customers }: { customers: Customer[] }) {
   const [query, setQuery] = useState("");
   const [segment, setSegment] = useState<Segment>("all");
+  const [page, setPage] = useState(1);
+  const pageSize = TABLE_PAGE_SIZE;
+
+  // Reset to page 1 whenever the filter inputs change so the user never
+  // sees an empty page after narrowing the result set.
+  useEffect(() => {
+    setPage(1);
+  }, [query, segment]);
 
   const enriched = useMemo(
     () =>
@@ -79,6 +92,14 @@ export function CustomersTable({ customers }: { customers: Customer[] }) {
       );
     });
   }, [enriched, query, segment]);
+
+  // Clamp page lazily so the slice stays valid if the dataset shrinks
+  // below the current page (e.g. user toggles segment after navigating
+  // to page 4).
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const sliceStart = (safePage - 1) * pageSize;
+  const paged = filtered.slice(sliceStart, sliceStart + pageSize);
 
   return (
     <div className="flex flex-col gap-4">
@@ -136,14 +157,14 @@ export function CustomersTable({ customers }: { customers: Customer[] }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-200">
-              {filtered.map((c) => (
+              {paged.map((c) => (
                 <tr
                   key={c.id}
                   className="group cursor-pointer hover:bg-neutral-50"
                 >
                   <td className="px-5 py-3">
                     <Link
-                      href={`/dasbor/pelanggan/${c.id}`}
+                      href={`/customers/${c.id}`}
                       className="flex items-center gap-3"
                     >
                       <Avatar name={c.name} size="sm" />
@@ -172,20 +193,21 @@ export function CustomersTable({ customers }: { customers: Customer[] }) {
                   </td>
                   <td className="px-5 py-3 text-right">
                     {c.whatsapp_number && (
-                      <a
-                        href={waLink(
-                          c.whatsapp_number,
-                          `Halo ${c.name}, ada update dari tokomu :)`,
-                        )}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        className="inline-flex size-8 items-center justify-center rounded-md border border-neutral-200 text-neutral-600 transition-colors hover:border-brand-500 hover:bg-brand-50 hover:text-brand-700"
-                        aria-label={`Hubungi ${c.name} via WhatsApp`}
-                        title="Hubungi via WhatsApp"
-                      >
-                        <MessageCircle className="size-4" aria-hidden />
-                      </a>
+                      <Tooltip label="Hubungi via WhatsApp" align="end">
+                        <a
+                          href={waLink(
+                            c.whatsapp_number,
+                            `Halo ${c.name}, ada update dari tokomu :)`,
+                          )}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="inline-flex size-8 items-center justify-center rounded-md border border-neutral-200 text-neutral-600 transition-colors hover:border-brand-500 hover:bg-brand-50 hover:text-brand-700"
+                          aria-label={`Hubungi ${c.name} via WhatsApp`}
+                        >
+                          <MessageCircle className="size-4" aria-hidden />
+                        </a>
+                      </Tooltip>
                     )}
                   </td>
                 </tr>
@@ -194,6 +216,13 @@ export function CustomersTable({ customers }: { customers: Customer[] }) {
           </table>
         </div>
       )}
+
+      <TablePagination
+        page={safePage}
+        pageSize={pageSize}
+        total={filtered.length}
+        onPageChange={setPage}
+      />
     </div>
   );
 }

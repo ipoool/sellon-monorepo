@@ -1,13 +1,20 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
-type Variant = "default" | "brand" | "success" | "warning" | "outline";
+type Variant =
+  | "default"
+  | "brand"
+  | "success"
+  | "warning"
+  | "danger"
+  | "outline";
 
 const variantClasses: Record<Variant, string> = {
   default: "bg-neutral-100 text-neutral-700",
   brand: "bg-brand-50 text-brand-700",
   success: "bg-success/10 text-success",
   warning: "bg-warning/15 text-neutral-800",
+  danger: "bg-danger/10 text-danger",
   outline: "border border-neutral-200 text-neutral-700",
 };
 

@@ -1,5 +1,5 @@
 // Static help center registry. Each category has a small set of articles
-// rendered as plain JSX inside src/app/bantuan/[slug]/page.tsx. Keeping
+// rendered as plain JSX inside src/app/help/[slug]/page.tsx. Keeping
 // content here as data (not MDX) so changes are quick and the build stays
 // dependency-free.
 
@@ -62,7 +62,7 @@ export const helpArticles: HelpArticle[] = [
       {
         type: "ol",
         items: [
-          "Buka halaman /masuk dari mana saja di sellon.id.",
+          "Buka halaman /login dari mana saja di sellon.id.",
           "Klik tombol 'Lanjut dengan Google'.",
           "Pilih akun Google yang ingin Anda pakai untuk toko.",
           "Setelah login, Anda akan diarahkan ke setup wizard untuk membuat toko pertama.",
@@ -189,7 +189,7 @@ export const helpArticles: HelpArticle[] = [
       {
         type: "p",
         text:
-          "Halaman utama toko: sellon.id/{slug}. Halaman produk individual: sellon.id/{slug}/produk/{slug-produk}. Halaman pembayaran pesanan: sellon.id/{slug}/pesanan/{nomor-pesanan} (otomatis dikirim ke pembeli).",
+          "Halaman utama toko: sellon.id/{slug}. Halaman produk individual: sellon.id/{slug}/product/{slug-produk}. Halaman pembayaran pesanan: sellon.id/{slug}/order/{nomor-pesanan} (otomatis dikirim ke pembeli).",
       },
       { type: "h2", text: "Cara membagikan" },
       {

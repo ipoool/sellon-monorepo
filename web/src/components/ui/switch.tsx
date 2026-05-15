@@ -1,15 +1,24 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
+type SwitchProps = Omit<
+  React.InputHTMLAttributes<HTMLInputElement>,
+  "type" | "size"
+> & {
+  size?: "sm" | "md";
+  ref?: React.Ref<HTMLInputElement>;
+};
+
 // Switch is a checkbox styled as a toggle. The native input stays in the
 // DOM (as `peer`) so FormData / required / name still work, and assistive
 // tech treats it as a normal checkbox.
-export const Switch = React.forwardRef<
-  HTMLInputElement,
-  Omit<React.InputHTMLAttributes<HTMLInputElement>, "type" | "size"> & {
-    size?: "sm" | "md";
-  }
->(({ className, size = "md", disabled, ...props }, ref) => {
+export function Switch({
+  className,
+  size = "md",
+  disabled,
+  ref,
+  ...props
+}: SwitchProps) {
   const dims =
     size === "sm"
       ? { track: "h-5 w-9", thumb: "size-4 peer-checked:translate-x-4" }
@@ -45,5 +54,4 @@ export const Switch = React.forwardRef<
       />
     </span>
   );
-});
-Switch.displayName = "Switch";
+}

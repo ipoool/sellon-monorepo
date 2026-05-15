@@ -1,9 +1,11 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { Upload, Loader2, X, ImageIcon } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import Image from "next/image";
+import { Upload, Loader2, X, ImageIcon, ImageOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { uploadImage, type UploadKind } from "@/lib/supabase";
+import { showError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -26,25 +28,52 @@ export function ImageUploadInput({
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Track per-URL broken state lewat React (bukan style.display mutation
+  // langsung di DOM) supaya saat user upload ulang dengan URL baru,
+  // state reset otomatis dan image baru bisa render.
+  const [broken, setBroken] = useState(false);
+  useEffect(() => {
+    setBroken(false);
+  }, [value]);
+
+  // FE cap: logo + banner tidak boleh > 5 MB. Untuk product backend
+  // sudah compress jadi cap di-skip (file besar di-resize otomatis).
+  // QRIS / general dibatasi sama 5 MB juga supaya konsisten.
+  const FE_MAX_BYTES = 5 * 1024 * 1024;
+  const feCapped = kind !== "product";
 
   async function handleFile(file: File | undefined) {
     if (!file) return;
+
+    if (feCapped && file.size > FE_MAX_BYTES) {
+      const mb = (file.size / (1024 * 1024)).toFixed(1);
+      showError(
+        `Ukuran ${mb} MB melebihi batas 5 MB. Pakai gambar lebih kecil.`,
+      );
+      if (inputRef.current) inputRef.current.value = "";
+      return;
+    }
+
     setPending(true);
-    setError(null);
     try {
       const { url } = await uploadImage(file, kind);
       onChange(url);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload gagal");
+      showError(err);
     } finally {
       setPending(false);
       if (inputRef.current) inputRef.current.value = "";
     }
   }
 
-  const aspect =
-    shape === "wide" ? "aspect-[3/1]" : "aspect-square w-32 sm:w-40";
+  const isWide = shape === "wide";
+  // Wide banner: full width sampai max ~md supaya tetap punya tinggi
+  // dari aspect-ratio. Tanpa width explicit, Image fill di parent
+  // tanpa intrinsic width = 0×0 (banner gak muncul setelah upload).
+  // Square logo: width fix supaya thumbnail rapi di samping tombol.
+  const aspect = isWide
+    ? "aspect-[3/1] w-full sm:max-w-md"
+    : "aspect-square w-32 sm:w-40";
 
   return (
     <div className="flex flex-col gap-2">
@@ -57,22 +86,38 @@ export function ImageUploadInput({
       />
 
       {value ? (
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div
+          className={cn(
+            "flex flex-col gap-2",
+            // Square (logo): preview + tombol side-by-side di desktop.
+            // Wide (banner): selalu stacked agar lebar banner penuh.
+            !isWide && "sm:flex-row sm:items-center",
+          )}
+        >
           <div
             className={cn(
               "relative shrink-0 overflow-hidden rounded-lg border border-neutral-200 bg-neutral-100",
               aspect,
             )}
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={value}
-              alt=""
-              className="size-full object-cover"
-              onError={(e) => {
-                (e.target as HTMLImageElement).style.display = "none";
-              }}
-            />
+            {broken ? (
+              <div className="flex size-full flex-col items-center justify-center gap-1 bg-neutral-100 text-neutral-500">
+                <ImageOff className="size-5" aria-hidden />
+                <span className="text-[10px] font-medium">
+                  Gambar gagal dimuat
+                </span>
+              </div>
+            ) : (
+              <Image
+                key={value}
+                src={value}
+                alt=""
+                fill
+                sizes="(max-width: 768px) 100vw, 320px"
+                className="object-cover"
+                onError={() => setBroken(true)}
+              />
+            )}
             <button
               type="button"
               onClick={() => onChange("")}
@@ -125,7 +170,6 @@ export function ImageUploadInput({
         </button>
       )}
 
-      {error && <p className="text-xs font-medium text-danger">{error}</p>}
     </div>
   );
 }

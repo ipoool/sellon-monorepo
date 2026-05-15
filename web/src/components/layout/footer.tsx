@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { Container } from "@/components/layout/container";
 
+const COPYRIGHT_YEAR = new Date().getFullYear();
+
 type FooterLink = {
   label: string;
   href?: string;
@@ -25,7 +27,7 @@ const columns: FooterColumn[] = [
   {
     title: "Perusahaan",
     links: [
-      { label: "Tentang Kami", href: "/tentang" },
+      { label: "Tentang Kami", href: "/about" },
       { label: "Karir" },
       { label: "Blog" },
       { label: "Press Kit" },
@@ -34,8 +36,8 @@ const columns: FooterColumn[] = [
   {
     title: "Resource",
     links: [
-      { label: "Pusat Bantuan", href: "/bantuan" },
-      { label: "Panduan UMKM", href: "/panduan" },
+      { label: "Pusat Bantuan", href: "/help" },
+      { label: "Panduan UMKM", href: "/guides" },
       { label: "Status Layanan", href: "/status" },
       { label: "API Docs" },
     ],
@@ -43,9 +45,9 @@ const columns: FooterColumn[] = [
   {
     title: "Hukum",
     links: [
-      { label: "Syarat & Ketentuan", href: "/syarat-ketentuan" },
-      { label: "Kebijakan Privasi", href: "/kebijakan-privasi" },
-      { label: "Kebijakan Cookie", href: "/kebijakan-cookie" },
+      { label: "Syarat & Ketentuan", href: "/terms" },
+      { label: "Kebijakan Privasi", href: "/privacy" },
+      { label: "Kebijakan Cookie", href: "/cookies" },
     ],
   },
 ];
@@ -63,8 +65,9 @@ export function Footer() {
               SellOn
             </Link>
             <p className="mt-3 max-w-xs text-sm leading-relaxed text-neutral-600">
-              Platform UMKM Indonesia untuk jualan via WhatsApp tanpa potongan
-              marketplace. Bayar bulanan, tidak ada take-rate.
+              Toko online untuk seller WhatsApp Indonesia. Pembeli pilih
+              produk lewat link, bayar online, konfirmasi via WhatsApp -
+              tanpa potongan marketplace.
             </p>
             <p className="mt-4 text-xs text-neutral-500">
               Pertanyaan?{" "}
@@ -109,7 +112,7 @@ export function Footer() {
         </div>
 
         <div className="flex flex-col gap-3 border-t border-neutral-200 py-6 text-sm text-neutral-500 sm:flex-row sm:items-center sm:justify-between">
-          <p>© {new Date().getFullYear()} SellOn Indonesia. Semua hak dilindungi.</p>
+          <p>© {COPYRIGHT_YEAR} SellOn Indonesia. Semua hak dilindungi.</p>
           <p className="flex items-center gap-1.5">
             <span aria-hidden>🇮🇩</span>
             <span>Dibuat di Indonesia untuk UMKM Indonesia.</span>

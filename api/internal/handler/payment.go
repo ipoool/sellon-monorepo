@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/sellon/sellon/api/internal/audit"
 	"github.com/sellon/sellon/api/internal/auth"
 	"github.com/sellon/sellon/api/internal/payments"
 	"github.com/sellon/sellon/api/internal/pkg/response"
@@ -18,6 +19,7 @@ type PaymentHandler struct {
 	stores         *repository.StoreRepo
 	encryptor      *auth.AESEncryptor
 	midtrans       *payments.MidtransClient
+	audit          *audit.Logger
 	logger         *slog.Logger
 	webhookBaseURL string
 }
@@ -27,12 +29,15 @@ func NewPaymentHandler(
 	stores *repository.StoreRepo,
 	enc *auth.AESEncryptor,
 	midtrans *payments.MidtransClient,
+	audit *audit.Logger,
 	logger *slog.Logger,
 	webhookBaseURL string,
 ) *PaymentHandler {
 	return &PaymentHandler{
 		gateways: gateways, stores: stores, encryptor: enc,
-		midtrans: midtrans, logger: logger, webhookBaseURL: webhookBaseURL,
+		midtrans: midtrans,
+		audit:    audit,
+		logger:   logger, webhookBaseURL: webhookBaseURL,
 	}
 }
 
@@ -91,13 +96,21 @@ func (h *PaymentHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 // POST /api/v1/payments/midtrans/rotate-webhook
+//
+// Generate URL webhook baru. Side effects:
+//   - Toko otomatis di-set offline (is_open=false). Sampai seller paste
+//     URL baru di dashboard Midtrans, notifikasi pembayaran tidak akan
+//     sampai ke SellOn — toko offline lebih aman daripada nampung order
+//     dengan webhook patah.
+//   - Audit log mencatat URL lama vs URL baru di metadata supaya seller
+//     bisa lihat di tab Aktivitas.
 func (h *PaymentHandler) RotateWebhook(w http.ResponseWriter, r *http.Request) {
 	store, err := h.storeFor(r)
 	if err != nil {
 		response.Error(w, http.StatusBadRequest, "toko belum dibuat")
 		return
 	}
-	token, err := h.gateways.RotateWebhookToken(r.Context(), store.ID, "midtrans")
+	oldToken, newToken, err := h.gateways.RotateWebhookToken(r.Context(), store.ID, "midtrans")
 	if errors.Is(err, repository.ErrGatewayNotFound) {
 		response.Error(w, http.StatusBadRequest, "gateway belum dikonfigurasi")
 		return
@@ -107,8 +120,35 @@ func (h *PaymentHandler) RotateWebhook(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, "gagal rotate token")
 		return
 	}
-	response.JSON(w, http.StatusOK, map[string]string{
-		"webhook_url": h.webhookBaseURL + "/webhooks/midtrans/" + token,
+
+	oldURL := h.webhookBaseURL + "/webhooks/midtrans/" + oldToken
+	newURL := h.webhookBaseURL + "/webhooks/midtrans/" + newToken
+
+	// Toko di-offline supaya pembeli tidak sempat order sebelum webhook
+	// baru terdaftar di Midtrans. Failure di-log tapi tidak block
+	// response — token sudah ter-rotate, seller wajib update Midtrans.
+	storeWasOpen := store.IsOpen
+	if storeWasOpen {
+		if err := h.stores.SetIsOpen(r.Context(), store.ID, false); err != nil {
+			h.logger.Warn("rotate webhook: set offline", "err", err, "store_id", store.ID)
+		}
+	}
+
+	h.audit.Log(r.Context(), store.ID, audit.Event{
+		Action:     "payment_gateway.webhook_rotated",
+		EntityType: "payment_gateway",
+		Summary:    "Rotate webhook Midtrans — toko di-set offline sampai URL baru ter-update di Midtrans",
+		Metadata: map[string]any{
+			"provider":         "midtrans",
+			"old_webhook_url":  oldURL,
+			"new_webhook_url":  newURL,
+			"store_set_offline": storeWasOpen,
+		},
+	})
+	response.JSON(w, http.StatusOK, map[string]any{
+		"webhook_url":       newURL,
+		"old_webhook_url":   oldURL,
+		"store_set_offline": storeWasOpen,
 	})
 }
 
@@ -198,6 +238,23 @@ func (h *PaymentHandler) Save(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, "gagal simpan")
 		return
 	}
+
+	mode := "production"
+	if req.IsSandbox {
+		mode = "sandbox"
+	}
+	h.audit.Log(r.Context(), store.ID, audit.Event{
+		Action:     "payment_gateway.updated",
+		EntityType: "payment_gateway",
+		Summary:    "Update Midtrans (mode " + mode + ")",
+		Metadata: map[string]any{
+			"provider":          "midtrans",
+			"is_sandbox":        req.IsSandbox,
+			"enabled_methods":   req.EnabledMethods,
+			"sandbox_key_set":   sandboxBlob != nil,
+			"prod_key_set":      prodBlob != nil,
+		},
+	})
 
 	response.JSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

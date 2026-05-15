@@ -26,7 +26,7 @@ const DEFAULT: OpenHours = {
 
 type Props = {
   initial: OpenHours;
-  // Hidden input name — its value is the JSON to submit with the form.
+  // Hidden input name - its value is the JSON to submit with the form.
   name: string;
 };
 
@@ -83,7 +83,7 @@ export function JamBukaEditor({ initial, name }: Props) {
                   onChange={(e) => update(d.key, { open: e.target.value })}
                   className="h-9 w-28 rounded-lg border border-neutral-200 bg-white px-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 disabled:cursor-not-allowed"
                 />
-                <span className="text-neutral-400">—</span>
+                <span className="text-neutral-400">-</span>
                 <input
                   type="time"
                   disabled={closed}

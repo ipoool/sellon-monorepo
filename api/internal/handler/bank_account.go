@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/sellon/sellon/api/internal/audit"
 	"github.com/sellon/sellon/api/internal/auth"
 	"github.com/sellon/sellon/api/internal/pkg/response"
 	"github.com/sellon/sellon/api/internal/repository"
@@ -18,11 +19,12 @@ import (
 type BankAccountHandler struct {
 	accounts *repository.BankAccountRepo
 	stores   *repository.StoreRepo
+	audit    *audit.Logger
 	logger   *slog.Logger
 }
 
-func NewBankAccountHandler(a *repository.BankAccountRepo, s *repository.StoreRepo, logger *slog.Logger) *BankAccountHandler {
-	return &BankAccountHandler{accounts: a, stores: s, logger: logger}
+func NewBankAccountHandler(a *repository.BankAccountRepo, s *repository.StoreRepo, audit *audit.Logger, logger *slog.Logger) *BankAccountHandler {
+	return &BankAccountHandler{accounts: a, stores: s, audit: audit, logger: logger}
 }
 
 type bankAccountDTO struct {
@@ -109,6 +111,22 @@ func (h *BankAccountHandler) Create(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, "gagal simpan")
 		return
 	}
+	label := a.BankName + " " + a.AccountNo
+	if a.QRISURL != "" && a.BankName == "" {
+		label = "QRIS"
+	}
+	h.audit.Log(r.Context(), store.ID, audit.Event{
+		Action:     "bank_account.created",
+		EntityType: "bank_account",
+		EntityID:   a.ID.String(),
+		Summary:    "Tambah rekening " + label,
+		Metadata: map[string]any{
+			"bank_name":   a.BankName,
+			"holder_name": a.HolderName,
+			"is_primary":  a.IsPrimary,
+			"has_qris":    a.QRISURL != "",
+		},
+	})
 	response.JSON(w, http.StatusCreated, map[string]any{"account": toBankAccountDTO(a)})
 }
 
@@ -148,6 +166,16 @@ func (h *BankAccountHandler) Update(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, "gagal update")
 		return
 	}
+	h.audit.Log(r.Context(), store.ID, audit.Event{
+		Action:     "bank_account.updated",
+		EntityType: "bank_account",
+		EntityID:   id.String(),
+		Summary:    "Update rekening " + strings.TrimSpace(req.BankName+" "+req.AccountNo),
+		Metadata: map[string]any{
+			"bank_name":  req.BankName,
+			"is_primary": req.IsPrimary,
+		},
+	})
 	response.JSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -171,6 +199,12 @@ func (h *BankAccountHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, "gagal hapus")
 		return
 	}
+	h.audit.Log(r.Context(), store.ID, audit.Event{
+		Action:     "bank_account.deleted",
+		EntityType: "bank_account",
+		EntityID:   id.String(),
+		Summary:    "Hapus rekening",
+	})
 	response.JSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 

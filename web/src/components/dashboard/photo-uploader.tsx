@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { showError, showSuccess } from "@/lib/toast";
 import { Upload, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { uploadProductPhoto } from "@/lib/supabase";
@@ -13,20 +14,18 @@ type Props = {
 export function PhotoUploader({ onUploaded, disabled }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
     setPending(true);
-    setError(null);
     try {
-      // Upload sequentially so one bad file doesn't kill the rest.
-      for (const file of Array.from(files)) {
-        const { url } = await uploadProductPhoto(file);
-        onUploaded(url);
-      }
+      // Upload in parallel — failures are surfaced via Promise.all rejection.
+      const urls = await Promise.all(
+        Array.from(files).map((file) => uploadProductPhoto(file)),
+      );
+      for (const { url } of urls) onUploaded(url);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload gagal");
+      showError(err);
     } finally {
       setPending(false);
       if (inputRef.current) inputRef.current.value = "";
@@ -60,7 +59,6 @@ export function PhotoUploader({ onUploaded, disabled }: Props) {
       <p className="text-xs text-neutral-500">
         JPG/PNG/WebP, maks 5 MB per foto. Bisa pilih beberapa sekaligus.
       </p>
-      {error && <p className="text-xs font-medium text-danger">{error}</p>}
-    </div>
+          </div>
   );
 }

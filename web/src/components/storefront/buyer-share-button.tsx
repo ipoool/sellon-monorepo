@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { Share2, Copy, Check } from "lucide-react";
 
 type Props = {
@@ -9,16 +9,18 @@ type Props = {
   priceLabel: string;
 };
 
+// useSyncExternalStore avoids the post-mount setState flash: the server
+// snapshot returns "", the client subscribes to history events.
+function subscribe(cb: () => void) {
+  window.addEventListener("popstate", cb);
+  return () => window.removeEventListener("popstate", cb);
+}
+const getSnapshot = () => window.location.href;
+const getServerSnapshot = () => "";
+
 export function BuyerShareButton({ productName, storeName, priceLabel }: Props) {
   const [copied, setCopied] = useState(false);
-  // URL is empty during SSR + first client render so the markup matches;
-  // we hydrate it from window.location.href post-mount. While empty, the
-  // WA share link still works as a no-text link.
-  const [url, setUrl] = useState("");
-
-  useEffect(() => {
-    setUrl(window.location.href);
-  }, []);
+  const url = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   async function copy() {
     if (!url) return;

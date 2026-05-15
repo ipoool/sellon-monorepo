@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { showError, showSuccess } from "@/lib/toast";
 import { Save, ShieldOff, ShieldAlert } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -18,18 +19,12 @@ export function CustomerProfileForm({
   initialNotes,
   initialBlacklisted,
 }: Props) {
-  const router = useRouter();
-  const [notes, setNotes] = useState(initialNotes);
-  const [isBlacklisted, setIsBlacklisted] = useState(initialBlacklisted);
+  const { refresh } = useRouter();
+  const [notes, setNotes] = useState(() => initialNotes);
+  const [isBlacklisted, setIsBlacklisted] = useState(() => initialBlacklisted);
   const [pending, setPending] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
   async function save(nextBlacklisted = isBlacklisted) {
-    setPending(true);
-    setSaved(false);
-    setError(null);
-    try {
+    setPending(true);    try {
       const res = await fetch(`${apiBase}/api/v1/customers/${customerId}`, {
         method: "PUT",
         credentials: "include",
@@ -40,11 +35,9 @@ export function CustomerProfileForm({
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || `HTTP ${res.status}`);
       }
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-      router.refresh();
+      showSuccess("Tersimpan");      refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal simpan");
+      showError(err);
     } finally {
       setPending(false);
     }
@@ -81,13 +74,7 @@ export function CustomerProfileForm({
         />
         <div className="flex items-center justify-between">
           <span className="text-xs">
-            {saved && (
-              <span className="font-medium text-success">✓ Tersimpan</span>
-            )}
-            {error && (
-              <span className="font-medium text-danger">{error}</span>
-            )}
-          </span>
+                                  </span>
           <Button size="sm" onClick={() => save()} disabled={pending}>
             <Save className="size-4" aria-hidden />
             {pending ? "Menyimpan…" : "Simpan"}
@@ -101,7 +88,7 @@ export function CustomerProfileForm({
             {isBlacklisted ? "Pelanggan di-blacklist" : "Status: aman"}
           </p>
           <p className="text-xs text-neutral-600">
-            Tag blacklist hanya peringatan internal — tidak otomatis menolak order.
+            Tag blacklist hanya peringatan internal - tidak otomatis menolak order.
           </p>
         </div>
         <Button

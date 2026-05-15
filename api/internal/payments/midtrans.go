@@ -182,6 +182,105 @@ func (c *MidtransClient) Ping(serverKey string, isSandbox bool) error {
 	}
 }
 
+// RefundInput captures the fields Midtrans needs for a direct-refund call.
+// AmountCents is converted to rupiah at the boundary so the rest of the
+// codebase keeps using cents consistently.
+type RefundInput struct {
+	OrderNumber string // our order_number — also Midtrans' order_id
+	AmountCents int64
+	Reason      string
+	RefundKey   string // idempotency key, must be unique per refund attempt
+	IsSandbox   bool
+	ServerKey   string
+}
+
+// RefundResponse is the subset of Midtrans's /refund response we care about.
+// `status_code` is "200" on success, anything else carries `status_message`.
+type RefundResponse struct {
+	StatusCode        string `json:"status_code"`
+	StatusMessage     string `json:"status_message"`
+	TransactionID     string `json:"transaction_id"`
+	OrderID           string `json:"order_id"`
+	GrossAmount       string `json:"gross_amount"`
+	RefundAmount      string `json:"refund_amount"`
+	RefundKey         string `json:"refund_key"`
+	TransactionStatus string `json:"transaction_status"`
+}
+
+// Refund calls POST {core_base}/v2/{order_id}/refund. Used when the order
+// was paid via a Midtrans-supported method (QRIS, VA, e-wallet, card).
+//
+// Notes:
+//   - Some methods need to be refunded via the e-wallet partner instead and
+//     will return 412/413; the caller should surface the message verbatim
+//     so the seller knows to try the manual route.
+//   - We always send `amount` in rupiah (Midtrans's native unit).
+func (c *MidtransClient) Refund(in RefundInput) (*RefundResponse, error) {
+	base := coreSandboxBase
+	if !in.IsSandbox {
+		base = coreProdBase
+	}
+
+	body := map[string]any{
+		"refund_key": in.RefundKey,
+		"amount":     in.AmountCents / 100,
+		"reason":     in.Reason,
+	}
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+
+	url := base + "/" + in.OrderNumber + "/refund"
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(buf))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.SetBasicAuth(in.ServerKey, "")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("hubungi Midtrans: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+
+	var out RefundResponse
+	if err := json.Unmarshal(respBody, &out); err != nil {
+		return nil, fmt.Errorf("midtrans refund decode: %w (raw=%s)", err, string(respBody))
+	}
+
+	// Midtrans returns 200 OK with status_code "200" on success. Some
+	// errors (412, 413) come through as 4xx HTTP with a parseable JSON body.
+	switch out.StatusCode {
+	case "200", "201":
+		return &out, nil
+	default:
+		msg := out.StatusMessage
+		if msg == "" {
+			msg = string(respBody)
+		}
+		return nil, fmt.Errorf("midtrans tolak refund (%s): %s", out.StatusCode, msg)
+	}
+}
+
+// IsMidtransPaymentMethod reports whether `method` (as recorded in
+// orders.payment_method) was processed by Midtrans Snap. Manual transfers
+// and QRIS-statis are not Midtrans even though they look similar in name.
+func IsMidtransPaymentMethod(method string) bool {
+	switch method {
+	case "credit_card", "card",
+		"bank_transfer", "va", "echannel",
+		"bca_va", "bni_va", "bri_va", "permata_va", "cimb_va",
+		"gopay", "shopeepay", "qris":
+		return true
+	default:
+		return false
+	}
+}
+
 // VerifySignature validates the Midtrans webhook signature_key.
 //
 // Per Midtrans docs:

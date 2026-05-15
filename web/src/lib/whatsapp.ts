@@ -1,5 +1,5 @@
 // Strip non-digits and ensure leading 62 (Indonesia country code).
-export function normalizeWANumber(raw: string): string {
+function normalizeWANumber(raw: string): string {
   const digits = raw.replace(/[^\d]/g, "");
   if (!digits) return "";
   if (digits.startsWith("62")) return digits;

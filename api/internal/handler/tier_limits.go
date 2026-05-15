@@ -1,60 +1,42 @@
 package handler
 
-// Tier limits source-of-truth. Update with /landing/pricing.tsx if you
-// change the marketing copy.
+import (
+	"github.com/sellon/sellon/api/internal/repository"
+)
+
+// Tier limits read from each subscription's own snapshot. The snapshot
+// is set at the time of the last plan CHANGE (decision 2026-05-10), so
+// admin edits to the `plans` table only affect *new* subscriptions —
+// existing subscribers keep the limits they signed up under until they
+// change tier.
 //
-// -1 means unlimited.
-const (
-	freeProductLimit   = 30
-	proProductLimit    = -1
-	bisnisProductLimit = -1
-)
+// nil-receiver fail-open: if for any reason the caller hands us a nil
+// subscription, return -1 (unlimited) rather than blocking the action.
 
-// productLimitForPlan returns -1 when the plan has no cap.
-func productLimitForPlan(plan string) int {
-	switch plan {
-	case "pro":
-		return proProductLimit
-	case "bisnis":
-		return bisnisProductLimit
-	default:
-		return freeProductLimit
+func productLimitForSub(sub *repository.Subscription) int {
+	if sub == nil {
+		return -1
 	}
+	return sub.ProductLimit
 }
 
-// Staff seat caps (includes the owner). Free=1 means owner only.
-const (
-	freeStaffLimit   = 1
-	proStaffLimit    = 5
-	bisnisStaffLimit = -1
-)
-
-func staffLimitForPlan(plan string) int {
-	switch plan {
-	case "pro":
-		return proStaffLimit
-	case "bisnis":
-		return bisnisStaffLimit
-	default:
-		return freeStaffLimit
+func staffLimitForSub(sub *repository.Subscription) int {
+	if sub == nil {
+		return -1
 	}
+	return sub.StaffLimit
 }
 
-// Orders/month caps for the storefront create flow. -1 = unlimited.
-// "Month" is calendar-month at server-time UTC; close enough for now.
-const (
-	freeOrderLimit   = 50
-	proOrderLimit    = -1
-	bisnisOrderLimit = -1
-)
-
-func orderLimitForPlan(plan string) int {
-	switch plan {
-	case "pro":
-		return proOrderLimit
-	case "bisnis":
-		return bisnisOrderLimit
-	default:
-		return freeOrderLimit
+func orderLimitForSub(sub *repository.Subscription) int {
+	if sub == nil {
+		return -1
 	}
+	return sub.OrderMonthlyLimit
+}
+
+func promoLimitForSub(sub *repository.Subscription) int {
+	if sub == nil {
+		return -1
+	}
+	return sub.PromoLimit
 }

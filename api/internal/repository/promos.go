@@ -64,25 +64,62 @@ func scanPromo(row pgx.Row) (*Promo, error) {
 	return &p, nil
 }
 
-func (r *PromoRepo) ListByStore(ctx context.Context, storeID uuid.UUID) ([]Promo, error) {
+// HasAtLeast returns true if the store owns at least `n` promo codes.
+// Bounded probe — never scans past row n+1, so cost stays flat as the
+// table grows. Used by the create-quota check.
+func (r *PromoRepo) HasAtLeast(ctx context.Context, storeID uuid.UUID, n int) (bool, error) {
+	if n <= 0 {
+		return true, nil
+	}
+	var x int
+	err := r.pool.QueryRow(ctx,
+		`SELECT 1 FROM promos WHERE store_id = $1 OFFSET $2 LIMIT 1`,
+		storeID, n-1,
+	).Scan(&x)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// ListByStore returns up to `limit` promos starting at `offset`, plus the
+// total row count for the store. Pass limit=0 for the default.
+func (r *PromoRepo) ListByStore(
+	ctx context.Context, storeID uuid.UUID, limit, offset int,
+) ([]Promo, int, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 25
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	var total int
+	if err := r.pool.QueryRow(ctx,
+		"SELECT COUNT(*) FROM promos WHERE store_id = $1", storeID,
+	).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
 	rows, err := r.pool.Query(ctx, `
 		SELECT `+promoCols+`
 		FROM promos WHERE store_id = $1
 		ORDER BY created_at DESC
-	`, storeID)
+		LIMIT $2 OFFSET $3
+	`, storeID, limit, offset)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 	var out []Promo
 	for rows.Next() {
 		p, err := scanPromo(rows)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		out = append(out, *p)
 	}
-	return out, rows.Err()
+	return out, total, rows.Err()
 }
 
 func (r *PromoRepo) FindByID(ctx context.Context, storeID, id uuid.UUID) (*Promo, error) {

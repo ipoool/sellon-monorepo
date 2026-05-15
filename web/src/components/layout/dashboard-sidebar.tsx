@@ -12,6 +12,11 @@ import {
   BarChart3,
   Settings,
   HelpCircle,
+  ShieldCheck,
+  Store,
+  Tag,
+  Receipt,
+  UserCog,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -19,6 +24,7 @@ import {
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { LogoutButton } from "@/components/auth/logout-button";
+import { usePlan } from "@/components/dashboard/plan-context";
 import { cn } from "@/lib/utils";
 import type { Me } from "@/lib/auth-types";
 
@@ -31,17 +37,17 @@ type NavItem = {
 };
 
 const primaryNav: NavItem[] = [
-  { label: "Dasbor", href: "/dasbor", icon: LayoutDashboard },
-  { label: "Pesanan", href: "/dasbor/pesanan", icon: ShoppingBag },
-  { label: "Produk", href: "/dasbor/produk", icon: Package },
-  { label: "Pelanggan", href: "/dasbor/pelanggan", icon: Users },
-  { label: "Promo", href: "/dasbor/promo", icon: Megaphone },
-  { label: "Laporan", href: "/dasbor/laporan", icon: BarChart3 },
+  { label: "Dasbor", href: "/dashboard", icon: LayoutDashboard },
+  { label: "Pesanan", href: "/orders", icon: ShoppingBag },
+  { label: "Produk", href: "/products", icon: Package },
+  { label: "Pelanggan", href: "/customers", icon: Users },
+  { label: "Promo", href: "/promos", icon: Megaphone },
+  { label: "Laporan", href: "/reports", icon: BarChart3 },
 ];
 
 const secondaryNav: NavItem[] = [
-  { label: "Pengaturan", href: "/dasbor/pengaturan", icon: Settings },
-  { label: "Bantuan", href: "/bantuan", icon: HelpCircle },
+  { label: "Pengaturan", href: "/settings", icon: Settings },
+  { label: "Bantuan", href: "/help", icon: HelpCircle },
 ];
 
 type Props = {
@@ -85,7 +91,7 @@ export function DashboardSidebar({ me, open, onClose }: Props) {
   return (
     <>
       {/* Desktop sidebar */}
-      <aside className="hidden border-r border-neutral-200 bg-white lg:fixed lg:inset-y-0 lg:left-0 lg:z-30 lg:flex lg:w-60 lg:flex-col">
+      <aside className="hidden border-r border-neutral-200 bg-white lg:fixed lg:bottom-0 lg:left-0 lg:top-[calc(var(--imp-h,0px)+var(--exp-h,0px)+var(--sbx-h,0px))] lg:z-30 lg:flex lg:w-60 lg:flex-col">
         <SidebarContent me={me} pathname={pathname} />
       </aside>
 
@@ -112,6 +118,13 @@ function SidebarContent({
   pathname: string;
   onClose?: () => void;
 }) {
+  const plan = usePlan();
+  const tierLabel =
+    plan === "pro" ? "Pro" : plan === "bisnis" ? "Bisnis" : "Free";
+  // Badge variants: paid tiers get visual emphasis ("brand" for Pro,
+  // "warning" gold for Bisnis), free stays neutral.
+  const tierVariant =
+    plan === "pro" ? "brand" : plan === "bisnis" ? "warning" : "outline";
   return (
     <>
       <div className="flex h-16 items-center justify-between gap-3 border-b border-neutral-200 px-5">
@@ -133,12 +146,63 @@ function SidebarContent({
             SellOn
           </Link>
         </div>
-        <Badge variant="success">Aktif</Badge>
+        <Link href="/settings/subscription" aria-label="Lihat langganan">
+          <Badge variant={tierVariant}>{tierLabel}</Badge>
+        </Link>
       </div>
 
+      {/* Sidebar nav diverges by role:
+            - Admin (not impersonating): platform-only items. Seller
+              menu (Pesanan/Produk/etc) is irrelevant since admins
+              don't have their own store.
+            - Seller (or admin currently impersonating): the regular
+              seller menu, no platform items. */}
       <nav className="flex flex-1 flex-col gap-6 overflow-y-auto p-3">
-        <NavGroup label="Menu" items={primaryNav} pathname={pathname} />
-        <NavGroup label="Lainnya" items={secondaryNav} pathname={pathname} />
+        {me.role === "admin" && !me.is_impersonated ? (
+          <>
+            <NavGroup
+              label="Menu"
+              items={[
+                {
+                  label: "Dasbor",
+                  href: "/platform",
+                  icon: LayoutDashboard,
+                },
+                {
+                  label: "Pengguna",
+                  href: "/platform/users",
+                  icon: Users,
+                },
+                {
+                  label: "Toko",
+                  href: "/platform/stores",
+                  icon: Store,
+                },
+                {
+                  label: "Harga Paket",
+                  href: "/platform/plans",
+                  icon: Tag,
+                },
+                {
+                  label: "Transaksi",
+                  href: "/platform/subscriptions",
+                  icon: Receipt,
+                },
+              ]}
+              pathname={pathname}
+            />
+            <NavGroup
+              label="Lainnya"
+              items={[{ label: "Bantuan", href: "/help", icon: HelpCircle }]}
+              pathname={pathname}
+            />
+          </>
+        ) : (
+          <>
+            <NavGroup label="Menu" items={primaryNav} pathname={pathname} />
+            <NavGroup label="Lainnya" items={secondaryNav} pathname={pathname} />
+          </>
+        )}
       </nav>
 
       <div className="border-t border-neutral-200 p-3">
@@ -148,13 +212,41 @@ function SidebarContent({
             <p className="truncate text-sm font-medium text-neutral-900">
               {me.name || me.email}
             </p>
-            <p className="truncate text-xs text-neutral-500">{me.email}</p>
+            <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
+              <RoleDot me={me} />
+              <p className="truncate text-xs text-neutral-500">{me.email}</p>
+            </div>
           </div>
           <LogoutButton />
         </div>
       </div>
     </>
   );
+}
+
+// RoleDot is the compact role indicator shown inline with the email
+// in the sidebar. Only renders for non-default sessions worth flagging:
+// admins (always show) and impersonation (override admin). Regular
+// sellers don't get a chip — their email already identifies them and
+// "Penjual" was redundant noise.
+function RoleDot({ me }: { me: Me }) {
+  if (me.is_impersonated) {
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-danger">
+        <UserCog className="size-3" aria-hidden />
+        Imp
+      </span>
+    );
+  }
+  if (me.role === "admin") {
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-brand-700">
+        <ShieldCheck className="size-3" aria-hidden />
+        Admin
+      </span>
+    );
+  }
+  return null;
 }
 
 function NavGroup({
@@ -173,10 +265,16 @@ function NavGroup({
       </p>
       <ul className="flex flex-col gap-0.5">
         {items.map((item) => {
-          // /dasbor only matches exactly; nested routes match by prefix.
+          // "Home" entries match exactly only — otherwise the seller
+          // /dashboard link stays highlighted on every /dashboard/* sub-page,
+          // and the admin /platform link does the same on
+          // /platform/users etc. Anything deeper still
+          // highlights when its prefix matches.
+          const isHome =
+            item.href === "/dashboard" || item.href === "/platform";
           const active =
             pathname === item.href ||
-            (item.href !== "/dasbor" && pathname.startsWith(item.href + "/"));
+            (!isHome && pathname.startsWith(item.href + "/"));
           const Icon = item.icon;
 
           if (item.disabled) {

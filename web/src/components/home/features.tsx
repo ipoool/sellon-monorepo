@@ -6,6 +6,8 @@ import {
   Megaphone,
   BarChart3,
   Upload,
+  Download,
+  Truck,
   Sparkles,
   Check,
   type LucideIcon,
@@ -19,7 +21,7 @@ type Feature = {
   title: string;
   tagline: string;
   bullets: string[];
-  // Tailwind tint for the icon container — kept inside the brand family but
+  // Tailwind tint for the icon container - kept inside the brand family but
   // varied so the grid doesn't feel monotonous.
   iconBg: string;
   iconFg: string;
@@ -28,104 +30,130 @@ type Feature = {
 const features: Feature[] = [
   {
     icon: Store,
-    title: "Toko publik & katalog WhatsApp",
+    title: "Toko sendiri, cukup kirim link-nya",
     tagline:
-      "Halaman toko cantik dengan banner, tagline, dan link siap dibagikan ke pelanggan.",
+      "Halaman toko siap dipakai dalam menit - tinggal kirim link-nya ke grup WA atau bio Instagram, pembeli langsung lihat seluruh katalog.",
     bullets: [
-      "Search & filter kategori",
-      "Produk unggulan & jam buka live",
-      "Tombol share WA per produk",
+      "Pembeli scroll & cari produk dengan mudah dari HP",
+      "Produk paling laku tampil paling atas",
+      "Tombol order WhatsApp cukup sekali ketuk",
     ],
     iconBg: "bg-brand-50",
     iconFg: "text-brand-600",
   },
   {
     icon: CreditCard,
-    title: "Pembayaran fleksibel",
+    title: "Terima bayaran dengan cara apa pun",
     tagline:
-      "Pakai akun Midtrans-mu sendiri, atau cukup transfer manual + QRIS statis untuk yang baru mulai.",
+      "QRIS, transfer bank, GoPay, ShopeePay - pembeli tinggal scan atau klik, uangnya langsung masuk ke rekening kamu.",
     bullets: [
-      "QRIS, VA, GoPay, ShopeePay",
-      "Mode sandbox sebelum live",
-      "Webhook per-toko (signature SHA-512)",
+      "Pembayaran QRIS, transfer, GoPay, ShopeePay",
+      "Coba dulu di mode test sebelum diaktifkan",
+      "Notifikasi otomatis pas pembeli selesai bayar",
     ],
     iconBg: "bg-brand-50",
     iconFg: "text-brand-600",
   },
   {
     icon: ClipboardList,
-    title: "Manajemen pesanan end-to-end",
+    title: "Kelola pesanan dari satu layar",
     tagline:
-      "Dari order masuk sampai paket diterima — semua diatur dari satu dasbor.",
+      "Dari order masuk sampai paket diterima pembeli - semua status pesanan tercatat rapi. Tidak perlu lagi catat manual di buku.",
     bullets: [
-      "Status flow: pending → selesai",
-      "Input resi & cetak nota",
-      "Export CSV & catatan internal",
+      "Status jelas: baru, diproses, dikirim, atau selesai",
+      "Masukkan nomor resi langsung dari HP",
+      "Unduh semua pesanan jadi file Excel kapan saja",
     ],
     iconBg: "bg-brand-50",
     iconFg: "text-brand-600",
   },
   {
     icon: Upload,
-    title: "Produk, varian & bulk upload",
+    title: "Tambah produk banyak sekaligus",
     tagline:
-      "Upload 200 produk via Excel sekali jalan. Dukung varian dengan stok & SKU sendiri-sendiri.",
+      "Punya ratusan produk? Upload sekali jalan dari file Excel - selesai dalam 5 menit, bukan seharian.",
     bullets: [
-      "Foto langsung upload dari HP",
-      "Varian (ukuran, warna) per produk",
-      "Low-stock alert otomatis",
+      "Foto produk langsung dari HP",
+      "Satu produk bisa banyak ukuran atau warna",
+      "Notifikasi otomatis kalau stok mau habis",
+    ],
+    iconBg: "bg-brand-50",
+    iconFg: "text-brand-600",
+  },
+  {
+    icon: Truck,
+    title: "Cocok untuk barang fisik",
+    tagline:
+      "Kaos, makanan, kerajinan - apa pun yang dikirim ke alamat pembeli, pengiriman & ongkir-nya tinggal pilih.",
+    bullets: [
+      "Pilih kurir (JNE, J&T, SiCepat, dll.) langsung di checkout",
+      "Ongkir hitung otomatis berdasarkan kota tujuan",
+      "Cetak label & input nomor resi tanpa pindah aplikasi",
+    ],
+    iconBg: "bg-brand-50",
+    iconFg: "text-brand-600",
+  },
+  {
+    icon: Download,
+    title: "Cocok juga untuk produk digital",
+    tagline:
+      "Ebook, kursus, voucher, atau template - file langsung sampai ke pembeli setelah pembayaran lunas, tanpa kamu repot kirim manual.",
+    bullets: [
+      "Pembeli digital tidak perlu isi alamat",
+      "Link akses otomatis dikirim ke email pembeli",
+      "Aman - link punya token unik, tidak bisa dibagi-bagi",
     ],
     iconBg: "bg-brand-50",
     iconFg: "text-brand-600",
   },
   {
     icon: Users,
-    title: "CRM pelanggan otomatis",
+    title: "Daftar pelanggan tercatat otomatis",
     tagline:
-      "Database pembeli terkumpul tiap order. Datamu, dataku — bisa diekspor kapan saja.",
+      "Setiap pembeli langsung masuk daftar tanpa kamu input manual. Lama-lama kamu tahu mana langganan setia, mana yang baru kenal.",
     bullets: [
-      "Segmen otomatis (VIP / Loyal / Baru)",
-      "Catatan & blacklist per pelanggan",
-      "Quick chat WhatsApp",
+      "Pelanggan baru, loyal, atau VIP otomatis ditandai",
+      "Tulis catatan kecil di tiap pelanggan",
+      "Chat ulang pelanggan langsung dari dasbor",
     ],
     iconBg: "bg-brand-50",
     iconFg: "text-brand-600",
   },
   {
     icon: Megaphone,
-    title: "Promo & kupon diskon",
+    title: "Bikin promo gampang",
     tagline:
-      "Bikin kode promo sendiri — persentase, nominal, atau gratis ongkir — lengkap dengan kuota dan masa berlaku.",
+      "Kode diskon, gratis ongkir, atau potongan harga - pakai cara apa pun untuk bikin pelanggan balik lagi.",
     bullets: [
-      "Min belanja & batas pemakaian",
-      "Validitas tanggal mulai/kadaluarsa",
-      "Validasi otomatis di checkout",
+      "Atur minimum belanja & batas pemakaian kode",
+      "Tentukan tanggal mulai dan kapan promo habis",
+      "Pembeli tinggal masukkan kode pas checkout",
     ],
     iconBg: "bg-brand-50",
     iconFg: "text-brand-600",
   },
   {
     icon: BarChart3,
-    title: "Laporan & insight",
+    title: "Pantau performa toko sekejap",
     tagline:
-      "Lihat tren revenue harian, produk terlaris, dan pelanggan top — filter 7/30/90 hari.",
+      "Penjualan harian, produk paling laku, pelanggan paling loyal - semua di satu halaman, tanpa perlu hitung manual.",
     bullets: [
-      "Grafik revenue per hari",
-      "Top 10 produk & pelanggan",
-      "Breakdown status & metode bayar",
+      "Grafik pendapatan harian yang mudah dibaca",
+      "Tahu produk mana yang paling laku",
+      "Bandingkan performa 7, 30, atau 90 hari terakhir",
     ],
     iconBg: "bg-brand-50",
     iconFg: "text-brand-600",
   },
   {
     icon: Sparkles,
-    title: "Tanpa potongan transaksi",
+    title: "Bayar tetap per bulan, bukan per pesanan",
     tagline:
-      "Biaya bulanan tetap. Tidak ada take-rate per pesanan. Semakin laris, semakin untung.",
+      "Marketplace potong 5-12% dari setiap order. Di SellOn, biayanya tetap per bulan - makin laris, makin untung kamu.",
     bullets: [
-      "Dana langsung ke rekeningmu",
-      "Settle hari yang sama (Midtrans)",
-      "Tidak ada biaya tersembunyi",
+      "Uang masuk langsung ke rekening atau akun Midtrans-mu",
+      "Pencairan ikut jadwal Midtrans (umumnya T+1), atau langsung kalau pakai transfer manual",
+      "Tidak ada biaya tersembunyi belakangan",
     ],
     iconBg: "bg-brand-50",
     iconFg: "text-brand-600",
@@ -142,12 +170,12 @@ export function Features() {
             Fitur
           </span>
           <h2 className="mt-3 font-display text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
-            Semua yang UMKM butuhkan untuk{" "}
+            Semua yang kamu perlukan untuk <br /> {" "}
             <span className="text-gradient-brand">jualan online</span>
           </h2>
           <p className="mt-4 text-lg text-neutral-600">
-            Dirancang untuk toko kecil yang tumbuh — tanpa kerumitan
-            marketplace, tanpa potongan transaksi.
+            Dibuat untuk toko kecil yang ingin tumbuh - tanpa ribetnya
+            marketplace, <br /> tanpa potongan setiap transaksi.
           </p>
         </div>
 

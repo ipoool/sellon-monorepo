@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/sellon/sellon/api/internal/audit"
 	"github.com/sellon/sellon/api/internal/auth"
 	"github.com/sellon/sellon/api/internal/pkg/response"
 	"github.com/sellon/sellon/api/internal/repository"
@@ -21,11 +22,12 @@ type CustomerHandler struct {
 	customers *repository.CustomerRepo
 	orders    *repository.OrderRepo
 	stores    *repository.StoreRepo
+	audit     *audit.Logger
 	logger    *slog.Logger
 }
 
-func NewCustomerHandler(customers *repository.CustomerRepo, orders *repository.OrderRepo, stores *repository.StoreRepo, logger *slog.Logger) *CustomerHandler {
-	return &CustomerHandler{customers: customers, orders: orders, stores: stores, logger: logger}
+func NewCustomerHandler(customers *repository.CustomerRepo, orders *repository.OrderRepo, stores *repository.StoreRepo, audit *audit.Logger, logger *slog.Logger) *CustomerHandler {
+	return &CustomerHandler{customers: customers, orders: orders, stores: stores, audit: audit, logger: logger}
 }
 
 type customerDTO struct {
@@ -62,11 +64,13 @@ func toCustomerDTO(c repository.Customer) customerDTO {
 	}
 }
 
-// GET /api/v1/customers
+// GET /api/v1/customers?limit=&offset=
 func (h *CustomerHandler) List(w http.ResponseWriter, r *http.Request) {
 	store, err := h.storeFor(r)
 	if errors.Is(err, repository.ErrStoreNotFound) {
-		response.JSON(w, http.StatusOK, map[string]any{"customers": []customerDTO{}})
+		response.JSON(w, http.StatusOK, map[string]any{
+			"customers": []customerDTO{}, "total": 0,
+		})
 		return
 	}
 	if err != nil {
@@ -74,7 +78,14 @@ func (h *CustomerHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := h.customers.ListByStore(r.Context(), store.ID)
+	q := r.URL.Query()
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	if limit == 0 {
+		limit = 25
+	}
+	offset, _ := strconv.Atoi(q.Get("offset"))
+
+	rows, total, err := h.customers.ListByStore(r.Context(), store.ID, limit, offset)
 	if err != nil {
 		h.logger.Error("list customers", "err", err)
 		response.Error(w, http.StatusInternalServerError, "internal error")
@@ -85,7 +96,9 @@ func (h *CustomerHandler) List(w http.ResponseWriter, r *http.Request) {
 	for _, c := range rows {
 		out = append(out, toCustomerDTO(c))
 	}
-	response.JSON(w, http.StatusOK, map[string]any{"customers": out})
+	response.JSON(w, http.StatusOK, map[string]any{
+		"customers": out, "total": total,
+	})
 }
 
 // GET /api/v1/customers/{id}
@@ -166,6 +179,17 @@ func (h *CustomerHandler) Update(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusNotFound, "pelanggan tidak ditemukan")
 		return
 	}
+	h.audit.Log(r.Context(), store.ID, audit.Event{
+		Action:     "customer.updated",
+		EntityType: "customer",
+		EntityID:   c.ID.String(),
+		Summary:    "Update profil pelanggan " + c.Name,
+		Metadata: map[string]any{
+			"customer_name":   c.Name,
+			"is_blacklisted":  c.IsBlacklisted,
+			"notes_changed":   req.Notes != "",
+		},
+	})
 	response.JSON(w, http.StatusOK, map[string]any{"customer": toCustomerDTO(*c)})
 }
 
@@ -176,7 +200,8 @@ func (h *CustomerHandler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusBadRequest, "toko belum dibuat")
 		return
 	}
-	rows, err := h.customers.ListByStore(r.Context(), store.ID)
+	// Export hits the entire dataset (capped at 500 server-side).
+	rows, _, err := h.customers.ListByStore(r.Context(), store.ID, 500, 0)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "internal error")
 		return

@@ -1,4 +1,3 @@
-import type { Metadata } from "next";
 import {
   CheckCircle2,
   Hammer,
@@ -15,12 +14,14 @@ import { Section } from "@/components/layout/section";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { getMe } from "@/lib/server-auth";
+import { pageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
-  title: "Roadmap — SellOn",
+export const metadata = pageMetadata({
+  title: "Roadmap",
   description:
-    "Apa yang sedang kami bangun untuk SellOn. Public roadmap dengan ETA, voting, dan request fitur.",
-};
+    "Apa yang sedang dibangun di SellOn. Public roadmap dengan ETA, voting, dan request fitur dari komunitas UMKM.",
+  path: "/roadmap",
+});
 
 type Status = "shipped" | "in-progress" | "next" | "considering";
 
@@ -110,7 +111,7 @@ const columns: Column[] = [
       {
         title: "Otomasi WhatsApp",
         description:
-          "Konfirmasi pesanan, reminder pembayaran, status pengiriman — auto-send via WA.",
+          "Konfirmasi pesanan, reminder pembayaran, status pengiriman - auto-send via WA.",
         votes: 312,
         eta: "Q4 2026",
       },
@@ -198,7 +199,7 @@ export default async function RoadmapPage() {
               </h1>
               <p className="mt-6 text-lg leading-relaxed text-neutral-600">
                 Roadmap ini diperbarui setiap minggu. Vote ide yang penting buat
-                kamu — yang paling banyak vote naik prioritas.
+                kamu - yang paling banyak vote naik prioritas.
               </p>
               <p className="mt-3 text-sm text-neutral-500">
                 Terakhir diperbarui · 8 Mei 2026

@@ -130,24 +130,36 @@ func (r *PaymentRepo) Upsert(ctx context.Context, in SaveGatewayInput) error {
 }
 
 // RotateWebhookToken regenerates the webhook URL token (e.g. when seller
-// suspects compromise). Returns the new token.
-func (r *PaymentRepo) RotateWebhookToken(ctx context.Context, storeID uuid.UUID, provider string) (string, error) {
-	token, err := generateWebhookToken()
+// suspects compromise). Returns both old and new token — caller needs
+// the old one for the audit log entry yang nampilin URL lama vs baru
+// di tab Aktivitas.
+func (r *PaymentRepo) RotateWebhookToken(ctx context.Context, storeID uuid.UUID, provider string) (oldToken, newToken string, err error) {
+	newToken, err = generateWebhookToken()
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	tag, err := r.pool.Exec(ctx, `
-		UPDATE payment_gateway_credentials
+	// Single statement update+RETURNING old supaya tidak ada race
+	// window di antara SELECT lama dan UPDATE. Postgres punya
+	// RETURNING tapi untuk "value sebelum update" perlu trick.
+	err = r.pool.QueryRow(ctx, `
+		UPDATE payment_gateway_credentials AS p
 		SET webhook_token = $3, updated_at = now()
-		WHERE store_id = $1 AND provider = $2
-	`, storeID, provider, token)
+		FROM (
+			SELECT webhook_token
+			FROM payment_gateway_credentials
+			WHERE store_id = $1 AND provider = $2
+			FOR UPDATE
+		) AS prev
+		WHERE p.store_id = $1 AND p.provider = $2
+		RETURNING prev.webhook_token
+	`, storeID, provider, newToken).Scan(&oldToken)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", ErrGatewayNotFound
+	}
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	if tag.RowsAffected() == 0 {
-		return "", ErrGatewayNotFound
-	}
-	return token, nil
+	return oldToken, newToken, nil
 }
 
 func (r *PaymentRepo) MarkVerified(ctx context.Context, storeID uuid.UUID, provider, status string) error {

@@ -7,7 +7,7 @@ type Bucket = {
 };
 
 // SalesChart renders an inline SVG bar chart of daily revenue. No chart
-// library — just a few path/rect calculations. Designed for ≤90 buckets
+// library - just a few path/rect calculations. Designed for ≤90 buckets
 // (3 months max in MVP).
 export function SalesChart({ data }: { data: Bucket[] }) {
   if (data.length === 0) {
@@ -40,6 +40,14 @@ export function SalesChart({ data }: { data: Bucket[] }) {
     return { v, y };
   });
 
+  // Show first, middle, last x-axis labels - pre-filtered so the JSX runs
+  // a single pass.
+  const axisLabels = [
+    data[0],
+    data[Math.floor(data.length / 2)],
+    data[data.length - 1],
+  ].filter((d): d is (typeof data)[number] => Boolean(d));
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-baseline justify-between gap-3">
@@ -65,7 +73,7 @@ export function SalesChart({ data }: { data: Bucket[] }) {
         >
           {/* Gridlines */}
           {ticks.map((t, i) => (
-            <g key={i}>
+            <g key={`tick-${t.v}`}>
               <line
                 x1={padLeft}
                 x2={w - padRight}
@@ -109,40 +117,34 @@ export function SalesChart({ data }: { data: Bucket[] }) {
                   className="fill-brand-500"
                 />
                 <title>
-                  {d.date} — {formatRupiah(d.revenue_cents)} ({d.orders} order)
+                  {d.date} - {formatRupiah(d.revenue_cents)} ({d.orders} order)
                 </title>
               </g>
             );
           })}
 
-          {/* X-axis labels — show first, middle, last to avoid clutter */}
-          {[
-            data[0],
-            data[Math.floor(data.length / 2)],
-            data[data.length - 1],
-          ]
-            .filter(Boolean)
-            .map((d, idx, arr) => {
-              const i = data.indexOf(d!);
-              const x = padLeft + i * barW + barW / 2;
-              return (
-                <text
-                  key={idx}
-                  x={x}
-                  y={h - 6}
-                  textAnchor={
-                    idx === 0
-                      ? "start"
-                      : idx === arr.length - 1
-                        ? "end"
-                        : "middle"
-                  }
-                  className="fill-neutral-500 text-[10px]"
-                >
-                  {formatShortDate(d!.date)}
-                </text>
-              );
-            })}
+          {/* X-axis labels - show first, middle, last to avoid clutter */}
+          {axisLabels.map((d, idx) => {
+            const i = data.indexOf(d);
+            const x = padLeft + i * barW + barW / 2;
+            return (
+              <text
+                key={d.date}
+                x={x}
+                y={h - 6}
+                textAnchor={
+                  idx === 0
+                    ? "start"
+                    : idx === axisLabels.length - 1
+                      ? "end"
+                      : "middle"
+                }
+                className="fill-neutral-500 text-[10px]"
+              >
+                {formatShortDate(d.date)}
+              </text>
+            );
+          })}
         </svg>
       </div>
     </div>

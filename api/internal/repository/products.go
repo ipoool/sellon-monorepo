@@ -12,26 +12,32 @@ import (
 )
 
 type Product struct {
-	ID                uuid.UUID
-	StoreID           uuid.UUID
-	CategoryID        *uuid.UUID
-	Name              string
-	Slug              string
-	Description       string
-	PriceCents        int64
-	Stock             int
-	LowStockThreshold int
-	WeightG           int
-	LengthCm          int
-	WidthCm           int
-	HeightCm          int
-	Status            string
-	PhotoURLs         []string
-	HasVariants       bool
-	IsFeatured        bool
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	ID                  uuid.UUID
+	StoreID             uuid.UUID
+	CategoryID          *uuid.UUID
+	Name                string
+	Slug                string
+	Description         string
+	PriceCents          int64
+	Stock               int
+	LowStockThreshold   int
+	WeightG             int
+	LengthCm            int
+	WidthCm             int
+	HeightCm            int
+	Status              string
+	PhotoURLs           []string
+	HasVariants         bool
+	IsFeatured          bool
+	ProductType         string // "physical" | "digital"
+	DigitalDeliveryURL  string
+	DigitalFileURL      string
+	DigitalInstructions string
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
+
+func (p *Product) IsDigital() bool { return p != nil && p.ProductType == "digital" }
 
 type ProductRepo struct {
 	pool *pgxpool.Pool
@@ -45,7 +51,9 @@ var ErrProductNotFound = errors.New("product not found")
 
 const productColumns = `id, store_id, category_id, name, slug, description, price_cents, stock,
 	low_stock_threshold, weight_g, length_cm, width_cm, height_cm,
-	status, photo_urls, has_variants, is_featured, created_at, updated_at`
+	status, photo_urls, has_variants, is_featured,
+	product_type, digital_delivery_url, digital_file_url, digital_instructions,
+	created_at, updated_at`
 
 func scanProduct(row pgx.Row, p *Product) error {
 	return row.Scan(
@@ -53,6 +61,7 @@ func scanProduct(row pgx.Row, p *Product) error {
 		&p.PriceCents, &p.Stock, &p.LowStockThreshold,
 		&p.WeightG, &p.LengthCm, &p.WidthCm, &p.HeightCm,
 		&p.Status, &p.PhotoURLs, &p.HasVariants, &p.IsFeatured,
+		&p.ProductType, &p.DigitalDeliveryURL, &p.DigitalFileURL, &p.DigitalInstructions,
 		&p.CreatedAt, &p.UpdatedAt,
 	)
 }
@@ -162,35 +171,45 @@ func (r *ProductRepo) FindByID(ctx context.Context, storeID, id uuid.UUID) (*Pro
 }
 
 type SaveProductInput struct {
-	StoreID           uuid.UUID
-	CategoryID        *uuid.UUID
-	Name              string
-	Slug              string
-	Description       string
-	PriceCents        int64
-	Stock             int
-	LowStockThreshold int
-	WeightG           int
-	LengthCm          int
-	WidthCm           int
-	HeightCm          int
-	Status            string
-	PhotoURLs         []string
-	IsFeatured        bool
+	StoreID             uuid.UUID
+	CategoryID          *uuid.UUID
+	Name                string
+	Slug                string
+	Description         string
+	PriceCents          int64
+	Stock               int
+	LowStockThreshold   int
+	WeightG             int
+	LengthCm            int
+	WidthCm             int
+	HeightCm            int
+	Status              string
+	PhotoURLs           []string
+	IsFeatured          bool
+	ProductType         string // "physical" | "digital" — defaults to physical when empty
+	DigitalDeliveryURL  string
+	DigitalFileURL      string
+	DigitalInstructions string
 }
 
 func (r *ProductRepo) Create(ctx context.Context, in SaveProductInput) (*Product, error) {
+	if in.ProductType != "digital" {
+		in.ProductType = "physical"
+	}
 	q := `
 		INSERT INTO products (store_id, category_id, name, slug, description, price_cents, stock,
 		                     low_stock_threshold,
-		                     weight_g, length_cm, width_cm, height_cm, status, photo_urls, is_featured)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+		                     weight_g, length_cm, width_cm, height_cm, status, photo_urls, is_featured,
+		                     product_type, digital_delivery_url, digital_file_url, digital_instructions)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+		        $16, $17, $18, $19)
 		RETURNING ` + productColumns
 	var p Product
 	if err := scanProduct(r.pool.QueryRow(ctx, q,
 		in.StoreID, in.CategoryID, in.Name, in.Slug, in.Description, in.PriceCents, in.Stock,
 		in.LowStockThreshold,
 		in.WeightG, in.LengthCm, in.WidthCm, in.HeightCm, in.Status, in.PhotoURLs, in.IsFeatured,
+		in.ProductType, in.DigitalDeliveryURL, in.DigitalFileURL, in.DigitalInstructions,
 	), &p); err != nil {
 		return nil, err
 	}
@@ -198,13 +217,21 @@ func (r *ProductRepo) Create(ctx context.Context, in SaveProductInput) (*Product
 }
 
 func (r *ProductRepo) Update(ctx context.Context, id uuid.UUID, in SaveProductInput) (*Product, error) {
+	if in.ProductType != "digital" {
+		in.ProductType = "physical"
+	}
 	q := `
 		UPDATE products
 		SET category_id = $3,
 		    name = $4, slug = $5, description = $6, price_cents = $7, stock = $8,
 		    low_stock_threshold = $9,
 		    weight_g = $10, length_cm = $11, width_cm = $12, height_cm = $13,
-		    status = $14, photo_urls = $15, is_featured = $16, updated_at = now()
+		    status = $14, photo_urls = $15, is_featured = $16,
+		    product_type = $17,
+		    digital_delivery_url = $18,
+		    digital_file_url = $19,
+		    digital_instructions = $20,
+		    updated_at = now()
 		WHERE id = $1 AND store_id = $2
 		RETURNING ` + productColumns
 	var p Product
@@ -212,6 +239,7 @@ func (r *ProductRepo) Update(ctx context.Context, id uuid.UUID, in SaveProductIn
 		id, in.StoreID, in.CategoryID, in.Name, in.Slug, in.Description, in.PriceCents, in.Stock,
 		in.LowStockThreshold,
 		in.WeightG, in.LengthCm, in.WidthCm, in.HeightCm, in.Status, in.PhotoURLs, in.IsFeatured,
+		in.ProductType, in.DigitalDeliveryURL, in.DigitalFileURL, in.DigitalInstructions,
 	), &p); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrProductNotFound
@@ -233,14 +261,34 @@ func (r *ProductRepo) Delete(ctx context.Context, storeID, id uuid.UUID) error {
 }
 
 // CountAll returns the total product count for a store (active + inactive +
-// sold_out). Used for tier-quota enforcement so sellers can't dodge the
-// limit by toggling status.
+// sold_out). Used by the seller dashboard to show "X / Y produk" usage.
+// For tier-quota enforcement on the create path use HasAtLeast — that's
+// a bounded probe that doesn't scale with store size.
 func (r *ProductRepo) CountAll(ctx context.Context, storeID uuid.UUID) (int, error) {
 	var n int
 	err := r.pool.QueryRow(ctx,
 		"SELECT COUNT(*) FROM products WHERE store_id = $1", storeID,
 	).Scan(&n)
 	return n, err
+}
+
+// HasAtLeast returns true if the store has at least n products. Bounded
+// probe — Postgres stops scanning at row n+1 so the cost is constant
+// (≈ index seek + n+1 fetches) regardless of how many products the
+// store actually owns.
+func (r *ProductRepo) HasAtLeast(ctx context.Context, storeID uuid.UUID, n int) (bool, error) {
+	if n <= 0 {
+		return true, nil
+	}
+	var x int
+	err := r.pool.QueryRow(ctx,
+		`SELECT 1 FROM products WHERE store_id = $1 OFFSET $2 LIMIT 1`,
+		storeID, n-1,
+	).Scan(&x)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // CountByStatus returns map of status → count for a store. Used on dasbor home.

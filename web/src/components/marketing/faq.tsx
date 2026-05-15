@@ -5,27 +5,31 @@ import { Container } from "@/components/layout/container";
 const faqs = [
   {
     q: "Apakah SellOn benar-benar tanpa potongan transaksi?",
-    a: "Ya. SellOn pakai model langganan bulanan tetap. Kami tidak mengambil komisi dari penjualan-mu. Biaya jaringan QRIS (sekitar 0.7%) tetap ada karena itu fee dari Bank Indonesia, bukan dari kami — dan langsung dipotong di sisi PJP, bukan masuk ke kami.",
+    a: "Ya. SellOn pakai model langganan bulanan tetap. Kami tidak ambil komisi dari penjualan kamu. Biaya jaringan QRIS (sekitar 0,7%) tetap ada karena itu biaya dari Bank Indonesia, bukan dari kami - dipotong langsung di sisi penyedia pembayaran, bukan masuk ke SellOn.",
   },
   {
-    q: "Saya belum punya akun Midtrans/Xendit. Bisa pakai SellOn?",
-    a: "Bisa. Kamu daftar SellOn dulu, kelola katalog dan pesanan. Saat siap menerima pembayaran QRIS, kami akan pandu setup Midtrans/Xendit (gratis, langsung verified untuk UMKM).",
+    q: "Saya belum punya akun Midtrans. Bisa pakai SellOn?",
+    a: "Bisa. Daftar SellOn dulu, kelola katalog dan pesanan. Saat siap terima pembayaran QRIS online, kami pandu kamu setup Midtrans (gratis, langsung disetujui untuk UMKM). Belum mau setup gateway? Kamu tetap bisa terima pembayaran lewat transfer bank manual atau QRIS statis - tinggal upload nomor rekening atau foto QRIS-mu.",
   },
   {
-    q: "Bedanya dengan jualan di Tokopedia atau Shopee?",
-    a: "Di marketplace, mereka potong 5–12% dari setiap pesanan + biaya iklan. Di SellOn, biaya bulanan tetap (mulai Rp 0). Plus, kamu punya brand toko sendiri, bukan numpang di etalase orang lain.",
+    q: "Bedanya sama jualan di Tokopedia atau Shopee?",
+    a: "Di marketplace, mereka potong 5-12% setiap pesanan, ditambah biaya iklan. Di SellOn, biaya bulanan tetap (mulai Rp 0). Kamu juga punya brand toko sendiri, bukan numpang di etalase pihak lain.",
   },
   {
     q: "Bisa buat toko offline dan online sekaligus?",
-    a: "Bisa banget. SellOn cocok untuk toko fisik yang ingin terima pesanan WhatsApp dari pelanggan luar kota tanpa harus on-call setiap saat.",
+    a: "Bisa. SellOn cocok untuk toko fisik yang ingin terima pesanan WhatsApp dari pelanggan luar kota - tanpa harus standby balas WA seharian. Pesanan masuk pas kamu sempat, kamu balas pas kamu siap.",
+  },
+  {
+    q: "Bisa jual produk digital (ebook, kursus, voucher)?",
+    a: "Bisa. Saat tambah produk, pilih tipe \"Digital\". Checkout otomatis melewati ongkir & alamat. Begitu pembeli bayar, link akses otomatis dikirim ke email mereka dan tampil di halaman unduhan yang aman (token unik, tidak bisa dibagi-bagi). Cocok untuk ebook, kursus online, template, kode redeem, dan sejenisnya.",
   },
   {
     q: "Data saya aman?",
-    a: "Login pakai Google OAuth (standar enterprise). Database di-encrypt at rest, kami hanya menyimpan email, nama, dan foto profil dari Google. Data pesanan dan pembeli sepenuhnya milik kamu — kami tidak menjualnya, tidak menggunakannya untuk iklan.",
+    a: "Login pakai Google OAuth (standar yang dipakai aplikasi besar). Database disimpan dalam bentuk terenkripsi - kami cuma simpan email, nama, dan foto profil dari Google. Data pesanan & pembeli sepenuhnya milik kamu. Kami tidak menjualnya, tidak memakainya untuk iklan.",
   },
   {
-    q: "Kalau saya berhenti langganan, data saya hilang?",
-    a: "Tidak. Akun masuk mode read-only selama 90 hari, kamu bisa export semua data (CSV) sebelum dihapus. Setelah 90 hari, data dihapus permanen sesuai standar privasi.",
+    q: "Kalau saya berhenti langganan Pro/Bisnis, data saya hilang?",
+    a: "Tidak. Akun otomatis turun ke tier Gratis dengan kuota terbatas (30 produk, 50 pesanan per bulan). Semua data pesanan, pelanggan, dan produk tetap aman - kamu bisa unduh ke file CSV kapan pun dari halaman Pesanan & Pelanggan.",
   },
 ];
 
@@ -40,14 +44,14 @@ export function Faq() {
               Pertanyaan yang sering ditanyakan
             </h2>
             <p className="mt-4 text-lg text-neutral-600">
-              Tidak nemu jawaban-mu? Kirim email ke{" "}
+              Belum nemu jawabannya? Kirim email ke{" "}
               <a
                 href="mailto:halo@sellon.id"
                 className="font-medium text-brand-600 hover:text-brand-700"
               >
                 halo@sellon.id
               </a>
-              .
+              , dijawab dalam 1 hari kerja.
             </p>
           </div>
 

@@ -29,6 +29,9 @@ func RequireAuth(jwt *auth.JWTService) func(http.Handler) http.Handler {
 				return
 			}
 			ctx := auth.WithUserID(r.Context(), claims.UserID)
+			if claims.Impersonator != nil && *claims.Impersonator != uuid.Nil {
+				ctx = auth.WithImpersonatorID(ctx, *claims.Impersonator)
+			}
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

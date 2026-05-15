@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { showError, showSuccess } from "@/lib/toast";
 import { useRouter } from "next/navigation";
 import {
   Crown,
@@ -15,12 +16,25 @@ import {
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { formatRupiah } from "@/lib/format";
-import type { Subscription } from "@/lib/types";
+import { formatRupiah, formatDateID } from "@/lib/format";
+import { quotaBullets } from "@/lib/plan-bullets";
+import type {
+  PublicPlan,
+  Subscription,
+  SubscriptionInvoice,
+} from "@/lib/types";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
-// Hard-coded for MVP — in production these should be tenant-configured.
+function formatLongDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("id-ID", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+}
+
+// Hard-coded for MVP - in production these should be tenant-configured.
 const SUPPORT_WA = "6281291006534"; // 0812 9100 6534
 const PAYMENT_BANK = "BCA";
 const PAYMENT_ACCOUNT_NO = "2040144776";
@@ -28,10 +42,22 @@ const PAYMENT_ACCOUNT_NAME = "Asep Saepulloh";
 
 type Props = {
   subscription: Subscription;
+  // Invoice history — used here only to detect "ada pending manual
+  // transfer yang belum diverifikasi". We don't render the list, just
+  // gate the "Saya sudah transfer" button so the seller can't fire
+  // duplicate rows while ops is still processing the previous one.
+  invoices: SubscriptionInvoice[];
+  // Plans dari /api/v1/plans — supaya kartu tier di dialog upgrade
+  // pakai deskripsi + fitur yang sama dengan landing & /platform/plans.
+  plans: PublicPlan[];
 };
 
-export function BerlanggananActions({ subscription }: Props) {
-  const router = useRouter();
+export function BerlanggananActions({
+  subscription,
+  invoices,
+  plans,
+}: Props) {
+  const { refresh } = useRouter();
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [showCancel, setShowCancel] = useState(false);
   const [tier, setTier] = useState<"pro" | "bisnis">(
@@ -39,8 +65,6 @@ export function BerlanggananActions({ subscription }: Props) {
   );
   const [months, setMonths] = useState(1);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
   const upgradeRef = useRef<HTMLDialogElement>(null);
   const cancelRef = useRef<HTMLDialogElement>(null);
 
@@ -82,33 +106,37 @@ export function BerlanggananActions({ subscription }: Props) {
     };
   }, []);
 
+  // Lookup plans by tier. Fallback ke subscription.*_price_cents kalau
+  // /api/v1/plans gagal (mis. API down saat SSR) supaya dialog tetap
+  // bisa render harga yang masuk akal.
+  const planByTier = new Map(plans.map((p) => [p.tier, p]));
+  const proPlan = planByTier.get("pro");
+  const bisnisPlan = planByTier.get("bisnis");
+  const activePlan = tier === "bisnis" ? bisnisPlan : proPlan;
   const tierPriceCents =
-    tier === "bisnis"
+    activePlan?.monthly_price_cents ??
+    (tier === "bisnis"
       ? subscription.bisnis_price_cents
-      : subscription.pro_price_cents;
+      : subscription.pro_price_cents);
   const totalCents = tierPriceCents * months;
-  const tierLabel = tier === "bisnis" ? "Bisnis" : "Pro";
-  const tierFeatures =
-    tier === "bisnis"
-      ? [
-          "Semua fitur Pro",
-          "Multi-cabang",
-          "Staf tanpa batas",
-          "API & webhook",
-          "Priority support",
-        ]
-      : [
-          "Produk tanpa batas",
-          "Otomasi WhatsApp",
-          "5 staf admin",
-          "Integrasi kurir",
-          "Laporan lengkap",
-        ];
+  const tierLabel = activePlan?.name ?? (tier === "bisnis" ? "Bisnis" : "Pro");
+
+  // Open pending manual-transfer request, if any. Used to dedupe the
+  // "Saya sudah transfer" button so the seller can't fire a second
+  // row while ops is still verifying the first. Backend also dedupes
+  // defensively (idempotent), this just makes the UX explicit.
+  const pendingManual = invoices.find(
+    (inv) => inv.status === "pending" && inv.provider === "manual_transfer",
+  );
+  // Feature bullets dari DB. Quota bullet (Produk tanpa batas / Sampai N …)
+  // ditambahin via plan-bullets helper supaya konsisten dengan landing
+  // dan settings/berlangganan comparison card.
+  const tierFeatures: string[] = activePlan
+    ? [...quotaBullets(activePlan), ...activePlan.features]
+    : [];
 
   async function requestUpgrade() {
     setBusy(true);
-    setError(null);
-    setSuccess(null);
     try {
       const res = await fetch(
         `${apiBase}/api/v1/subscription/request-upgrade`,
@@ -123,14 +151,19 @@ export function BerlanggananActions({ subscription }: Props) {
           }),
         },
       );
-      const data = await res.json().catch(() => ({}));
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        already_pending?: boolean;
+      };
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-      setSuccess(
-        "Permintaan upgrade tercatat. Silakan transfer dan kontak support — tim akan aktifkan dalam 1×24 jam.",
+      showSuccess(
+        data.already_pending
+          ? "Permintaan upgrade sebelumnya masih diproses oleh tim. Tidak perlu kirim lagi — kami akan aktifkan dalam 1×24 jam."
+          : "Permintaan upgrade tercatat. Silakan transfer dan kontak support - tim akan aktifkan dalam 1×24 jam.",
       );
-      router.refresh();
+      refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal mengirim permintaan");
+      showError(err);
     } finally {
       setBusy(false);
     }
@@ -138,7 +171,6 @@ export function BerlanggananActions({ subscription }: Props) {
 
   async function cancelSubscription() {
     setBusy(true);
-    setError(null);
     try {
       const res = await fetch(`${apiBase}/api/v1/subscription/cancel`, {
         method: "POST",
@@ -149,9 +181,9 @@ export function BerlanggananActions({ subscription }: Props) {
         throw new Error(data.error || `HTTP ${res.status}`);
       }
       setShowCancel(false);
-      router.refresh();
+      refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal cancel");
+      showError(err);
     } finally {
       setBusy(false);
     }
@@ -159,7 +191,6 @@ export function BerlanggananActions({ subscription }: Props) {
 
   async function resumeSubscription() {
     setBusy(true);
-    setError(null);
     try {
       const res = await fetch(`${apiBase}/api/v1/subscription/resume`, {
         method: "POST",
@@ -167,9 +198,9 @@ export function BerlanggananActions({ subscription }: Props) {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-      router.refresh();
+      refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal resume");
+      showError(err);
     } finally {
       setBusy(false);
     }
@@ -211,10 +242,7 @@ export function BerlanggananActions({ subscription }: Props) {
         )}
       </div>
 
-      {error && !showUpgrade && !showCancel && (
-        <p className="mt-2 text-sm font-medium text-danger">{error}</p>
-      )}
-
+      
       {/* Upgrade dialog */}
       <dialog
         ref={upgradeRef}
@@ -242,6 +270,17 @@ export function BerlanggananActions({ subscription }: Props) {
         </div>
 
         <div className="flex flex-col gap-4 p-5">
+          {pendingManual && (
+            <div className="rounded-lg border border-success/40 bg-success/10 p-3 text-sm text-neutral-800">
+              <p className="font-semibold text-success">Sedang diproses</p>
+              <p className="mt-1">
+                Permintaan transfer{" "}
+                <strong>{formatDateID(pendingManual.created_at)}</strong> masih
+                diverifikasi tim.
+              </p>
+            </div>
+          )}
+
           <p className="text-sm text-neutral-700">
             Buka semua fitur tanpa batasan. Pilih tier yang sesuai skala
             tokomu.
@@ -251,60 +290,80 @@ export function BerlanggananActions({ subscription }: Props) {
             <button
               type="button"
               onClick={() => setTier("pro")}
+              disabled={!!pendingManual}
               className={
-                "rounded-lg border-2 p-3 text-left transition-colors " +
+                "rounded-lg border-2 p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 " +
                 (tier === "pro"
                   ? "border-brand-500 bg-brand-50/50"
-                  : "border-neutral-200 bg-white hover:border-neutral-300")
+                  : "border-neutral-200 bg-white hover:border-neutral-300 disabled:hover:border-neutral-200")
               }
             >
-              <p className="text-sm font-semibold text-neutral-900">Pro</p>
+              <p className="text-sm font-semibold text-neutral-900">
+                {proPlan?.name ?? "Pro"}
+              </p>
               <p className="mt-1 font-display text-base font-semibold text-neutral-900">
-                {formatRupiah(subscription.pro_price_cents)}
+                {formatRupiah(
+                  proPlan?.monthly_price_cents ?? subscription.pro_price_cents,
+                )}
                 <span className="text-xs font-normal text-neutral-600">
                   /bulan
                 </span>
               </p>
-              <p className="mt-1 text-xs text-neutral-500">
-                Untuk toko yang sudah punya pelanggan tetap.
-              </p>
+              {proPlan?.description && (
+                <p className="mt-1 text-xs text-neutral-500">
+                  {proPlan.description}
+                </p>
+              )}
             </button>
             <button
               type="button"
               onClick={() => setTier("bisnis")}
+              disabled={!!pendingManual}
               className={
-                "rounded-lg border-2 p-3 text-left transition-colors " +
+                "rounded-lg border-2 p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 " +
                 (tier === "bisnis"
                   ? "border-brand-500 bg-brand-50/50"
-                  : "border-neutral-200 bg-white hover:border-neutral-300")
+                  : "border-neutral-200 bg-white hover:border-neutral-300 disabled:hover:border-neutral-200")
               }
             >
-              <p className="text-sm font-semibold text-neutral-900">Bisnis</p>
+              <p className="text-sm font-semibold text-neutral-900">
+                {bisnisPlan?.name ?? "Bisnis"}
+              </p>
               <p className="mt-1 font-display text-base font-semibold text-neutral-900">
-                {formatRupiah(subscription.bisnis_price_cents)}
+                {formatRupiah(
+                  bisnisPlan?.monthly_price_cents ??
+                    subscription.bisnis_price_cents,
+                )}
                 <span className="text-xs font-normal text-neutral-600">
                   /bulan
                 </span>
               </p>
-              <p className="mt-1 text-xs text-neutral-500">
-                Multi-cabang, API, priority support.
-              </p>
+              {bisnisPlan?.description && (
+                <p className="mt-1 text-xs text-neutral-500">
+                  {bisnisPlan.description}
+                </p>
+              )}
             </button>
           </div>
 
-          <div className="rounded-lg border border-brand-200 bg-brand-50/50 p-3">
-            <p className="text-xs font-medium uppercase tracking-wider text-brand-700">
-              Yang termasuk di tier {tierLabel}
-            </p>
-            <ul className="mt-2 grid gap-1.5 text-xs text-neutral-700 sm:grid-cols-2">
-              {tierFeatures.map((b) => (
-                <li key={b} className="flex items-center gap-1.5">
-                  <Check className="size-3.5 text-brand-600" aria-hidden />
-                  {b}
-                </li>
-              ))}
-            </ul>
-          </div>
+          {tierFeatures.length > 0 && (
+            <div className="rounded-lg border border-brand-200 bg-brand-50/50 p-3">
+              <p className="text-xs font-medium uppercase tracking-wider text-brand-700">
+                Yang termasuk di tier {tierLabel}
+              </p>
+              <ul className="mt-2 grid gap-1.5 text-xs text-neutral-700 sm:grid-cols-2">
+                {tierFeatures.map((b) => (
+                  <li key={b} className="flex items-start gap-1.5">
+                    <Check
+                      className="mt-0.5 size-3.5 shrink-0 text-brand-600"
+                      aria-hidden
+                    />
+                    <span>{b}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="months">Durasi</Label>
@@ -312,6 +371,7 @@ export function BerlanggananActions({ subscription }: Props) {
               id="months"
               value={String(months)}
               onChange={(e) => setMonths(parseInt(e.target.value, 10))}
+              disabled={!!pendingManual}
             >
               <option value="1">1 bulan</option>
               <option value="3">3 bulan</option>
@@ -347,23 +407,15 @@ export function BerlanggananActions({ subscription }: Props) {
                 .
               </li>
               <li>
-                Klik &ldquo;Saya sudah transfer&rdquo; — tim akan aktifkan
+                Klik &ldquo;Saya sudah transfer&rdquo; - tim akan aktifkan
                 dalam 1×24 jam.
               </li>
             </ol>
           </div>
 
-          {error && (
-            <p className="text-sm font-medium text-danger">{error}</p>
-          )}
-          {success && (
-            <p className="rounded-lg border border-success/40 bg-success/10 p-3 text-sm font-medium text-neutral-800">
-              {success}
-            </p>
-          )}
         </div>
 
-        <div className="flex items-center justify-end gap-2 border-t border-neutral-200 bg-neutral-50 px-5 py-3">
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-neutral-200 bg-neutral-50 px-5 py-3">
           <a
             href={`https://wa.me/${SUPPORT_WA}?text=${encodeURIComponent(
               `Halo SellOn, saya mau upgrade ${tierLabel} ${months} bulan (${formatRupiah(totalCents)}).`,
@@ -375,9 +427,22 @@ export function BerlanggananActions({ subscription }: Props) {
             <MessageCircle className="size-4" aria-hidden />
             Chat support
           </a>
-          <Button onClick={requestUpgrade} disabled={busy}>
+          <Button
+            variant="outline"
+            onClick={requestUpgrade}
+            disabled={busy || !!pendingManual}
+            title={
+              pendingManual
+                ? "Permintaan sebelumnya masih diproses"
+                : undefined
+            }
+          >
             <Check className="size-4" aria-hidden />
-            {busy ? "Menyimpan…" : "Saya sudah transfer"}
+            {busy
+              ? "Menyimpan…"
+              : pendingManual
+              ? "Menunggu verifikasi"
+              : "Saya sudah transfer"}
           </Button>
         </div>
       </dialog>
@@ -402,21 +467,12 @@ export function BerlanggananActions({ subscription }: Props) {
             <p className="mt-1.5 text-sm text-neutral-600">
               Akses Pro tetap aktif sampai{" "}
               {subscription.current_period_end
-                ? new Date(
-                    subscription.current_period_end,
-                  ).toLocaleDateString("id-ID", {
-                    day: "numeric",
-                    month: "long",
-                    year: "numeric",
-                  })
+                ? formatLongDate(subscription.current_period_end)
                 : "akhir periode"}
               . Setelah itu akun turun ke tier Gratis. Anda bisa aktifkan
               kembali kapan saja sebelum periode habis.
             </p>
-            {error && (
-              <p className="mt-2 text-sm font-medium text-danger">{error}</p>
-            )}
-          </div>
+                      </div>
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-neutral-200 bg-neutral-50 px-5 py-3">
           <Button

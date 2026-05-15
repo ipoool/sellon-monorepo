@@ -32,3 +32,22 @@ export async function serverApi<T>(
   if (!res.ok) return null;
   return (await res.json()) as T;
 }
+
+// Server-side fetch for public endpoints (no session required). Use this
+// for SSR of marketing pages that need to call the API anonymously —
+// e.g. landing page reading /api/v1/plans for pricing cards.
+export async function publicServerApi<T>(
+  path: string,
+  init?: RequestInit,
+): Promise<T | null> {
+  const res = await fetch(`${apiBase()}${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers || {}),
+    },
+    cache: "no-store",
+  });
+  if (!res.ok) return null;
+  return (await res.json()) as T;
+}

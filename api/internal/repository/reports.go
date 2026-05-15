@@ -29,12 +29,16 @@ type Headline struct {
 
 func (r *ReportsRepo) Headline(ctx context.Context, storeID uuid.UUID, since, until time.Time) (*Headline, error) {
 	var h Headline
+	// Cancelled orders are excluded from revenue + paid_orders even when
+	// payment_status = 'paid' — sellers who cancel after payment have
+	// almost always refunded out of band, so counting that money would
+	// overstate revenue (BUG-012).
 	err := r.pool.QueryRow(ctx, `
 		SELECT
 		    COUNT(*) AS orders_total,
 		    COUNT(*) FILTER (WHERE status = 'cancelled') AS orders_cancelled,
-		    COALESCE(SUM(total_cents) FILTER (WHERE payment_status = 'paid'), 0) AS revenue_cents,
-		    COUNT(*) FILTER (WHERE payment_status = 'paid') AS paid_orders
+		    COALESCE(SUM(total_cents) FILTER (WHERE payment_status = 'paid' AND status <> 'cancelled'), 0) AS revenue_cents,
+		    COUNT(*) FILTER (WHERE payment_status = 'paid' AND status <> 'cancelled') AS paid_orders
 		FROM orders
 		WHERE store_id = $1 AND created_at >= $2 AND created_at < $3
 	`, storeID, since, until).Scan(&h.OrdersTotal, &h.OrdersCancelled, &h.RevenueCents, &h.PaidOrders)
@@ -66,7 +70,7 @@ func (r *ReportsRepo) SalesByDay(ctx context.Context, storeID uuid.UUID, since, 
 		)
 		SELECT d.d::date AS bucket,
 		       COUNT(o.id) AS orders,
-		       COALESCE(SUM(o.total_cents) FILTER (WHERE o.payment_status = 'paid'), 0) AS revenue
+		       COALESCE(SUM(o.total_cents) FILTER (WHERE o.payment_status = 'paid' AND o.status <> 'cancelled'), 0) AS revenue
 		FROM days d
 		LEFT JOIN orders o
 		    ON o.store_id = $1
@@ -144,7 +148,7 @@ func (r *ReportsRepo) TopCustomers(ctx context.Context, storeID uuid.UUID, since
 	rows, err := r.pool.Query(ctx, `
 		SELECT c.id, c.name, c.whatsapp_number,
 		       COUNT(o.id)::int AS order_count,
-		       COALESCE(SUM(o.total_cents) FILTER (WHERE o.payment_status = 'paid'), 0)::bigint AS spent
+		       COALESCE(SUM(o.total_cents) FILTER (WHERE o.payment_status = 'paid' AND o.status <> 'cancelled'), 0)::bigint AS spent
 		FROM orders o
 		JOIN customers c ON c.id = o.customer_id
 		WHERE o.store_id = $1

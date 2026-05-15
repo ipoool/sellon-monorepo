@@ -1,5 +1,5 @@
 export type DayOfWeek = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
-export type DayHours = { open: string; close: string; closed?: boolean };
+type DayHours = { open: string; close: string; closed?: boolean };
 export type OpenHours = Partial<Record<DayOfWeek, DayHours>>;
 
 export type Store = {
@@ -13,6 +13,7 @@ export type Store = {
   category: string;
   city: string;
   whatsapp_number: string;
+  notification_whatsapp_number?: string;
   instagram: string;
   tiktok: string;
   open_hours: OpenHours;
@@ -23,6 +24,13 @@ export type Store = {
   enabled_couriers?: string[];
   free_shipping_threshold_cents?: number;
   theme_hue?: number;
+  product_layout?:
+    | "grid"
+    | "list"
+    | "showcase"
+    | "compact"
+    | "magazine"
+    | "feed";
   show_hours_public?: boolean;
   show_social_public?: boolean;
   footer_text?: string;
@@ -70,6 +78,10 @@ export type Product = {
   photo_urls: string[];
   has_variants: boolean;
   is_featured: boolean;
+  product_type: "physical" | "digital";
+  digital_delivery_url: string;
+  digital_file_url: string;
+  digital_instructions: string;
   variants?: Variant[];
   // Aggregates surfaced by the list endpoint when has_variants=true so the
   // dashboard "Stok" column reflects per-variant edits. Zero otherwise.
@@ -109,7 +121,7 @@ export type Order = {
   created_at: string;
 };
 
-export type OrderItem = {
+type OrderItem = {
   id: string;
   product_name: string;
   variant_name: string;
@@ -144,9 +156,43 @@ export type OrderDetail = {
   completed_at: string | null;
   cancelled_at: string | null;
   cancellation_reason: string;
+  refund_amount_cents: number;
+  refund_reason: string;
+  refunded_at: string | null;
+  payment_proof_url?: string;
+  payment_proof_note?: string;
+  payment_proof_at?: string | null;
   created_at: string;
   updated_at: string;
   items: OrderItem[];
+};
+
+export type PaymentGatewayStatus = {
+  is_configured: boolean;
+  is_sandbox: boolean;
+  has_sandbox_server_key: boolean;
+  has_prod_server_key: boolean;
+};
+
+export type AdminSubscriptionInvoice = {
+  id: string;
+  store_id: string;
+  store_name: string;
+  store_slug: string;
+  owner_name: string;
+  owner_email: string;
+  owner_picture: string;
+  plan: string; // "pro" | "bisnis" | "free"
+  months: number;
+  amount_cents: number;
+  status: "pending" | "paid" | "failed";
+  provider: string; // "manual_transfer" | "midtrans" | ""
+  provider_order_id: string;
+  notes: string;
+  paid_at: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  created_at: string;
 };
 
 export type Customer = {
@@ -175,7 +221,7 @@ export type CustomerOrderSummary = {
   created_at: string;
 };
 
-export type StaffRole = "owner" | "admin" | "staff";
+type StaffRole = "owner" | "admin" | "staff";
 
 export type StaffMember = {
   user_id: string;
@@ -235,6 +281,7 @@ export type SubscriptionInvoice = {
   id: string;
   amount_cents: number;
   status: "pending" | "paid" | "failed";
+  provider: string; // "manual_transfer" | "midtrans" | ""
   period_start: string | null;
   period_end: string | null;
   paid_at: string | null;
@@ -264,4 +311,82 @@ export type GatewayInfo = {
   enabled_methods: string[];
   last_verify_status?: string;
   webhook_url: string;
+};
+
+export type AuditEntry = {
+  id: string;
+  actor_user_id: string;
+  actor_email: string;
+  actor_name: string;
+  impersonator_user_id?: string;
+  impersonator_email?: string;
+  impersonator_name?: string;
+  action: string;
+  entity_type: string;
+  entity_id: string;
+  summary: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+};
+
+export type AdminUser = {
+  id: string;
+  email: string;
+  name: string;
+  picture_url: string;
+  role: "user" | "admin";
+  banned_at?: string;
+  created_at: string;
+};
+
+export type AdminStoreSummary = {
+  id: string;
+  slug: string;
+  name: string;
+  owner_user_id: string;
+  owner_email: string;
+  owner_name: string;
+  is_open: boolean;
+  plan: string;
+  sub_status: string;
+  products_count: number;
+  orders_count: number;
+  revenue_cents: number;
+  created_at: string;
+};
+
+export type PublicPlan = {
+  tier: "free" | "pro" | "bisnis";
+  name: string;
+  monthly_price_cents: number;
+  yearly_price_cents: number;
+  currency: string;
+  sort_order: number;
+  // Enforcement caps. -1 means unlimited.
+  product_limit: number;
+  staff_limit: number;
+  order_monthly_limit: number;
+  promo_limit: number;
+  // Marketing copy editable by admin without redeploy.
+  description: string;
+  features: string[];
+  cta_label: string;
+  period_monthly_label: string;
+  period_yearly_label: string;
+  highlighted: boolean;
+  updated_at: string;
+};
+
+export type PlatformAuditEntry = {
+  id: string;
+  actor_user_id: string;
+  actor_email: string;
+  actor_name: string;
+  impersonator_user_id?: string;
+  action: string;
+  target_user_id: string;
+  target_store_id: string;
+  summary: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
 };

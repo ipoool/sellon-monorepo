@@ -6,7 +6,7 @@ import { LogOut, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export function LogoutButton() {
-  const router = useRouter();
+  const { push, refresh } = useRouter();
   const [pending, setPending] = useState(false);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -35,8 +35,8 @@ export function LogoutButton() {
       });
     } finally {
       closeDialog();
-      router.push("/");
-      router.refresh();
+      push("/");
+      refresh();
     }
   };
 

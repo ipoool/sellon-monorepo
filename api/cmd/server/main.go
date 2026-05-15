@@ -10,6 +10,9 @@ import (
 
 	"github.com/sellon/sellon/api/internal/config"
 	"github.com/sellon/sellon/api/internal/db"
+	"github.com/sellon/sellon/api/internal/email"
+	"github.com/sellon/sellon/api/internal/repository"
+	"github.com/sellon/sellon/api/internal/scheduler"
 	"github.com/sellon/sellon/api/internal/server"
 )
 
@@ -50,6 +53,13 @@ func main() {
 			os.Exit(1)
 		}
 	}()
+
+	// Start background schedulers.
+	mailer := email.NewMailer(cfg.MailtrapAPIKey, cfg.FromEmail, cfg.FromName, logger)
+	users := repository.NewUserRepo(pool)
+	tipGen := email.NewTipGenerator(cfg.AnthropicAPIKey, logger)
+	dashURL := cfg.PrimaryWebOrigin() + "/dashboard"
+	scheduler.NewWeeklyTipsJob(users, mailer, tipGen, dashURL, logger).Start(ctx)
 
 	slog.Info("server started", "port", cfg.Port, "env", cfg.Env)
 

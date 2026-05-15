@@ -1,14 +1,20 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	"github.com/sellon/sellon/api/internal/auth"
+	"github.com/sellon/sellon/api/internal/email"
+	"github.com/sellon/sellon/api/internal/fulfillment"
 	"github.com/sellon/sellon/api/internal/payments"
 	"github.com/sellon/sellon/api/internal/pkg/response"
 	"github.com/sellon/sellon/api/internal/repository"
@@ -17,12 +23,34 @@ import (
 type WebhookHandler struct {
 	gateways  *repository.PaymentRepo
 	orders    *repository.OrderRepo
+	stores    *repository.StoreRepo
+	users     *repository.UserRepo
 	encryptor *auth.AESEncryptor
+	mailer    *email.Mailer
+	fulfiller *fulfillment.Fulfiller
+	webOrigin string
 	logger    *slog.Logger
 }
 
-func NewWebhookHandler(g *repository.PaymentRepo, o *repository.OrderRepo, enc *auth.AESEncryptor, logger *slog.Logger) *WebhookHandler {
-	return &WebhookHandler{gateways: g, orders: o, encryptor: enc, logger: logger}
+func NewWebhookHandler(
+	g *repository.PaymentRepo,
+	o *repository.OrderRepo,
+	s *repository.StoreRepo,
+	u *repository.UserRepo,
+	enc *auth.AESEncryptor,
+	mailer *email.Mailer,
+	fulfiller *fulfillment.Fulfiller,
+	webOrigin string,
+	logger *slog.Logger,
+) *WebhookHandler {
+	return &WebhookHandler{
+		gateways: g, orders: o, stores: s, users: u,
+		encryptor: enc,
+		mailer:    mailer,
+		fulfiller: fulfiller,
+		webOrigin: webOrigin,
+		logger:    logger,
+	}
 }
 
 // Midtrans notification payload — only the fields we use.
@@ -124,8 +152,60 @@ func (h *WebhookHandler) Midtrans(w http.ResponseWriter, r *http.Request) {
 
 	h.logger.Info("webhook: payment status updated",
 		"order_id", n.OrderID, "from", order.PaymentStatus, "to", mappedStatus)
+
+	// Email seller when a payment freshly transitions to paid. Only fire
+	// once: if the previous payment_status was already 'paid' this is a
+	// duplicate notification.
+	if mappedStatus == "paid" && order.PaymentStatus != "paid" {
+		go h.emailPaymentReceived(gateway.StoreID, order, n.PaymentType)
+		// Digital fulfillment: auto-complete + mint download tokens +
+		// email buyer. Background context so this survives the webhook
+		// HTTP handler returning.
+		go h.fulfiller.OnPaymentPaid(context.Background(), gateway.StoreID, order.ID)
+	}
+
 	response.JSON(w, http.StatusOK, map[string]string{
 		"status":         "ok",
 		"payment_status": mappedStatus,
+	})
+}
+
+func (h *WebhookHandler) emailPaymentReceived(storeID uuid.UUID, order *repository.Order, paymentType string) {
+	// Detached context — webhook caller doesn't wait for the email.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if !h.mailer.Configured() || h.stores == nil || h.users == nil {
+		return
+	}
+	store, err := h.stores.FindByID(ctx, storeID)
+	if err != nil || store == nil {
+		return
+	}
+	owner, err := h.users.FindByID(ctx, store.OwnerID)
+	if err != nil || owner == nil || owner.Email == "" {
+		return
+	}
+
+	method := strings.TrimSpace(paymentType)
+	if method == "" {
+		method = order.PaymentMethod
+	}
+
+	subject, text, htmlBody := email.RenderPaymentReceived(email.PaymentReceivedData{
+		StoreName:         store.Name,
+		OrderNumber:       order.OrderNumber,
+		CustomerName:      order.CustomerName,
+		TotalCents:        order.TotalCents,
+		PaymentMethod:     method,
+		OrderDashboardURL: strings.TrimRight(h.webOrigin, "/") + "/dashboard/orders",
+	})
+	h.mailer.Send(email.Message{
+		To:       owner.Email,
+		ToName:   owner.Name,
+		Subject:  subject,
+		Text:     text,
+		HTML:     htmlBody,
+		Category: "order_paid",
 	})
 }

@@ -1,23 +1,76 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Script from "next/script";
 import { useRouter } from "next/navigation";
 import "@/lib/auth-types";
+import { showError } from "@/lib/toast";
 
 const GIS_SRC = "https://accounts.google.com/gsi/client";
 
+// Loads the GIS client via direct DOM injection (not next/script). The
+// Next.js Script component sometimes doesn't actually inject its
+// `<script>` tag in dev mode through ngrok / under aggressive content
+// scripts (MetaMask SES, Brave shields, etc.) — falling back to
+// vanilla DOM bypasses those.
+function loadGISScript(onReady: () => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  if (window.google?.accounts?.id) {
+    onReady();
+    return () => {};
+  }
+  const existing = document.querySelector<HTMLScriptElement>(
+    'script[data-sellon-gis="1"]',
+  );
+  if (existing) {
+    if (existing.dataset.loaded === "1") {
+      onReady();
+      return () => {};
+    }
+    existing.addEventListener("load", onReady, { once: true });
+    return () => existing.removeEventListener("load", onReady);
+  }
+  const s = document.createElement("script");
+  s.src = GIS_SRC;
+  s.async = true;
+  s.defer = true;
+  s.dataset.sellonGis = "1";
+  s.addEventListener(
+    "load",
+    () => {
+      s.dataset.loaded = "1";
+      onReady();
+    },
+    { once: true },
+  );
+  document.head.appendChild(s);
+  return () => s.removeEventListener("load", onReady);
+}
+
 export function GoogleSignInButton() {
-  const router = useRouter();
+  const { push, refresh } = useRouter();
   const buttonRef = useRef<HTMLDivElement>(null);
   const [scriptReady, setScriptReady] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
   const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
+  // Inject the GIS client via vanilla DOM so the script reliably
+  // loads regardless of Next.js Script timing or extension
+  // hardening that intercepts the framework's loader.
   useEffect(() => {
+    console.log("[SellOn GSI] mounting, requesting script");
+    return loadGISScript(() => {
+      console.log("[SellOn GSI] script loaded, window.google =", !!window.google);
+      setScriptReady(true);
+    });
+  }, []);
+
+  useEffect(() => {
+    console.log("[SellOn GSI] render effect", {
+      scriptReady, hasClientId: !!clientId, hasRef: !!buttonRef.current,
+      hasGoogle: !!window.google,
+    });
     if (!scriptReady || !clientId || !buttonRef.current) return;
     if (!window.google) return;
 
@@ -25,7 +78,6 @@ export function GoogleSignInButton() {
       client_id: clientId,
       callback: async ({ credential }) => {
         setSubmitting(true);
-        setError(null);
         try {
           const res = await fetch(`${apiBase}/api/v1/auth/google`, {
             method: "POST",
@@ -33,31 +85,42 @@ export function GoogleSignInButton() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ credential }),
           });
+          const data = await res.json().catch(() => ({}));
           if (!res.ok) {
-            const data = await res.json().catch(() => ({}));
             throw new Error(data.error || `HTTP ${res.status}`);
           }
-          router.push("/dasbor");
-          router.refresh();
+          // Platform admins land at /platform instead of being
+          // forced through /setup → /dashboard. Sellers (role 'user' or
+          // unset) keep the original flow; the dashboard layout still
+          // redirects them to /setup if they don't have a store yet.
+          const dest =
+            data?.role === "admin" ? "/platform" : "/dashboard";
+          push(dest);
+          refresh();
         } catch (err) {
-          setError(err instanceof Error ? err.message : "Login gagal");
+          showError(err);
           setSubmitting(false);
         }
       },
       ux_mode: "popup",
     });
 
-    window.google.accounts.id.renderButton(buttonRef.current, {
-      type: "standard",
-      theme: "outline",
-      size: "large",
-      text: "continue_with",
-      shape: "rectangular",
-      logo_alignment: "left",
-      width: 320,
-      locale: "id",
-    });
-  }, [scriptReady, clientId, apiBase, router]);
+    try {
+      window.google.accounts.id.renderButton(buttonRef.current, {
+        type: "standard",
+        theme: "outline",
+        size: "large",
+        text: "continue_with",
+        shape: "rectangular",
+        logo_alignment: "left",
+        width: 320,
+        locale: "id",
+      });
+      console.log("[SellOn GSI] renderButton called OK");
+    } catch (e) {
+      console.error("[SellOn GSI] renderButton threw", e);
+    }
+  }, [scriptReady, clientId, apiBase, push, refresh]);
 
   if (!clientId) {
     return (
@@ -72,17 +135,16 @@ export function GoogleSignInButton() {
 
   return (
     <div className="flex flex-col items-center gap-3">
-      <Script src={GIS_SRC} strategy="afterInteractive" onLoad={() => setScriptReady(true)} />
       <div
         ref={buttonRef}
         aria-label="Masuk dengan Google"
         className={submitting ? "pointer-events-none opacity-60" : ""}
       />
+      {!scriptReady && (
+        <p className="text-xs text-neutral-500">Memuat tombol Google…</p>
+      )}
       {submitting && (
         <p className="text-sm text-neutral-500">Memverifikasi…</p>
-      )}
-      {error && (
-        <p className="text-sm text-danger">{error}</p>
       )}
     </div>
   );

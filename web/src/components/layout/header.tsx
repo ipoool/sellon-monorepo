@@ -57,14 +57,14 @@ export function Header({ me, variant = "marketing" }: HeaderProps) {
 
             {me ? (
               <div className="flex items-center gap-2">
-                <Link href="/dasbor">
+                <Link href="/dashboard">
                   <Button size="sm">
                     <LayoutDashboard className="size-4" aria-hidden />
                     Buka Dasbor
                   </Button>
                 </Link>
                 <Link
-                  href="/dasbor"
+                  href="/dashboard"
                   className="hidden items-center sm:inline-flex"
                   aria-label={`Masuk ke dasbor sebagai ${me.name || me.email}`}
                 >
@@ -77,12 +77,12 @@ export function Header({ me, variant = "marketing" }: HeaderProps) {
               </div>
             ) : (
               <div className="flex items-center gap-2">
-                <Link href="/masuk">
+                <Link href="/login">
                   <Button size="sm" variant="ghost">
                     Masuk
                   </Button>
                 </Link>
-                <Link href="/masuk">
+                <Link href="/login">
                   <Button size="sm">Mulai Gratis</Button>
                 </Link>
               </div>

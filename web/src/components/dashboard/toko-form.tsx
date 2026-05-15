@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Save, ExternalLink } from "lucide-react";
 
@@ -13,6 +13,8 @@ import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { JamBukaEditor } from "@/components/dashboard/jam-buka-editor";
 import { ImageUploadInput } from "@/components/dashboard/image-upload-input";
+import { deleteUploaded } from "@/lib/supabase";
+import { showError, showSuccess } from "@/lib/toast";
 import type { OpenHours, Store } from "@/lib/types";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -30,20 +32,21 @@ const categories = [
 ];
 
 export function TokoForm({ initial }: { initial: Store | null }) {
-  const router = useRouter();
+  const { refresh } = useRouter();
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
   const [logoUrl, setLogoUrl] = useState(initial?.logo_url ?? "");
   const [bannerUrl, setBannerUrl] = useState(initial?.banner_url ?? "");
+  // Track URL gambar yang sudah benar-benar tersimpan di server agar
+  // kalau seller ganti/hapus logo atau banner, file lama di Supabase
+  // Storage ikut terhapus (no orphan files).
+  const savedLogoRef = useRef<string>(initial?.logo_url ?? "");
+  const savedBannerRef = useRef<string>(initial?.banner_url ?? "");
 
   const isCreating = !initial;
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setPending(true);
-    setError(null);
-    setSuccess(false);
 
     const fd = new FormData(e.currentTarget);
     let openHours: OpenHours = {};
@@ -63,6 +66,11 @@ export function TokoForm({ initial }: { initial: Store | null }) {
       category: String(fd.get("category") ?? ""),
       city: String(fd.get("city") ?? ""),
       whatsapp_number: String(fd.get("whatsapp_number") ?? ""),
+      // notification_whatsapp_number is edited from /settings/whatsapp,
+      // not here. We still send the current value so the PUT doesn't
+      // accidentally blank it out — initial?.notification_whatsapp_number
+      // came from the same /api/v1/store payload that hydrated this form.
+      notification_whatsapp_number: initial?.notification_whatsapp_number ?? "",
       instagram: String(fd.get("instagram") ?? ""),
       tiktok: String(fd.get("tiktok") ?? ""),
       open_hours: openHours,
@@ -78,10 +86,22 @@ export function TokoForm({ initial }: { initial: Store | null }) {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-      setSuccess(true);
-      router.refresh();
+
+      // Cleanup file lama setelah PUT sukses. Fire-and-forget; backend
+      // punya cross-tenant guard + skip non-Supabase URL.
+      if (savedLogoRef.current && savedLogoRef.current !== logoUrl) {
+        void deleteUploaded(savedLogoRef.current);
+      }
+      if (savedBannerRef.current && savedBannerRef.current !== bannerUrl) {
+        void deleteUploaded(savedBannerRef.current);
+      }
+      savedLogoRef.current = logoUrl;
+      savedBannerRef.current = bannerUrl;
+
+      showSuccess("Profil toko tersimpan");
+      refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal menyimpan");
+      showError(err);
     } finally {
       setPending(false);
     }
@@ -95,7 +115,7 @@ export function TokoForm({ initial }: { initial: Store | null }) {
             Selamat datang! Mari setup toko-mu dulu.
           </p>
           <p className="mt-1 text-neutral-700">
-            Pilih nama toko dan URL singkat (slug) — sisanya bisa diisi kapan saja.
+            Pilih nama toko dan URL singkat (slug) - sisanya bisa diisi kapan saja.
           </p>
         </div>
       )}
@@ -146,7 +166,7 @@ export function TokoForm({ initial }: { initial: Store | null }) {
               name="category"
               defaultValue={initial?.category ?? ""}
             >
-              <option value="">— Pilih kategori —</option>
+              <option value="">- Pilih kategori -</option>
               {categories.map((c) => (
                 <option key={c} value={c}>{c}</option>
               ))}
@@ -159,7 +179,7 @@ export function TokoForm({ initial }: { initial: Store | null }) {
               name="description"
               rows={3}
               defaultValue={initial?.description ?? ""}
-              placeholder="Ceritakan singkat tentang toko-mu — produk apa, lokasi, kapan buka, kenapa pelanggan harus pilih kamu."
+              placeholder="Ceritakan singkat tentang toko-mu - produk apa, lokasi, kapan buka, kenapa pelanggan harus pilih kamu."
               className="rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
             />
           </div>
@@ -214,7 +234,7 @@ export function TokoForm({ initial }: { initial: Store | null }) {
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="whatsapp_number">Nomor WhatsApp</Label>
+            <Label htmlFor="whatsapp_number">Nomor WhatsApp (publik)</Label>
             <Input
               id="whatsapp_number"
               name="whatsapp_number"
@@ -222,6 +242,9 @@ export function TokoForm({ initial }: { initial: Store | null }) {
               defaultValue={initial?.whatsapp_number ?? ""}
               placeholder="62812-3456-7890"
             />
+            <p className="text-xs text-neutral-500">
+              Dipakai pembeli untuk hubungi toko.
+            </p>
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="city">Kota</Label>
@@ -277,8 +300,12 @@ export function TokoForm({ initial }: { initial: Store | null }) {
                   bisa terima order baru. Override jam buka di atas.
                 </p>
               </div>
-              <label className="flex cursor-pointer items-center gap-3">
+              <label
+                htmlFor="is_open_toggle"
+                className="flex cursor-pointer items-center gap-3"
+              >
                 <Switch
+                  id="is_open_toggle"
                   name="is_open"
                   defaultChecked={initial?.is_open ?? true}
                 />
@@ -289,13 +316,7 @@ export function TokoForm({ initial }: { initial: Store | null }) {
         </>
       )}
 
-      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-2 text-sm">
-          {success && (
-            <span className="font-medium text-success">✓ Tersimpan</span>
-          )}
-          {error && <span className="font-medium text-danger">{error}</span>}
-        </div>
+      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
         <div className="flex items-center gap-2">
           {!isCreating && initial && (
             <a

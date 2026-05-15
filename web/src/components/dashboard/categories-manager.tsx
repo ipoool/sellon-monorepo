@@ -6,6 +6,7 @@ import {
   useState,
   type FormEvent,
 } from "react";
+import { showError, showSuccess } from "@/lib/toast";
 import {
   Plus,
   Edit2,
@@ -30,7 +31,6 @@ export function CategoriesManager() {
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Category | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const deleteDialogRef = useRef<HTMLDialogElement>(null);
@@ -79,7 +79,6 @@ export function CategoriesManager() {
   async function onCreate(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setBusy(true);
-    setError(null);
     const fd = new FormData(e.currentTarget);
     const name = String(fd.get("name") ?? "").trim();
     try {
@@ -97,7 +96,7 @@ export function CategoriesManager() {
       setAdding(false);
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal");
+      showError(err);
     } finally {
       setBusy(false);
     }
@@ -105,7 +104,6 @@ export function CategoriesManager() {
 
   async function onRename(id: string, name: string) {
     setBusy(true);
-    setError(null);
     try {
       const res = await fetch(`${apiBase}/api/v1/categories/${id}`, {
         method: "PUT",
@@ -117,7 +115,7 @@ export function CategoriesManager() {
       setEditingId(null);
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal");
+      showError(err);
     } finally {
       setBusy(false);
     }
@@ -175,7 +173,7 @@ export function CategoriesManager() {
           <Input
             name="name"
             required
-            autoFocus
+
             placeholder="Nama kategori (mis. Makanan, Minuman)"
             className="flex-1"
           />
@@ -197,8 +195,7 @@ export function CategoriesManager() {
         </form>
       )}
 
-      {error && <p className="mb-3 text-sm font-medium text-danger">{error}</p>}
-
+      
       {loading ? (
         <p className="text-sm text-neutral-500">Memuat…</p>
       ) : categories.length === 0 && !adding ? (
@@ -318,23 +315,28 @@ function InlineEdit({
   onCancel: () => void;
   disabled?: boolean;
 }) {
-  const [v, setV] = useState(initial);
+  const [v, setV] = useState(() => initial);
+  function commit() {
+    if (v.trim()) onSave(v.trim());
+  }
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (v.trim()) onSave(v.trim());
-      }}
-      className="flex flex-1 items-center gap-2"
-    >
+    <div className="flex flex-1 items-center gap-2">
       <Input
-        autoFocus
         value={v}
         onChange={(e) => setV(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
+          if (e.key === "Escape") onCancel();
+        }}
         className="flex-1"
         disabled={disabled}
       />
-      <Button type="submit" size="sm" disabled={disabled || !v.trim()}>
+      <Button
+        type="button"
+        size="sm"
+        onClick={commit}
+        disabled={disabled || !v.trim()}
+      >
         <Check className="size-4" aria-hidden />
       </Button>
       <Button
@@ -346,6 +348,6 @@ function InlineEdit({
       >
         <X className="size-4" aria-hidden />
       </Button>
-    </form>
+    </div>
   );
 }

@@ -12,6 +12,11 @@ const SessionCookieName = "sellon_session"
 
 type SessionClaims struct {
 	UserID uuid.UUID `json:"uid"`
+	// Impersonator is set when an admin issued this token to act as
+	// UserID. The middleware reads this and stamps it on the request
+	// context so audit log helpers can record both the actor and the
+	// human admin behind the action.
+	Impersonator *uuid.UUID `json:"imp,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -25,9 +30,21 @@ func NewJWTService(secret string, ttl time.Duration) *JWTService {
 }
 
 func (s *JWTService) Issue(userID uuid.UUID) (string, time.Time, error) {
-	exp := time.Now().Add(s.ttl)
+	return s.IssueImpersonation(userID, nil, s.ttl)
+}
+
+// IssueImpersonation creates a token that authenticates as `userID`
+// while recording the originating admin in the `imp` claim. Use a
+// shorter ttl (e.g. 30 minutes) so an abandoned impersonation session
+// can't linger forever.
+func (s *JWTService) IssueImpersonation(userID uuid.UUID, impersonator *uuid.UUID, ttl time.Duration) (string, time.Time, error) {
+	if ttl <= 0 {
+		ttl = s.ttl
+	}
+	exp := time.Now().Add(ttl)
 	claims := SessionClaims{
-		UserID: userID,
+		UserID:       userID,
+		Impersonator: impersonator,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(exp),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

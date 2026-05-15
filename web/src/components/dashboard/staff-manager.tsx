@@ -6,6 +6,7 @@ import {
   useState,
   type FormEvent,
 } from "react";
+import { showError, showSuccess } from "@/lib/toast";
 import { useRouter } from "next/navigation";
 import {
   UserPlus,
@@ -22,6 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Card } from "@/components/ui/card";
+import { Tooltip } from "@/components/ui/tooltip";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import type { StaffData, StaffInvite, StaffMember } from "@/lib/types";
@@ -46,12 +48,11 @@ const roleVariant: Record<
 type Props = { initial: StaffData };
 
 export function StaffManager({ initial }: Props) {
-  const router = useRouter();
-  const [data, setData] = useState<StaffData>(initial);
+  const { refresh } = useRouter();
+  const [data, setData] = useState<StaffData>(() => initial);
   const [showInvite, setShowInvite] = useState(false);
   const [pendingRemove, setPendingRemove] = useState<StaffMember | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const inviteDialogRef = useRef<HTMLDialogElement>(null);
   const removeDialogRef = useRef<HTMLDialogElement>(null);
@@ -93,7 +94,7 @@ export function StaffManager({ initial }: Props) {
     };
   }, []);
 
-  async function refresh() {
+  async function reloadData() {
     const res = await fetch(`${apiBase}/api/v1/staff`, {
       credentials: "include",
     });
@@ -101,13 +102,12 @@ export function StaffManager({ initial }: Props) {
       const next = (await res.json()) as StaffData;
       setData(next);
     }
-    router.refresh();
+    refresh();
   }
 
   async function onInvite(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setBusy(true);
-    setError(null);
     setFlash(null);
     const fd = new FormData(e.currentTarget);
     const email = String(fd.get("email") ?? "").trim();
@@ -124,13 +124,13 @@ export function StaffManager({ initial }: Props) {
       setShowInvite(false);
       setFlash(
         out.direct
-          ? `${email} sudah punya akun SellOn — langsung ditambahkan sebagai ${role}.`
+          ? `${email} sudah punya akun SellOn - langsung ditambahkan sebagai ${role}.`
           : `Undangan terkirim ke ${email}. Akan aktif saat dia login dengan Google.`,
       );
       setTimeout(() => setFlash(null), 5000);
-      await refresh();
+      await reloadData();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal mengundang");
+      showError(err);
     } finally {
       setBusy(false);
     }
@@ -139,7 +139,6 @@ export function StaffManager({ initial }: Props) {
   async function confirmRemove() {
     if (!pendingRemove) return;
     setBusy(true);
-    setError(null);
     try {
       const res = await fetch(
         `${apiBase}/api/v1/staff/${pendingRemove.user_id}`,
@@ -150,9 +149,9 @@ export function StaffManager({ initial }: Props) {
         throw new Error(out.error || `HTTP ${res.status}`);
       }
       setPendingRemove(null);
-      await refresh();
+      await reloadData();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal hapus");
+      showError(err);
     } finally {
       setBusy(false);
     }
@@ -160,16 +159,15 @@ export function StaffManager({ initial }: Props) {
 
   async function deleteInvite(inv: StaffInvite) {
     setBusy(true);
-    setError(null);
     try {
       const res = await fetch(
         `${apiBase}/api/v1/staff/invites/${inv.id}`,
         { method: "DELETE", credentials: "include" },
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      await refresh();
+      await reloadData();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal hapus undangan");
+      showError(err);
     } finally {
       setBusy(false);
     }
@@ -187,20 +185,19 @@ export function StaffManager({ initial }: Props) {
           <div>
             <h2 className="font-semibold text-neutral-900">Staf & Anggota Tim</h2>
             <p className="mt-0.5 text-sm text-neutral-600">
-              Undang anggota tim untuk akses dasbor toko-mu. Pemilik tetap kamu —
+              Undang anggota tim untuk akses dasbor toko-mu. Pemilik tetap kamu -
               mereka tidak bisa hapus toko atau ubah berlangganan.
             </p>
             {isCapped && (
               <p className="mt-2 text-xs font-medium text-neutral-700">
                 {used} / {limit} seat terpakai
-                {quotaFull && " — limit tier tercapai."}
+                {quotaFull && " - limit tier tercapai."}
               </p>
             )}
           </div>
           <Button
             size="sm"
             onClick={() => {
-              setError(null);
               setShowInvite(true);
             }}
             disabled={quotaFull}
@@ -216,10 +213,7 @@ export function StaffManager({ initial }: Props) {
             {flash}
           </p>
         )}
-        {error && !showInvite && !pendingRemove && (
-          <p className="mt-4 text-sm font-medium text-danger">{error}</p>
-        )}
-
+        
         <ul className="mt-5 flex flex-col divide-y divide-neutral-200 rounded-lg border border-neutral-200">
           {data.members.map((m) => (
             <li
@@ -252,18 +246,18 @@ export function StaffManager({ initial }: Props) {
                 {roleLabel[m.role]}
               </Badge>
               {m.role !== "owner" && !m.is_current && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setError(null);
-                    setPendingRemove(m);
-                  }}
-                  className="inline-flex size-8 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-danger/10 hover:text-danger"
-                  aria-label={`Hapus ${m.name || m.email}`}
-                  title="Hapus dari tim"
-                >
-                  <Trash2 className="size-4" aria-hidden />
-                </button>
+                <Tooltip label="Hapus dari tim" align="end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPendingRemove(m);
+                    }}
+                    className="inline-flex size-8 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-danger/10 hover:text-danger"
+                    aria-label={`Hapus ${m.name || m.email}`}
+                  >
+                    <Trash2 className="size-4" aria-hidden />
+                  </button>
+                </Tooltip>
               )}
             </li>
           ))}
@@ -291,16 +285,17 @@ export function StaffManager({ initial }: Props) {
                       Sebagai {roleLabel[inv.role]} · menunggu login pertama
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => deleteInvite(inv)}
-                    disabled={busy}
-                    className="inline-flex size-8 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-danger/10 hover:text-danger"
-                    aria-label="Batalkan undangan"
-                    title="Batalkan undangan"
-                  >
-                    <X className="size-4" aria-hidden />
-                  </button>
+                  <Tooltip label="Batalkan undangan" align="end">
+                    <button
+                      type="button"
+                      onClick={() => deleteInvite(inv)}
+                      disabled={busy}
+                      className="inline-flex size-8 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-danger/10 hover:text-danger"
+                      aria-label="Batalkan undangan"
+                    >
+                      <X className="size-4" aria-hidden />
+                    </button>
+                  </Tooltip>
                 </li>
               ))}
             </ul>
@@ -312,7 +307,7 @@ export function StaffManager({ initial }: Props) {
           <p className="mt-1">
             Saat kamu undang lewat email, kalau orang itu sudah punya akun
             SellOn, mereka langsung ditambahkan. Kalau belum, mereka jadi
-            &ldquo;Pending&rdquo; — undangan otomatis aktif saat mereka login
+            &ldquo;Pending&rdquo; - undangan otomatis aktif saat mereka login
             pertama kali pakai akun Google dengan email yang sama.
           </p>
         </div>
@@ -352,7 +347,7 @@ export function StaffManager({ initial }: Props) {
                 name="email"
                 type="email"
                 required
-                autoFocus
+
                 placeholder="rekan@gmail.com"
               />
               <p className="text-xs text-neutral-500">
@@ -362,14 +357,11 @@ export function StaffManager({ initial }: Props) {
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="invite_role">Role</Label>
               <Select id="invite_role" name="role" defaultValue="staff">
-                <option value="staff">Staf — operasional pesanan & produk</option>
-                <option value="admin">Admin — akses penuh kecuali billing</option>
+                <option value="staff">Staf - operasional pesanan & produk</option>
+                <option value="admin">Admin - akses penuh kecuali billing</option>
               </Select>
             </div>
-            {error && (
-              <p className="text-sm font-medium text-danger">{error}</p>
-            )}
-          </div>
+                      </div>
           <div className="flex items-center justify-end gap-2 border-t border-neutral-200 bg-neutral-50 px-5 py-3">
             <Button
               type="button"
@@ -410,10 +402,7 @@ export function StaffManager({ initial }: Props) {
               kehilangan akses ke dasbor toko ini. Kamu bisa undang mereka
               kembali kapan saja.
             </p>
-            {error && (
-              <p className="mt-2 text-sm font-medium text-danger">{error}</p>
-            )}
-          </div>
+                      </div>
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-neutral-200 bg-neutral-50 px-5 py-3">
           <Button

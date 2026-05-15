@@ -20,6 +20,10 @@ func Info(cfg *config.Config) http.HandlerFunc {
 				"photo_upload": cfg.SupabaseURL != "" &&
 					cfg.SupabaseServiceKey != "" &&
 					cfg.SupabaseBucket != "",
+				// True when the platform Midtrans server key is set; lets the
+				// dashboard show the "Bayar Sekarang" button next to the
+				// manual-transfer fallback.
+				"platform_billing": cfg.PlatformMidtransServerKey != "",
 			},
 		})
 	}

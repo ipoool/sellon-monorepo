@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/sellon/sellon/api/internal/audit"
 	"github.com/sellon/sellon/api/internal/auth"
 	"github.com/sellon/sellon/api/internal/pkg/response"
 	"github.com/sellon/sellon/api/internal/repository"
@@ -15,11 +16,13 @@ import (
 
 type StoreHandler struct {
 	stores *repository.StoreRepo
+	subs   *repository.SubscriptionRepo
+	audit  *audit.Logger
 	logger *slog.Logger
 }
 
-func NewStoreHandler(stores *repository.StoreRepo, logger *slog.Logger) *StoreHandler {
-	return &StoreHandler{stores: stores, logger: logger}
+func NewStoreHandler(stores *repository.StoreRepo, subs *repository.SubscriptionRepo, audit *audit.Logger, logger *slog.Logger) *StoreHandler {
+	return &StoreHandler{stores: stores, subs: subs, audit: audit, logger: logger}
 }
 
 type storeDTO struct {
@@ -33,6 +36,7 @@ type storeDTO struct {
 	Category                   string          `json:"category"`
 	City                       string          `json:"city"`
 	WhatsAppNumber             string          `json:"whatsapp_number"`
+	NotificationWhatsAppNumber string          `json:"notification_whatsapp_number"`
 	Instagram                  string          `json:"instagram"`
 	TikTok                     string          `json:"tiktok"`
 	OpenHours                  json.RawMessage `json:"open_hours"`
@@ -43,6 +47,7 @@ type storeDTO struct {
 	EnabledCouriers            []string        `json:"enabled_couriers"`
 	FreeShippingThresholdCents int64           `json:"free_shipping_threshold_cents"`
 	ThemeHue                   int             `json:"theme_hue"`
+	ProductLayout              string          `json:"product_layout"`
 	ShowHoursPublic            bool            `json:"show_hours_public"`
 	ShowSocialPublic           bool            `json:"show_social_public"`
 	FooterText                 string          `json:"footer_text"`
@@ -61,7 +66,9 @@ func toStoreDTO(s *repository.Store) storeDTO {
 		ID: s.ID.String(), Slug: s.Slug, Name: s.Name, Description: s.Description,
 		LogoURL: s.LogoURL, BannerURL: s.BannerURL, Tagline: s.Tagline,
 		Category: s.Category, City: s.City,
-		WhatsAppNumber: s.WhatsAppNumber, Instagram: s.Instagram, TikTok: s.TikTok,
+		WhatsAppNumber: s.WhatsAppNumber,
+		NotificationWhatsAppNumber: s.NotificationWhatsAppNumber,
+		Instagram: s.Instagram, TikTok: s.TikTok,
 		OpenHours: openHours, IsOpen: s.IsOpen,
 		ShippingOriginCity:         s.ShippingOriginCity,
 		ShippingOriginCityID:       s.ShippingOriginCityID,
@@ -69,6 +76,7 @@ func toStoreDTO(s *repository.Store) storeDTO {
 		EnabledCouriers:            couriers,
 		FreeShippingThresholdCents: s.FreeShippingThresholdCents,
 		ThemeHue:                   s.ThemeHue,
+		ProductLayout:              s.ProductLayout,
 		ShowHoursPublic:            s.ShowHoursPublic,
 		ShowSocialPublic:           s.ShowSocialPublic,
 		FooterText:                 s.FooterText,
@@ -128,22 +136,35 @@ func (h *StoreHandler) Create(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, "gagal membuat toko (slug mungkin sudah dipakai)")
 		return
 	}
+	h.audit.Log(r.Context(), store.ID, audit.Event{
+		Action:     "store.created",
+		EntityType: "store",
+		EntityID:   store.ID.String(),
+		Summary:    "Toko " + store.Name + " dibuat",
+		Metadata: map[string]any{
+			"name":     store.Name,
+			"slug":     store.Slug,
+			"category": store.Category,
+			"city":     store.City,
+		},
+	})
 	response.JSON(w, http.StatusCreated, map[string]any{"store": toStoreDTO(store)})
 }
 
 type updateStoreReq struct {
-	Name           string          `json:"name"`
-	Description    string          `json:"description"`
-	LogoURL        string          `json:"logo_url"`
-	BannerURL      string          `json:"banner_url"`
-	Tagline        string          `json:"tagline"`
-	Category       string          `json:"category"`
-	City           string          `json:"city"`
-	WhatsAppNumber string          `json:"whatsapp_number"`
-	Instagram      string          `json:"instagram"`
-	TikTok         string          `json:"tiktok"`
-	OpenHours      json.RawMessage `json:"open_hours"`
-	IsOpen         bool            `json:"is_open"`
+	Name                       string          `json:"name"`
+	Description                string          `json:"description"`
+	LogoURL                    string          `json:"logo_url"`
+	BannerURL                  string          `json:"banner_url"`
+	Tagline                    string          `json:"tagline"`
+	Category                   string          `json:"category"`
+	City                       string          `json:"city"`
+	WhatsAppNumber             string          `json:"whatsapp_number"`
+	NotificationWhatsAppNumber string          `json:"notification_whatsapp_number"`
+	Instagram                  string          `json:"instagram"`
+	TikTok                     string          `json:"tiktok"`
+	OpenHours                  json.RawMessage `json:"open_hours"`
+	IsOpen                     bool            `json:"is_open"`
 }
 
 // PUT /api/v1/store
@@ -173,15 +194,29 @@ func (h *StoreHandler) Update(w http.ResponseWriter, r *http.Request) {
 		Name: strings.TrimSpace(req.Name), Description: req.Description, LogoURL: req.LogoURL,
 		BannerURL: req.BannerURL, Tagline: strings.TrimSpace(req.Tagline),
 		Category: req.Category, City: req.City,
-		WhatsAppNumber: req.WhatsAppNumber, Instagram: req.Instagram, TikTok: req.TikTok,
-		OpenHoursJSON: openHours,
-		IsOpen:        req.IsOpen,
+		WhatsAppNumber:             strings.TrimSpace(req.WhatsAppNumber),
+		NotificationWhatsAppNumber: strings.TrimSpace(req.NotificationWhatsAppNumber),
+		Instagram:                  req.Instagram,
+		TikTok:                     req.TikTok,
+		OpenHoursJSON:              openHours,
+		IsOpen:                     req.IsOpen,
 	})
 	if err != nil {
 		h.logger.Error("update store", "err", err)
 		response.Error(w, http.StatusInternalServerError, "gagal update toko")
 		return
 	}
+	h.audit.Log(r.Context(), store.ID, audit.Event{
+		Action:     "store.updated",
+		EntityType: "store",
+		EntityID:   store.ID.String(),
+		Summary:    "Update profil toko",
+		Metadata: map[string]any{
+			"is_open":  store.IsOpen,
+			"category": store.Category,
+			"city":     store.City,
+		},
+	})
 	response.JSON(w, http.StatusOK, map[string]any{"store": toStoreDTO(store)})
 }
 
@@ -190,6 +225,7 @@ type updateStorefrontReq struct {
 	BannerURL        string `json:"banner_url"`
 	Tagline          string `json:"tagline"`
 	ThemeHue         int    `json:"theme_hue"`
+	ProductLayout    string `json:"product_layout"`
 	ShowHoursPublic  bool   `json:"show_hours_public"`
 	ShowSocialPublic bool   `json:"show_social_public"`
 	FooterText       string `json:"footer_text"`
@@ -212,11 +248,25 @@ func (h *StoreHandler) UpdateStorefront(w http.ResponseWriter, r *http.Request) 
 		response.Error(w, http.StatusBadRequest, "invalid body")
 		return
 	}
+	// Theme color + product layout adalah Pro/Bisnis feature. Free
+	// sellers keep whatever value is already on the row (don't reset
+	// to default — preserves choice yang dipakai sebelum downgrade).
+	// Frontend gates the picker; this is the server defense.
+	themeHue := req.ThemeHue
+	productLayout := req.ProductLayout
+	if h.subs != nil {
+		if sub, err := h.subs.GetOrCreate(r.Context(), existing.ID); err == nil &&
+			sub != nil && sub.Plan != "pro" && sub.Plan != "bisnis" {
+			themeHue = existing.ThemeHue
+			productLayout = existing.ProductLayout
+		}
+	}
 	store, err := h.stores.UpdateStorefront(r.Context(), existing.ID, repository.UpdateStorefrontInput{
 		LogoURL:          req.LogoURL,
 		BannerURL:        req.BannerURL,
 		Tagline:          strings.TrimSpace(req.Tagline),
-		ThemeHue:         req.ThemeHue,
+		ThemeHue:         themeHue,
+		ProductLayout:    productLayout,
 		ShowHoursPublic:  req.ShowHoursPublic,
 		ShowSocialPublic: req.ShowSocialPublic,
 		FooterText:       strings.TrimSpace(req.FooterText),
@@ -226,6 +276,16 @@ func (h *StoreHandler) UpdateStorefront(w http.ResponseWriter, r *http.Request) 
 		response.Error(w, http.StatusInternalServerError, "gagal simpan")
 		return
 	}
+	h.audit.Log(r.Context(), store.ID, audit.Event{
+		Action:     "store.storefront_updated",
+		EntityType: "store",
+		EntityID:   store.ID.String(),
+		Summary:    "Update tampilan storefront",
+		Metadata: map[string]any{
+			"theme_hue":   store.ThemeHue,
+			"footer_text": store.FooterText,
+		},
+	})
 	response.JSON(w, http.StatusOK, map[string]any{"store": toStoreDTO(store)})
 }
 
@@ -290,6 +350,17 @@ func (h *StoreHandler) UpdateShipping(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, "gagal simpan")
 		return
 	}
+	h.audit.Log(r.Context(), store.ID, audit.Event{
+		Action:     "store.shipping_updated",
+		EntityType: "store",
+		EntityID:   store.ID.String(),
+		Summary:    "Update setting pengiriman",
+		Metadata: map[string]any{
+			"origin_city":              store.ShippingOriginCityName,
+			"enabled_couriers":         clean,
+			"free_shipping_threshold":  store.FreeShippingThresholdCents,
+		},
+	})
 	response.JSON(w, http.StatusOK, map[string]any{"store": toStoreDTO(store)})
 }
 

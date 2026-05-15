@@ -5,6 +5,7 @@ import { MapPin, Search, X } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { showError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -43,8 +44,7 @@ export function CityPicker({
   const [results, setResults] = useState<CityResult[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  // True when /cities/search returns 503 — degrades to plain text input.
+  // True when /cities/search returns 503 - degrades to plain text input.
   const [noServer, setNoServer] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -68,24 +68,28 @@ export function CityPicker({
       )
         .then(async (r) => {
           if (r.status === 503) {
-            // Server has no API key — degrade to plain text input. The
+            // Server has no API key - degrade to plain text input. The
             // parent receives the typed value via the keystroke handler
             // below.
             setNoServer(true);
             setOpen(false);
-            setError(null);
             setResults([]);
+            // Push whatever the user already typed up to the parent
+            // (BUG-018). Without this, anything entered before the 503
+            // landed stays trapped in the picker's internal `query`
+            // state and the parent form sees `city = ""` — causing
+            // step 2 of the checkout wizard to falsely block.
+            if (query.trim()) onChange("", query);
             return;
           }
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
           const data = (await r.json()) as { cities: CityResult[] };
           setNoServer(false);
-          setError(null);
           setResults(data.cities ?? []);
         })
         .catch((err) => {
           if ((err as Error).name === "AbortError") return;
-          setError("Gagal cari kota");
+          showError("Gagal cari kota");
         })
         .finally(() => setLoading(false));
       setLoading(true);
@@ -162,7 +166,7 @@ export function CityPicker({
           </button>
         )}
 
-        {open && (results.length > 0 || loading || error) && (
+        {open && (results.length > 0 || loading) && (
           <ul
             role="listbox"
             className="absolute left-0 right-0 top-full z-20 mt-1 max-h-72 overflow-y-auto rounded-lg border border-neutral-200 bg-white shadow-popout"
@@ -172,10 +176,7 @@ export function CityPicker({
                 Mencari…
               </li>
             )}
-            {error && (
-              <li className="px-3 py-2 text-sm text-danger">{error}</li>
-            )}
-            {!loading && !error && results.length === 0 && query && (
+                        {!loading && results.length === 0 && query && (
               <li className="px-3 py-2 text-sm text-neutral-500">
                 Tidak ada kota cocok.
               </li>
@@ -203,9 +204,14 @@ export function CityPicker({
           </ul>
         )}
       </div>
-      {description && (
+      {noServer ? (
+        <p className="rounded-md border border-warning/40 bg-warning/10 px-2.5 py-1.5 text-xs text-neutral-700">
+          Kalkulator ongkir belum aktif di toko ini. Lanjut ketik kota apa
+          adanya - penjual akan konfirmasi alamat & ongkir lewat WhatsApp.
+        </p>
+      ) : description ? (
         <p className="text-xs text-neutral-500">{description}</p>
-      )}
+      ) : null}
     </div>
   );
 }

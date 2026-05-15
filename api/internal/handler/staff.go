@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/sellon/sellon/api/internal/audit"
 	"github.com/sellon/sellon/api/internal/auth"
 	"github.com/sellon/sellon/api/internal/pkg/response"
 	"github.com/sellon/sellon/api/internal/repository"
@@ -20,6 +21,8 @@ type StaffHandler struct {
 	memberships *repository.MembershipRepo
 	users       *repository.UserRepo
 	subs        *repository.SubscriptionRepo
+	plans       *repository.PlanRepo
+	audit       *audit.Logger
 	logger      *slog.Logger
 }
 
@@ -28,20 +31,24 @@ func NewStaffHandler(
 	memberships *repository.MembershipRepo,
 	users *repository.UserRepo,
 	subs *repository.SubscriptionRepo,
+	plans *repository.PlanRepo,
+	audit *audit.Logger,
 	logger *slog.Logger,
 ) *StaffHandler {
 	return &StaffHandler{
 		stores: stores, memberships: memberships, users: users,
-		subs: subs, logger: logger,
+		subs: subs, plans: plans, audit: audit, logger: logger,
 	}
 }
 
-func (h *StaffHandler) planFor(r *http.Request, storeID uuid.UUID) string {
+// subFor loads the active subscription (with snapshotted limits). Returns
+// nil on lookup error so callers can fail-open.
+func (h *StaffHandler) subFor(r *http.Request, storeID uuid.UUID) *repository.Subscription {
 	sub, err := h.subs.GetOrCreate(r.Context(), storeID)
 	if err != nil {
-		return "free"
+		return nil
 	}
-	return sub.Plan
+	return sub
 }
 
 type memberDTO struct {
@@ -112,7 +119,7 @@ func (h *StaffHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Surface the staff cap so the frontend can show usage.
-	limit := staffLimitForPlan(h.planFor(r, store.ID))
+	limit := staffLimitForSub(h.subFor(r, store.ID))
 	used := len(members) // owner counts toward the limit too
 	response.JSON(w, http.StatusOK, map[string]any{
 		"members":      memberOut,
@@ -153,15 +160,19 @@ func (h *StaffHandler) Invite(w http.ResponseWriter, r *http.Request) {
 		role = "staff"
 	}
 
-	// Quota check.
-	plan := h.planFor(r, store.ID)
-	limit := staffLimitForPlan(plan)
+	// Quota check. Snapshot lives on the subscription.
+	sub := h.subFor(r, store.ID)
+	limit := staffLimitForSub(sub)
 	if limit > 0 {
 		members, _ := h.memberships.ListByStore(r.Context(), store.ID)
 		invites, _ := h.memberships.ListInvitesByStore(r.Context(), store.ID)
 		if len(members)+len(invites) >= limit {
+			planName := "free"
+			if sub != nil {
+				planName = sub.Plan
+			}
 			response.Error(w, http.StatusPaymentRequired,
-				"Limit staf tier "+plan+" sudah tercapai. Upgrade untuk staf lebih banyak.")
+				"Limit staf tier "+planName+" sudah tercapai. Upgrade untuk staf lebih banyak.")
 			return
 		}
 	}
@@ -179,6 +190,18 @@ func (h *StaffHandler) Invite(w http.ResponseWriter, r *http.Request) {
 			response.Error(w, http.StatusInternalServerError, "gagal menambah staf")
 			return
 		}
+		h.audit.Log(r.Context(), store.ID, audit.Event{
+			Action:     "staff.added",
+			EntityType: "user",
+			EntityID:   existing.ID.String(),
+			Summary:    "Tambah staf " + existing.Email + " sebagai " + role,
+			Metadata: map[string]any{
+				"target_email": existing.Email,
+				"target_name":  existing.Name,
+				"role":         role,
+				"direct":       true,
+			},
+		})
 		response.JSON(w, http.StatusCreated, map[string]any{
 			"ok":     true,
 			"direct": true,
@@ -193,6 +216,16 @@ func (h *StaffHandler) Invite(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, "gagal membuat undangan")
 		return
 	}
+	h.audit.Log(r.Context(), store.ID, audit.Event{
+		Action:     "staff.invited",
+		EntityType: "invite",
+		EntityID:   inv.ID.String(),
+		Summary:    "Kirim undangan " + email + " sebagai " + role,
+		Metadata: map[string]any{
+			"target_email": email,
+			"role":         role,
+		},
+	})
 	response.JSON(w, http.StatusCreated, map[string]any{
 		"ok": true,
 		"invite": inviteDTO2{
@@ -218,6 +251,8 @@ func (h *StaffHandler) Remove(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusBadRequest, "user_id invalid")
 		return
 	}
+	// Capture target identity before removal for the audit summary.
+	target, _ := h.users.FindByID(r.Context(), uid)
 	if err := h.memberships.Remove(r.Context(), store.ID, uid); err != nil {
 		if errors.Is(err, repository.ErrMembershipNotFound) {
 			response.Error(w, http.StatusNotFound, "staf tidak ditemukan atau pemilik toko")
@@ -227,6 +262,22 @@ func (h *StaffHandler) Remove(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, "gagal hapus")
 		return
 	}
+	targetLabel := uid.String()
+	targetEmail := ""
+	if target != nil {
+		targetLabel = target.Email
+		targetEmail = target.Email
+	}
+	h.audit.Log(r.Context(), store.ID, audit.Event{
+		Action:     "staff.removed",
+		EntityType: "user",
+		EntityID:   uid.String(),
+		Summary:    "Hapus staf " + targetLabel,
+		Metadata: map[string]any{
+			"target_user_id": uid.String(),
+			"target_email":   targetEmail,
+		},
+	})
 	response.JSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -268,6 +319,21 @@ func (h *StaffHandler) ChangeRole(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	target, _ := h.users.FindByID(r.Context(), uid)
+	targetLabel := uid.String()
+	if target != nil {
+		targetLabel = target.Email
+	}
+	h.audit.Log(r.Context(), store.ID, audit.Event{
+		Action:     "staff.role_changed",
+		EntityType: "user",
+		EntityID:   uid.String(),
+		Summary:    "Ubah role " + targetLabel + " jadi " + role,
+		Metadata: map[string]any{
+			"target_user_id": uid.String(),
+			"new_role":       role,
+		},
+	})
 	response.JSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -295,6 +361,12 @@ func (h *StaffHandler) DeleteInvite(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, "gagal hapus undangan")
 		return
 	}
+	h.audit.Log(r.Context(), store.ID, audit.Event{
+		Action:     "staff.invite_deleted",
+		EntityType: "invite",
+		EntityID:   id.String(),
+		Summary:    "Batalkan undangan staf",
+	})
 	response.JSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 

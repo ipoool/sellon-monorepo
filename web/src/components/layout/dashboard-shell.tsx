@@ -1,9 +1,12 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Menu, Bell, Search } from "lucide-react";
 
 import { DashboardSidebar } from "@/components/layout/dashboard-sidebar";
+import { BulkJobWatcher } from "@/components/dashboard/bulk-job-watcher";
 import { Avatar } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import type { Me } from "@/lib/auth-types";
@@ -23,7 +26,18 @@ export function DashboardShell({
   actions,
   children,
 }: Props) {
+  const { push } = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Submit topbar search → /products?q=… The product list page
+  // already supports `q` server-side, so this Just Works™ without
+  // having to build a separate global-search backend.
+  function onSearchSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const q = searchQuery.trim();
+    push(q ? `/products?q=${encodeURIComponent(q)}` : "/products");
+  }
 
   return (
     <div className="min-h-svh bg-neutral-50">
@@ -34,7 +48,7 @@ export function DashboardShell({
       />
 
       <div className={cn("lg:pl-60")}>
-        <header className="sticky top-0 z-20 border-b border-neutral-200 bg-white/85 backdrop-blur">
+        <header className="sticky top-[calc(var(--imp-h,0px)+var(--exp-h,0px)+var(--sbx-h,0px))] z-20 border-b border-neutral-200 bg-white/85 backdrop-blur">
           <div className="flex h-16 items-center gap-3 px-4 sm:px-6 lg:px-8">
             <button
               type="button"
@@ -56,9 +70,13 @@ export function DashboardShell({
               )}
             </div>
 
-            <div className="hidden md:block md:w-72">
+            <form
+              onSubmit={onSearchSubmit}
+              className="hidden md:block md:w-72"
+              role="search"
+            >
               <label htmlFor="topbar-search" className="sr-only">
-                Cari
+                Cari produk
               </label>
               <div className="relative">
                 <span
@@ -70,24 +88,22 @@ export function DashboardShell({
                 <input
                   id="topbar-search"
                   type="search"
-                  placeholder="Cari produk, pesanan, pelanggan…"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Cari produk… (Enter)"
                   className="h-10 w-full rounded-lg border border-neutral-200 bg-neutral-50 pl-9 pr-3 text-sm placeholder:text-neutral-400 focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/30"
                 />
               </div>
-            </div>
+            </form>
 
-            <button
-              type="button"
-              className="relative rounded-md p-2 text-neutral-600 transition-colors hover:bg-neutral-100"
-              aria-label="Notifikasi"
-              title="Notifikasi"
+            <Link
+              href="/orders"
+              className="rounded-md p-2 text-neutral-600 transition-colors hover:bg-neutral-100"
+              aria-label="Lihat pesanan"
+              title="Lihat pesanan"
             >
               <Bell className="size-5" aria-hidden />
-              <span
-                className="absolute right-1.5 top-1.5 size-2 rounded-full bg-danger ring-2 ring-white"
-                aria-hidden
-              />
-            </button>
+            </Link>
 
             <div className="lg:hidden">
               <Avatar src={me.picture_url} name={me.name || me.email} />
@@ -123,6 +139,11 @@ export function DashboardShell({
           </div>
         </main>
       </div>
+
+      {/* Global cross-page bulk upload progress notifications. Lives di
+          dalam dashboard shell — landing page tidak terkena karena tidak
+          memakai shell ini. */}
+      <BulkJobWatcher />
     </div>
   );
 }

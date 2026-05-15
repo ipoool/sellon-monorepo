@@ -1,15 +1,17 @@
 "use client";
 
 import { useRef, useState, type DragEvent } from "react";
+import Link from "next/link";
+import { showError, showSuccess } from "@/lib/toast";
 import { useRouter } from "next/navigation";
 import {
   Download,
   Upload,
   FileSpreadsheet,
-  CheckCircle2,
   AlertTriangle,
-  ArrowRight,
   X,
+  Crown,
+  Lock,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -17,17 +19,17 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
+type Props = {
+  // Apakah seller sudah berlangganan Pro / Bisnis. Saat false, tombol
+  // "Mulai Upload" dikunci dan banner upsell ditampilkan di atas.
+  isPaid: boolean;
+};
+
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 const MAX_PRODUCTS = 100;
 const MAX_BYTES = 8 * 1024 * 1024;
 
-type RowError = { row: number; field: string; message: string };
-type BulkResult = {
-  total_rows: number;
-  succeeded: number;
-  failed: number;
-  errors: RowError[];
-};
+type StartedJob = { job_id: string; total_rows: number };
 
 const columnSpec: { name: string; required: boolean; description: string }[] = [
   { name: "Nama Produk", required: true, description: "Maksimal 200 karakter." },
@@ -72,29 +74,25 @@ const columnSpec: { name: string; required: boolean; description: string }[] = [
   },
 ];
 
-export function BulkUploadForm() {
+export function BulkUploadForm({ isPaid }: Props) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<BulkResult | null>(null);
 
   function pickFile(f: File | null) {
-    setError(null);
-    setResult(null);
     if (!f) {
       setFile(null);
       return;
     }
     if (!f.name.toLowerCase().endsWith(".xlsx")) {
-      setError("Format harus .xlsx (Excel). File CSV / numbers belum didukung.");
+      showError("Format harus .xlsx (Excel). File CSV / numbers belum didukung.");
       setFile(null);
       return;
     }
     if (f.size > MAX_BYTES) {
-      setError("Ukuran file maks 8 MB.");
+      showError("Ukuran file maks 8 MB.");
       setFile(null);
       return;
     }
@@ -109,9 +107,13 @@ export function BulkUploadForm() {
 
   async function onUpload() {
     if (!file) return;
+    if (!isPaid) {
+      showError(
+        "Upload massal hanya tersedia untuk paket Pro & Bisnis. Upgrade dulu untuk akses fitur ini.",
+      );
+      return;
+    }
     setUploading(true);
-    setError(null);
-    setResult(null);
 
     const fd = new FormData();
     fd.append("file", file);
@@ -122,18 +124,60 @@ export function BulkUploadForm() {
         credentials: "include",
         body: fd,
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-      setResult(data as BulkResult);
-      if ((data as BulkResult).succeeded > 0) router.refresh();
+      const data = (await res.json().catch(() => ({}))) as
+        | StartedJob
+        | { error?: string };
+      if (!res.ok) {
+        const msg = (data as { error?: string }).error || `HTTP ${res.status}`;
+        throw new Error(msg);
+      }
+      const started = data as StartedJob;
+      // Beritahu global watcher (BulkJobWatcher di DashboardShell) supaya
+      // dia mulai polling segera tanpa nunggu interval berikutnya. Lebih
+      // cepat dari sekedar reload + UI buat user-nya cepat lihat toast.
+      window.dispatchEvent(
+        new CustomEvent("bulk-job:started", { detail: started }),
+      );
+      showSuccess(
+        `Upload sedang diproses (${started.total_rows} produk). Kamu bisa pindah halaman — notifikasi progress akan tetap muncul.`,
+      );
+      setFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      // Arahkan ke list produk supaya user merasakan progres background +
+      // notifikasi yang nempel saat pindah halaman.
+      router.push("/products");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal upload");
+      showError(err);
     } finally {
       setUploading(false);
     }
   }
 
   return (
+    <>
+      {!isPaid && (
+        <div className="mb-5 flex flex-col gap-3 rounded-xl border border-warning/40 bg-warning/10 p-4 sm:flex-row sm:items-center sm:gap-4">
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-warning/20 text-neutral-800">
+            <Crown className="size-5" aria-hidden />
+          </div>
+          <div className="flex-1">
+            <p className="font-semibold text-neutral-900">
+              Fitur Pro &amp; Bisnis
+            </p>
+            <p className="mt-0.5 text-sm text-neutral-700">
+              Upload massal sampai 100 produk sekali jalan dari Excel. Tier
+              Gratis bisa lihat panduan + download template, tapi proses
+              upload-nya khusus paket berbayar.
+            </p>
+          </div>
+          <Link href="/settings/subscription" className="shrink-0">
+            <Button size="sm">
+              <Crown className="size-4" aria-hidden />
+              Upgrade ke Pro
+            </Button>
+          </Link>
+        </div>
+      )}
     <div className="grid gap-5 lg:grid-cols-12">
       {/* LEFT: Instructions + Template */}
       <div className="flex flex-col gap-5 lg:col-span-7">
@@ -174,7 +218,7 @@ export function BulkUploadForm() {
                 title: "Isi data produk-mu",
                 body: (
                   <ul className="list-disc space-y-1 pl-5">
-                    <li>Mulai isi dari baris 2 (baris 1 adalah header — jangan diubah).</li>
+                    <li>Mulai isi dari baris 2 (baris 1 adalah header - jangan diubah).</li>
                     <li>
                       Hapus 2 baris contoh yang sudah ada, atau replace dengan data
                       kamu.
@@ -185,7 +229,7 @@ export function BulkUploadForm() {
                     </li>
                     <li>
                       Maksimal <strong>{MAX_PRODUCTS} produk</strong> per upload.
-                      Lebih dari itu akan ditolak — split jadi beberapa file.
+                      Lebih dari itu akan ditolak - split jadi beberapa file.
                     </li>
                   </ul>
                 ),
@@ -195,7 +239,7 @@ export function BulkUploadForm() {
                 body: (
                   <p>
                     Drop file ke kolom kanan atau klik untuk pilih file. Setiap
-                    baris divalidasi — yang valid langsung tersimpan, yang
+                    baris divalidasi - yang valid langsung tersimpan, yang
                     error akan muncul beserta alasannya. Anda bisa fix di file
                     Excel dan re-upload (slug yang sudah tersimpan tidak akan
                     duplikat).
@@ -203,7 +247,7 @@ export function BulkUploadForm() {
                 ),
               },
             ].map((step, i) => (
-              <li key={i} className="flex gap-4">
+              <li key={step.title} className="flex gap-4">
                 <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-brand-50 text-sm font-semibold text-brand-700">
                   {i + 1}
                 </span>
@@ -261,23 +305,45 @@ export function BulkUploadForm() {
           <h2 className="font-semibold text-neutral-900">Upload File</h2>
 
           <div
-            role="button"
-            tabIndex={0}
+            role={isPaid ? "button" : undefined}
+            tabIndex={isPaid ? 0 : -1}
+            aria-disabled={!isPaid}
             onDragOver={(e) => {
+              if (!isPaid) return;
               e.preventDefault();
               setDragOver(true);
             }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={onDrop}
-            onClick={() => fileInputRef.current?.click()}
+            onDragLeave={() => {
+              if (!isPaid) return;
+              setDragOver(false);
+            }}
+            onDrop={(e) => {
+              if (!isPaid) {
+                e.preventDefault();
+                return;
+              }
+              onDrop(e);
+            }}
+            onClick={() => {
+              if (!isPaid) return;
+              fileInputRef.current?.click();
+            }}
             onKeyDown={(e) => {
+              if (!isPaid) return;
               if (e.key === "Enter" || e.key === " ") fileInputRef.current?.click();
             }}
+            title={
+              !isPaid
+                ? "Upgrade ke Pro untuk akses upload massal"
+                : undefined
+            }
             className={cn(
-              "mt-4 flex cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-10 text-center transition-colors",
-              dragOver
-                ? "border-brand-500 bg-brand-50"
-                : "border-neutral-300 hover:border-brand-400 hover:bg-neutral-50",
+              "mt-4 flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-10 text-center transition-colors",
+              !isPaid
+                ? "cursor-not-allowed border-neutral-200 bg-neutral-50 opacity-60"
+                : dragOver
+                  ? "cursor-pointer border-brand-500 bg-brand-50"
+                  : "cursor-pointer border-neutral-300 hover:border-brand-400 hover:bg-neutral-50",
             )}
           >
             <input
@@ -285,17 +351,33 @@ export function BulkUploadForm() {
               type="file"
               accept=".xlsx"
               hidden
+              disabled={!isPaid}
               onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
             />
-            <div className="flex size-12 items-center justify-center rounded-full bg-brand-50 text-brand-600">
-              <Upload className="size-5" aria-hidden />
+            <div
+              className={cn(
+                "flex size-12 items-center justify-center rounded-full",
+                !isPaid
+                  ? "bg-neutral-200 text-neutral-500"
+                  : "bg-brand-50 text-brand-600",
+              )}
+            >
+              {!isPaid ? (
+                <Lock className="size-5" aria-hidden />
+              ) : (
+                <Upload className="size-5" aria-hidden />
+              )}
             </div>
             <div>
               <p className="font-medium text-neutral-900">
-                Drop file Excel di sini
+                {!isPaid
+                  ? "Upload terkunci"
+                  : "Drop file Excel di sini"}
               </p>
               <p className="mt-1 text-sm text-neutral-600">
-                atau klik untuk pilih dari komputer
+                {!isPaid
+                  ? "Upgrade ke Pro / Bisnis untuk membuka upload massal."
+                  : "atau klik untuk pilih dari komputer"}
               </p>
             </div>
             <p className="text-xs text-neutral-500">
@@ -331,91 +413,38 @@ export function BulkUploadForm() {
             </div>
           )}
 
-          {error && (
-            <p className="mt-3 text-sm font-medium text-danger">{error}</p>
-          )}
-
+          
           <div className="mt-4 flex justify-end">
             <Button
               size="md"
               onClick={onUpload}
-              disabled={!file || uploading}
+              disabled={!file || uploading || !isPaid}
+              title={
+                !isPaid
+                  ? "Upgrade ke Pro untuk akses upload massal"
+                  : undefined
+              }
             >
-              <Upload className="size-4" aria-hidden />
-              {uploading ? "Memproses…" : "Upload Sekarang"}
+              {!isPaid ? (
+                <Lock className="size-4" aria-hidden />
+              ) : (
+                <Upload className="size-4" aria-hidden />
+              )}
+              {uploading
+                ? "Mengirim…"
+                : !isPaid
+                  ? "Khusus Pro / Bisnis"
+                  : "Mulai Upload"}
             </Button>
           </div>
+          <p className="mt-3 text-xs text-neutral-500">
+            {isPaid
+              ? "Upload akan jalan di latar belakang. Kamu bebas pindah halaman — notifikasi progress akan terus terlihat di pojok kanan atas sampai selesai."
+              : "Tier Gratis bisa lihat panduan + download template, tapi proses upload-nya dikunci. Upgrade ke Pro / Bisnis untuk membuka tombol ini."}
+          </p>
         </Card>
-
-        {result && (
-          <Card variant={result.failed === 0 ? "default" : "default"}>
-            <div className="flex items-center gap-3">
-              {result.failed === 0 ? (
-                <div className="flex size-10 items-center justify-center rounded-full bg-success/10 text-success">
-                  <CheckCircle2 className="size-5" aria-hidden />
-                </div>
-              ) : (
-                <div className="flex size-10 items-center justify-center rounded-full bg-warning/15 text-neutral-800">
-                  <AlertTriangle className="size-5" aria-hidden />
-                </div>
-              )}
-              <div className="flex-1">
-                <p className="font-semibold text-neutral-900">
-                  {result.failed === 0
-                    ? "Semua produk berhasil di-upload"
-                    : `${result.succeeded} berhasil, ${result.failed} gagal`}
-                </p>
-                <p className="text-sm text-neutral-600">
-                  Total {result.total_rows} baris diproses
-                </p>
-              </div>
-            </div>
-
-            {result.errors.length > 0 && (
-              <>
-                <div className="mt-5 border-t border-neutral-200 pt-4">
-                  <p className="text-sm font-semibold text-neutral-900">
-                    Detail Error ({result.errors.length})
-                  </p>
-                  <ul className="mt-3 max-h-72 overflow-y-auto rounded-lg border border-neutral-200">
-                    {result.errors.map((e, i) => (
-                      <li
-                        key={i}
-                        className="flex items-start gap-3 border-b border-neutral-200 px-3 py-2.5 text-sm last:border-b-0"
-                      >
-                        <span className="rounded bg-danger/10 px-1.5 py-0.5 text-xs font-mono font-medium text-danger">
-                          Baris {e.row}
-                        </span>
-                        <div className="flex-1">
-                          <p className="font-medium text-neutral-900">{e.field}</p>
-                          <p className="mt-0.5 text-xs text-neutral-600">
-                            {e.message}
-                          </p>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-                <p className="mt-3 text-xs text-neutral-500">
-                  Fix baris-baris di atas di file Excel-mu lalu upload ulang.
-                  Produk yang sudah berhasil tidak akan ter-duplikasi.
-                </p>
-              </>
-            )}
-
-            {result.succeeded > 0 && (
-              <div className="mt-5 flex justify-end">
-                <a href="/dasbor/produk">
-                  <Button variant="outline">
-                    Lihat di Daftar Produk
-                    <ArrowRight className="size-4" aria-hidden />
-                  </Button>
-                </a>
-              </div>
-            )}
-          </Card>
-        )}
       </div>
     </div>
+    </>
   );
 }

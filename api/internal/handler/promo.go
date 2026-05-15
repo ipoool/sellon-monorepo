@@ -5,12 +5,14 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/sellon/sellon/api/internal/audit"
 	"github.com/sellon/sellon/api/internal/auth"
 	"github.com/sellon/sellon/api/internal/pkg/response"
 	"github.com/sellon/sellon/api/internal/repository"
@@ -19,11 +21,25 @@ import (
 type PromoHandler struct {
 	promos *repository.PromoRepo
 	stores *repository.StoreRepo
+	subs   *repository.SubscriptionRepo
+	plans  *repository.PlanRepo
+	audit  *audit.Logger
 	logger *slog.Logger
 }
 
-func NewPromoHandler(promos *repository.PromoRepo, stores *repository.StoreRepo, logger *slog.Logger) *PromoHandler {
-	return &PromoHandler{promos: promos, stores: stores, logger: logger}
+func NewPromoHandler(
+	promos *repository.PromoRepo,
+	stores *repository.StoreRepo,
+	subs *repository.SubscriptionRepo,
+	plans *repository.PlanRepo,
+	audit *audit.Logger,
+	logger *slog.Logger,
+) *PromoHandler {
+	return &PromoHandler{
+		promos: promos, stores: stores,
+		subs: subs, plans: plans,
+		audit: audit, logger: logger,
+	}
 }
 
 type promoDTO struct {
@@ -68,18 +84,27 @@ func (h *PromoHandler) storeFor(r *http.Request) (*repository.Store, error) {
 	return h.stores.FindByOwnerID(r.Context(), uid)
 }
 
-// GET /api/v1/promos
+// GET /api/v1/promos?limit=&offset=
 func (h *PromoHandler) List(w http.ResponseWriter, r *http.Request) {
 	store, err := h.storeFor(r)
 	if errors.Is(err, repository.ErrStoreNotFound) {
-		response.JSON(w, http.StatusOK, map[string]any{"promos": []promoDTO{}})
+		response.JSON(w, http.StatusOK, map[string]any{
+			"promos": []promoDTO{}, "total": 0,
+		})
 		return
 	}
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	rows, err := h.promos.ListByStore(r.Context(), store.ID)
+	q := r.URL.Query()
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	if limit == 0 {
+		limit = 25
+	}
+	offset, _ := strconv.Atoi(q.Get("offset"))
+
+	rows, total, err := h.promos.ListByStore(r.Context(), store.ID, limit, offset)
 	if err != nil {
 		h.logger.Error("list promos", "err", err)
 		response.Error(w, http.StatusInternalServerError, "internal error")
@@ -89,7 +114,9 @@ func (h *PromoHandler) List(w http.ResponseWriter, r *http.Request) {
 	for _, p := range rows {
 		out = append(out, toPromoDTO(p))
 	}
-	response.JSON(w, http.StatusOK, map[string]any{"promos": out})
+	response.JSON(w, http.StatusOK, map[string]any{
+		"promos": out, "total": total,
+	})
 }
 
 // GET /api/v1/promos/{id}
@@ -193,6 +220,22 @@ func (h *PromoHandler) Create(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusBadRequest, "toko belum dibuat")
 		return
 	}
+
+	// Tier promo-quota check. Bounded probe — fails open on lookup
+	// errors so a transient DB hiccup never accidentally blocks a paying
+	// seller.
+	if sub, err := h.subs.GetOrCreate(r.Context(), store.ID); err == nil {
+		if limit := promoLimitForSub(sub); limit >= 0 {
+			over, err := h.promos.HasAtLeast(r.Context(), store.ID, limit)
+			if err == nil && over {
+				response.Error(w, http.StatusPaymentRequired,
+					"Limit promo tier "+sub.Plan+" ("+strconv.Itoa(limit)+
+						") sudah tercapai. Upgrade untuk lebih banyak kode promo.")
+				return
+			}
+		}
+	}
+
 	var req promoReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.Error(w, http.StatusBadRequest, "invalid body")
@@ -213,6 +256,17 @@ func (h *PromoHandler) Create(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+	h.audit.Log(r.Context(), store.ID, audit.Event{
+		Action:     "promo.created",
+		EntityType: "promo",
+		EntityID:   p.ID.String(),
+		Summary:    "Tambah promo " + p.Code,
+		Metadata: map[string]any{
+			"code":  p.Code,
+			"type":  string(p.Type),
+			"value": p.Value,
+		},
+	})
 	response.JSON(w, http.StatusCreated, map[string]any{"promo": toPromoDTO(*p)})
 }
 
@@ -252,6 +306,17 @@ func (h *PromoHandler) Update(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+	h.audit.Log(r.Context(), store.ID, audit.Event{
+		Action:     "promo.updated",
+		EntityType: "promo",
+		EntityID:   p.ID.String(),
+		Summary:    "Update promo " + p.Code,
+		Metadata: map[string]any{
+			"code":  p.Code,
+			"type":  string(p.Type),
+			"value": p.Value,
+		},
+	})
 	response.JSON(w, http.StatusOK, map[string]any{"promo": toPromoDTO(*p)})
 }
 
@@ -267,6 +332,11 @@ func (h *PromoHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusBadRequest, "id invalid")
 		return
 	}
+	// Capture code for audit summary before delete cascades.
+	preCode := ""
+	if existing, _ := h.promos.FindByID(r.Context(), store.ID, id); existing != nil {
+		preCode = existing.Code
+	}
 	if err := h.promos.Delete(r.Context(), store.ID, id); err != nil {
 		if errors.Is(err, repository.ErrPromoNotFound) {
 			response.Error(w, http.StatusNotFound, "promo tidak ditemukan")
@@ -276,5 +346,16 @@ func (h *PromoHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+	summary := "Hapus promo"
+	if preCode != "" {
+		summary = "Hapus promo " + preCode
+	}
+	h.audit.Log(r.Context(), store.ID, audit.Event{
+		Action:     "promo.deleted",
+		EntityType: "promo",
+		EntityID:   id.String(),
+		Summary:    summary,
+		Metadata:   map[string]any{"code": preCode},
+	})
 	response.JSON(w, http.StatusOK, map[string]any{"ok": true})
 }

@@ -1,31 +1,46 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { showError, showSuccess } from "@/lib/toast";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   CopyPlus,
   Edit2,
+  Eye,
   Trash2,
   Loader2,
   AlertTriangle,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Tooltip } from "@/components/ui/tooltip";
+import { ProductPreviewDialog } from "@/components/dashboard/product-preview-dialog";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
 type Props = {
   productId: string;
   productName: string;
+  storeSlug?: string;
+  // When true the seller's tier-quota for products is exhausted, so any
+  // action that would create a new row (currently: Duplikat) is hidden
+  // behind a disabled state + tooltip. Mirrors the top-level
+  // "Tambah Produk" disable on the same page (BUG-016).
+  quotaFull?: boolean;
 };
 
-export function ProductRowActions({ productId, productName }: Props) {
-  const router = useRouter();
+export function ProductRowActions({
+  productId,
+  productName,
+  storeSlug,
+  quotaFull,
+}: Props) {
+  const { push, refresh } = useRouter();
   const [pendingDelete, setPendingDelete] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
   const [busy, setBusy] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -52,7 +67,6 @@ export function ProductRowActions({ productId, productName }: Props) {
 
   async function onDuplicate() {
     setDuplicating(true);
-    setError(null);
     try {
       const res = await fetch(
         `${apiBase}/api/v1/products/${productId}/duplicate`,
@@ -64,12 +78,12 @@ export function ProductRowActions({ productId, productName }: Props) {
       if (newId) {
         // Land on the edit page of the duplicated product so the seller can
         // tweak before publishing (the copy is saved as inactive).
-        router.push(`/dasbor/produk/${newId}`);
+        push(`/products/${newId}`);
         return;
       }
-      router.refresh();
+      refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal duplikat");
+      showError(err);
     } finally {
       setDuplicating(false);
     }
@@ -77,7 +91,6 @@ export function ProductRowActions({ productId, productName }: Props) {
 
   async function confirmDelete() {
     setBusy(true);
-    setError(null);
     try {
       const res = await fetch(`${apiBase}/api/v1/products/${productId}`, {
         method: "DELETE",
@@ -88,9 +101,9 @@ export function ProductRowActions({ productId, productName }: Props) {
         throw new Error(data.error || `HTTP ${res.status}`);
       }
       setPendingDelete(false);
-      router.refresh();
+      refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal hapus");
+      showError(err);
     } finally {
       setBusy(false);
     }
@@ -99,46 +112,61 @@ export function ProductRowActions({ productId, productName }: Props) {
   return (
     <>
       <div className="inline-flex items-center gap-1">
-        <button
-          type="button"
-          onClick={onDuplicate}
-          disabled={duplicating}
-          title="Duplikat produk"
-          aria-label="Duplikat produk"
-          className="inline-flex size-8 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900 disabled:cursor-wait disabled:opacity-60"
+        <Tooltip label="Preview seperti customer">
+          <button
+            type="button"
+            onClick={() => setShowPreview(true)}
+            aria-label="Preview produk"
+            className="inline-flex size-8 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900"
+          >
+            <Eye className="size-4" aria-hidden />
+          </button>
+        </Tooltip>
+        <Tooltip
+          label={
+            quotaFull
+              ? "Limit produk tercapai — upgrade untuk duplikat"
+              : "Duplikat produk"
+          }
         >
-          {duplicating ? (
-            <Loader2 className="size-4 animate-spin" aria-hidden />
-          ) : (
-            <CopyPlus className="size-4" aria-hidden />
-          )}
-        </button>
-        <Link
-          href={`/dasbor/produk/${productId}`}
-          title="Edit produk"
-          aria-label="Edit produk"
-          className="inline-flex size-8 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900"
-        >
-          <Edit2 className="size-4" aria-hidden />
-        </Link>
-        <button
-          type="button"
-          onClick={() => {
-            setError(null);
-            setPendingDelete(true);
-          }}
-          title="Hapus produk"
-          aria-label="Hapus produk"
-          className="inline-flex size-8 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-danger/10 hover:text-danger"
-        >
-          <Trash2 className="size-4" aria-hidden />
-        </button>
+          <button
+            type="button"
+            onClick={onDuplicate}
+            disabled={duplicating || quotaFull}
+            aria-label="Duplikat produk"
+            className="inline-flex size-8 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-neutral-500"
+          >
+            {duplicating ? (
+              <Loader2 className="size-4 animate-spin" aria-hidden />
+            ) : (
+              <CopyPlus className="size-4" aria-hidden />
+            )}
+          </button>
+        </Tooltip>
+        <Tooltip label="Edit produk">
+          <Link
+            href={`/products/${productId}`}
+            aria-label="Edit produk"
+            className="inline-flex size-8 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900"
+          >
+            <Edit2 className="size-4" aria-hidden />
+          </Link>
+        </Tooltip>
+        <Tooltip label="Hapus produk" align="end">
+          <button
+            type="button"
+            onClick={() => {
+              setPendingDelete(true);
+            }}
+            aria-label="Hapus produk"
+            className="inline-flex size-8 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-danger/10 hover:text-danger"
+          >
+            <Trash2 className="size-4" aria-hidden />
+          </button>
+        </Tooltip>
       </div>
 
-      {error && !pendingDelete && (
-        <p className="mt-1 text-xs font-medium text-danger">{error}</p>
-      )}
-
+      
       {/* Delete confirmation dialog */}
       <dialog
         ref={dialogRef}
@@ -160,10 +188,7 @@ export function ProductRowActions({ productId, productName }: Props) {
               Foto, deskripsi, varian, dan stok akan ikut dihapus. Aksi ini
               tidak bisa di-undo.
             </p>
-            {error && (
-              <p className="mt-2 text-sm font-medium text-danger">{error}</p>
-            )}
-          </div>
+                      </div>
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-neutral-200 bg-neutral-50 px-5 py-3">
           <Button
@@ -187,6 +212,13 @@ export function ProductRowActions({ productId, productName }: Props) {
           </Button>
         </div>
       </dialog>
+
+      <ProductPreviewDialog
+        open={showPreview}
+        productId={productId}
+        storeSlug={storeSlug}
+        onClose={() => setShowPreview(false)}
+      />
     </>
   );
 }

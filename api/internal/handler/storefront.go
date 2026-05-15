@@ -4,34 +4,48 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/sellon/sellon/api/internal/audit"
+	"github.com/sellon/sellon/api/internal/email"
 	"github.com/sellon/sellon/api/internal/events"
+	"github.com/sellon/sellon/api/internal/notify"
 	"github.com/sellon/sellon/api/internal/pkg/response"
 	"github.com/sellon/sellon/api/internal/repository"
 	"github.com/sellon/sellon/api/internal/shipping"
 	"github.com/sellon/sellon/api/internal/shipping/rajaongkir"
+	"github.com/sellon/sellon/api/internal/storage"
 )
 
 type StorefrontHandler struct {
-	stores     *repository.StoreRepo
-	products   *repository.ProductRepo
-	variants   *repository.VariantRepo
-	orders     *repository.OrderRepo
-	banks      *repository.BankAccountRepo
-	categories *repository.CategoryRepo
-	promos     *repository.PromoRepo
-	gateways   *repository.PaymentRepo
-	subs       *repository.SubscriptionRepo
-	broker     *events.Broker
-	rajaongkir *rajaongkir.Client
-	logger     *slog.Logger
+	stores      *repository.StoreRepo
+	products    *repository.ProductRepo
+	variants    *repository.VariantRepo
+	orders      *repository.OrderRepo
+	banks       *repository.BankAccountRepo
+	categories  *repository.CategoryRepo
+	promos      *repository.PromoRepo
+	gateways    *repository.PaymentRepo
+	subs        *repository.SubscriptionRepo
+	plans       *repository.PlanRepo
+	users       *repository.UserRepo
+	waTemplates *repository.WATemplateRepo
+	broker      *events.Broker
+	rajaongkir  *rajaongkir.Client
+	mailer      *email.Mailer
+	twilio      *notify.Twilio
+	storage     *storage.SupabaseClient
+	auditLog    *audit.Logger
+	webOrigin   string
+	logger      *slog.Logger
 }
 
 func NewStorefrontHandler(
@@ -39,14 +53,29 @@ func NewStorefrontHandler(
 	o *repository.OrderRepo, b *repository.BankAccountRepo, c *repository.CategoryRepo,
 	pr *repository.PromoRepo, gw *repository.PaymentRepo,
 	subs *repository.SubscriptionRepo,
+	plans *repository.PlanRepo,
+	users *repository.UserRepo,
+	waTemplates *repository.WATemplateRepo,
 	broker *events.Broker,
 	rk *rajaongkir.Client,
+	mailer *email.Mailer,
+	twilio *notify.Twilio,
+	storageCli *storage.SupabaseClient,
+	auditLog *audit.Logger,
+	webOrigin string,
 	logger *slog.Logger,
 ) *StorefrontHandler {
 	return &StorefrontHandler{
 		stores: s, products: p, variants: v, orders: o, banks: b,
-		categories: c, promos: pr, gateways: gw, subs: subs,
-		broker: broker, rajaongkir: rk, logger: logger,
+		categories:  c, promos: pr, gateways: gw, subs: subs,
+		plans:       plans,
+		users:       users,
+		waTemplates: waTemplates,
+		broker:      broker, rajaongkir: rk,
+		mailer: mailer, twilio: twilio,
+		storage:  storageCli,
+		auditLog: auditLog, webOrigin: webOrigin,
+		logger: logger,
 	}
 }
 
@@ -117,9 +146,16 @@ type publicStoreDTO struct {
 	OpenHours        json.RawMessage `json:"open_hours"`
 	IsOpen           bool            `json:"is_open"`
 	ThemeHue         int             `json:"theme_hue"`
+	ProductLayout    string          `json:"product_layout"`
 	ShowHoursPublic  bool            `json:"show_hours_public"`
 	ShowSocialPublic bool            `json:"show_social_public"`
 	FooterText       string          `json:"footer_text"`
+	// AcceptingOrders is the buyer-facing "can I order?" gate. False when
+	// the seller has the store toggled closed OR has hit the monthly order
+	// quota for their tier. Reason carries a stable token the UI keys on:
+	// "store_closed" | "order_limit" | "" (when accepting).
+	AcceptingOrders       bool   `json:"accepting_orders"`
+	AcceptingOrdersReason string `json:"accepting_orders_reason"`
 }
 
 type publicProductDTO struct {
@@ -133,6 +169,7 @@ type publicProductDTO struct {
 	PhotoURLs   []string `json:"photo_urls"`
 	IsFeatured  bool     `json:"is_featured"`
 	HasVariants bool     `json:"has_variants"`
+	ProductType string   `json:"product_type"` // "physical" | "digital"
 }
 
 type publicCategoryDTO struct {
@@ -159,9 +196,175 @@ func toPublicStore(s *repository.Store) publicStoreDTO {
 		WhatsAppNumber: s.WhatsAppNumber, Instagram: s.Instagram, TikTok: s.TikTok,
 		OpenHours: openHours, IsOpen: s.IsOpen,
 		ThemeHue:         s.ThemeHue,
+		ProductLayout:    s.ProductLayout,
 		ShowHoursPublic:  s.ShowHoursPublic,
 		ShowSocialPublic: s.ShowSocialPublic,
 		FooterText:       s.FooterText,
+		// AcceptingOrders/Reason default to "open"; callers that have a
+		// request context override these with the real check.
+		AcceptingOrders:       s.IsOpen,
+		AcceptingOrdersReason: "",
+	}
+}
+
+// acceptingOrdersStatus mirrors the gate inside CreateOrder: the seller's
+// manual is_open toggle, plus the monthly order quota for their tier. Reads
+// fail open so a transient subscription/count error never accidentally
+// blocks a buyer who could have placed an order.
+func (h *StorefrontHandler) acceptingOrdersStatus(
+	ctx context.Context, store *repository.Store,
+) (bool, string) {
+	// store.IsOpen tidak lagi memblok ordering. Banner di UI yang
+	// menginformasikan ke pembeli bahwa pesanan akan diproses saat
+	// toko buka kembali — backend tetap accept agar pembeli tidak
+	// kehilangan momentum.
+	sub, err := h.subs.GetOrCreate(ctx, store.ID)
+	if err != nil {
+		return true, ""
+	}
+	limit := orderLimitForSub(sub)
+	if limit <= 0 {
+		return true, ""
+	}
+	over, err := h.orders.HasOrdersThisMonthAtLeast(ctx, store.ID, limit)
+	if err != nil {
+		return true, ""
+	}
+	if over {
+		return false, "order_limit"
+	}
+	return true, ""
+}
+
+// newOrderAlertTemplateKey is the slot in `whatsapp_templates` that
+// holds the per-store custom body for the seller-facing new-order
+// alert. Missing or empty body → defaultNewOrderAlertTemplate kicks in.
+const newOrderAlertTemplateKey = "new_order_alert"
+
+const defaultNewOrderAlertTemplate = "" +
+	"🛒 *Pesanan baru!*\n" +
+	"\n" +
+	"No: *{{order_number}}*\n" +
+	"Dari: {{customer_name}} ({{customer_whatsapp}})\n" +
+	"Total: *Rp {{total}}*\n" +
+	"Metode bayar: {{payment_method}}\n" +
+	"\n" +
+	"Lihat detail: {{order_link}}"
+
+// sendNewOrderAlert fires off the seller-facing WA alert in a goroutine.
+// Bails silently when:
+//   - the platform Twilio creds aren't configured (dev / staging), or
+//   - the seller is on the free tier (gated feature — see below), or
+//   - the store didn't set a notification number.
+//
+// Free-tier gate: outbound WA notifications are a paid-tier benefit
+// because Twilio bills the platform ~Rp 400/pesan. Frontend hides the
+// switch for free sellers, but this server-side check is the actual
+// guard — a free seller cannot bypass by editing the store row
+// directly. Any failure logs at WARN — order creation always succeeds
+// regardless.
+func (h *StorefrontHandler) sendNewOrderAlert(ctx context.Context, store *repository.Store, order *repository.Order) {
+	if h.twilio == nil || !h.twilio.Configured() {
+		return
+	}
+	to := strings.TrimSpace(store.NotificationWhatsAppNumber)
+	if to == "" {
+		return
+	}
+	// Plan gate: only Pro and Bisnis get outbound WA alerts.
+	sub, err := h.subs.GetOrCreate(ctx, store.ID)
+	if err != nil || sub == nil || (sub.Plan != "pro" && sub.Plan != "bisnis") {
+		return
+	}
+
+	// Pick up the seller's custom template if they've set one, else use
+	// the platform default. Template lookup must not block the response
+	// — we read inline because the read is cheap (single indexed row)
+	// and we already have the request context.
+	body := defaultNewOrderAlertTemplate
+	if h.waTemplates != nil {
+		if tmpls, err := h.waTemplates.ListByStore(ctx, store.ID); err == nil {
+			if custom, ok := tmpls[newOrderAlertTemplateKey]; ok && strings.TrimSpace(custom) != "" {
+				body = custom
+			}
+		}
+	}
+
+	orderLink := strings.TrimRight(h.webOrigin, "/") + "/orders/" + order.ID.String()
+	rendered := renderOrderAlert(body, store, order, orderLink)
+
+	h.twilio.FireAndForget(to, rendered)
+}
+
+// renderOrderAlert substitutes the supported template variables into
+// `body`. Keeping this as a plain string-replace (not text/template)
+// because the variable set is small + fixed and sellers paste these
+// into a Pengaturan form — `{{` is far less likely to collide with
+// Indonesian copy than Go template syntax.
+func renderOrderAlert(body string, store *repository.Store, order *repository.Order, orderLink string) string {
+	replacements := []string{
+		"{{order_number}}", order.OrderNumber,
+		"{{customer_name}}", order.CustomerName,
+		"{{customer_whatsapp}}", order.CustomerWhatsApp,
+		"{{customer_email}}", order.CustomerEmail,
+		"{{customer_city}}", order.CustomerCity,
+		"{{total}}", formatRupiahPlain(order.TotalCents),
+		"{{subtotal}}", formatRupiahPlain(order.SubtotalCents),
+		"{{shipping}}", formatRupiahPlain(order.ShippingCents),
+		"{{payment_method}}", paymentMethodLabel(order.PaymentMethod),
+		"{{store_name}}", store.Name,
+		"{{order_link}}", orderLink,
+	}
+	return strings.NewReplacer(replacements...).Replace(body)
+}
+
+// formatRupiahPlain renders cents as "1.234.567" (no "Rp" prefix, no
+// decimals). Keeps templates flexible — the template body controls
+// whether "Rp " appears before the number.
+func formatRupiahPlain(cents int64) string {
+	rupiah := cents / 100
+	if rupiah < 0 {
+		return "-" + formatRupiahPlain(-cents)
+	}
+	s := strconv.FormatInt(rupiah, 10)
+	// Insert thousands separators (Indonesian convention = dot).
+	n := len(s)
+	if n <= 3 {
+		return s
+	}
+	out := make([]byte, 0, n+(n-1)/3)
+	first := n % 3
+	if first > 0 {
+		out = append(out, s[:first]...)
+		if n > first {
+			out = append(out, '.')
+		}
+	}
+	for i := first; i < n; i += 3 {
+		out = append(out, s[i:i+3]...)
+		if i+3 < n {
+			out = append(out, '.')
+		}
+	}
+	return string(out)
+}
+
+// paymentMethodLabel maps internal codes to human Indonesian for the
+// WA template. Unknown codes pass through unchanged.
+func paymentMethodLabel(code string) string {
+	switch code {
+	case "midtrans":
+		return "Midtrans"
+	case "manual_transfer", "bank_transfer":
+		return "Transfer manual"
+	case "qris":
+		return "QRIS"
+	case "cod":
+		return "Bayar di tempat (COD)"
+	case "":
+		return "Belum dipilih"
+	default:
+		return code
 	}
 }
 
@@ -170,11 +373,16 @@ func toPublicProduct(p *repository.Product) publicProductDTO {
 	if p.CategoryID != nil {
 		categoryID = p.CategoryID.String()
 	}
+	productType := p.ProductType
+	if productType == "" {
+		productType = "physical"
+	}
 	return publicProductDTO{
 		ID: p.ID.String(), CategoryID: categoryID,
 		Name: p.Name, Slug: p.Slug, Description: p.Description,
 		PriceCents: p.PriceCents, Stock: p.Stock, PhotoURLs: p.PhotoURLs,
 		IsFeatured: p.IsFeatured, HasVariants: p.HasVariants,
+		ProductType: productType,
 	}
 }
 
@@ -209,8 +417,12 @@ func (h *StorefrontHandler) GetStore(w http.ResponseWriter, r *http.Request) {
 		catsOut = append(catsOut, publicCategoryDTO{ID: c.ID.String(), Name: c.Name})
 	}
 
+	storeDTO := toPublicStore(store)
+	storeDTO.AcceptingOrders, storeDTO.AcceptingOrdersReason =
+		h.acceptingOrdersStatus(r.Context(), store)
+
 	response.JSON(w, http.StatusOK, map[string]any{
-		"store":      toPublicStore(store),
+		"store":      storeDTO,
 		"products":   out,
 		"categories": catsOut,
 		"payment":    h.buildPaymentDTO(r.Context(), store.ID),
@@ -255,8 +467,12 @@ func (h *StorefrontHandler) GetProduct(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	storeDTO := toPublicStore(store)
+	storeDTO.AcceptingOrders, storeDTO.AcceptingOrdersReason =
+		h.acceptingOrdersStatus(r.Context(), store)
+
 	response.JSON(w, http.StatusOK, map[string]any{
-		"store":    toPublicStore(store),
+		"store":    storeDTO,
 		"product":  toPublicProduct(p),
 		"variants": vOut,
 		"payment":  h.buildPaymentDTO(r.Context(), store.ID),
@@ -273,6 +489,7 @@ type orderItemReq struct {
 type createOrderReq struct {
 	CustomerName    string         `json:"customer_name"`
 	CustomerWA      string         `json:"customer_whatsapp"`
+	CustomerEmail   string         `json:"customer_email"`
 	CustomerAddress string         `json:"customer_address"`
 	CustomerCity    string         `json:"customer_city"`
 	Courier         string         `json:"courier"`
@@ -295,19 +512,19 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 		response.Error(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	if !store.IsOpen {
-		response.Error(w, http.StatusBadRequest, "toko sedang tutup")
-		return
-	}
+	// Note: store.IsOpen TIDAK lagi block order creation. Pembeli tetap
+	// boleh order saat toko tutup — pesanan masuk antrian dan diproses
+	// seller setelah buka. UI menampilkan banner informatif sebagai
+	// pengganti hard-block. Quota check di bawah tetap berlaku.
 
 	// Tier order-quota: free=50/month, pro/bisnis=unlimited. Fail-open if
 	// the subscription read errors so a transient DB hiccup doesn't block
 	// buyer checkout.
 	if sub, err := h.subs.GetOrCreate(r.Context(), store.ID); err == nil {
-		if limit := orderLimitForPlan(sub.Plan); limit > 0 {
-			if used, err := h.orders.CountThisMonth(r.Context(), store.ID); err == nil && used >= limit {
+		if limit := orderLimitForSub(sub); limit > 0 {
+			if over, err := h.orders.HasOrdersThisMonthAtLeast(r.Context(), store.ID, limit); err == nil && over {
 				response.Error(w, http.StatusServiceUnavailable,
-					"toko sedang tidak menerima pesanan baru (limit bulanan tercapai). Coba lagi bulan depan.")
+					"Penjual sementara tidak menerima pesanan baru. Silakan hubungi langsung admin toko untuk pemesanan.")
 				return
 			}
 		}
@@ -381,7 +598,11 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 			stock = variant.Stock
 		}
 
-		if stock < it.Quantity {
+		// Digital products have no real inventory — bytes don't run out.
+		// Skipping the check so a seller who forgets to set stock on an
+		// ebook/voucher product doesn't end up with a silently-broken
+		// store (BUG-020).
+		if p.ProductType != "digital" && stock < it.Quantity {
 			response.Error(w, http.StatusBadRequest,
 				"stok "+productName+" tidak cukup")
 			return
@@ -393,6 +614,7 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 			VariantName: variantName,
 			UnitCents:   unitCents,
 			Quantity:    it.Quantity,
+			ProductType: p.ProductType,
 		})
 	}
 
@@ -433,10 +655,34 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 		promoID = &pid
 	}
 
+	// Cart-level digital detection. If every item is digital, we know
+	// to skip address / shipping requirements and trigger fulfillment
+	// path on payment-paid. Mixed carts (1 digital + 1 physical) are
+	// treated as physical for shipping purposes — seller still ships
+	// the physical item; the digital one gets its own download link.
+	allDigital := len(items) > 0
+	for _, it := range items {
+		if it.ProductType != "digital" {
+			allDigital = false
+			break
+		}
+	}
+	if allDigital {
+		// Sanity-check: digital orders should not be billed shipping.
+		shippingCents = 0
+	}
+
+	if allDigital && strings.TrimSpace(req.CustomerEmail) == "" {
+		response.Error(w, http.StatusBadRequest,
+			"email pembeli wajib diisi untuk produk digital — link download dikirim ke sini")
+		return
+	}
+
 	order, err := h.orders.Create(r.Context(), repository.CreateOrderInput{
 		StoreID:         store.ID,
 		CustomerName:    req.CustomerName,
 		CustomerWA:      req.CustomerWA,
+		CustomerEmail:   strings.TrimSpace(req.CustomerEmail),
 		CustomerAddress: req.CustomerAddress,
 		CustomerCity:    req.CustomerCity,
 		Courier:         req.Courier,
@@ -485,11 +731,128 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 		})
 	}
 
+	// Outbound WhatsApp alert to the seller's notification number, if
+	// they've configured one + Twilio is wired on the platform. Runs in
+	// a goroutine — never block the buyer's checkout on Twilio.
+	h.sendNewOrderAlert(r.Context(), store, order)
+
+	// Audit: log every buyer-side order creation. Buyer is anonymous
+	// (no auth), so the audit Logger records empty actor — UI surfaces
+	// it as "Pelanggan" / "Sistem".
+	h.auditLog.Log(r.Context(), store.ID, audit.Event{
+		Action:     "order.created",
+		EntityType: "order",
+		EntityID:   order.ID.String(),
+		Summary:    "Pesanan baru #" + order.OrderNumber + " dari " + order.CustomerName,
+		Metadata: map[string]any{
+			"order_number":   order.OrderNumber,
+			"customer_name":  order.CustomerName,
+			"customer_wa":    order.CustomerWhatsApp,
+			"total_cents":    order.TotalCents,
+			"payment_method": order.PaymentMethod,
+			"channel":        "storefront",
+		},
+	})
+
+	// Email the seller. Best-effort — already runs in a goroutine
+	// inside the mailer. Built from a fresh background context so a
+	// disconnected buyer doesn't cancel the lookup.
+	go h.emailNewOrderToSeller(store, order, items)
+
 	response.JSON(w, http.StatusCreated, map[string]any{
 		"order_id":     order.ID.String(),
 		"order_number": order.OrderNumber,
 		"total_cents":  order.TotalCents,
 	})
+}
+
+// emailNewOrderToSeller looks up the store owner's email and dispatches
+// the "new order" notification. Runs detached from the request to keep
+// the buyer's checkout fast and resilient.
+func (h *StorefrontHandler) emailNewOrderToSeller(
+	store *repository.Store,
+	order *repository.Order,
+	items []repository.OrderItemInput,
+) {
+	if !h.mailer.Configured() || h.users == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	owner, err := h.users.FindByID(ctx, store.OwnerID)
+	if err != nil || owner == nil || owner.Email == "" {
+		return
+	}
+
+	// One-line-per-item summary: "2× Kaos M (Hitam) — Rp 200.000".
+	var sb strings.Builder
+	for _, it := range items {
+		name := it.ProductName
+		if it.VariantName != "" {
+			name += " (" + it.VariantName + ")"
+		}
+		fmtLine(&sb, it.Quantity, name, it.UnitCents*int64(it.Quantity))
+	}
+
+	dashURL := strings.TrimRight(h.webOrigin, "/") + "/dashboard/orders"
+
+	subject, text, htmlBody := email.RenderNewOrder(email.NewOrderData{
+		StoreName:         store.Name,
+		OrderNumber:       order.OrderNumber,
+		CustomerName:      order.CustomerName,
+		CustomerWA:        order.CustomerWhatsApp,
+		TotalCents:        order.TotalCents,
+		ItemSummary:       sb.String(),
+		PaymentMethod:     order.PaymentMethod,
+		OrderDashboardURL: dashURL,
+	})
+	h.mailer.Send(email.Message{
+		To:       owner.Email,
+		ToName:   owner.Name,
+		Subject:  subject,
+		Text:     text,
+		HTML:     htmlBody,
+		Category: "order_created",
+	})
+}
+
+func fmtLine(sb *strings.Builder, qty int, name string, total int64) {
+	// Compact: "2× Kaos M — Rp 200.000\n"
+	rupiahStr := email.RenderRupiah(total)
+	if sb.Len() > 0 {
+		sb.WriteByte('\n')
+	}
+	if qty <= 0 {
+		qty = 1
+	}
+	sb.WriteString(itoa(qty))
+	sb.WriteString("× ")
+	sb.WriteString(name)
+	sb.WriteString(" — ")
+	sb.WriteString(rupiahStr)
+}
+
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	neg := n < 0
+	if neg {
+		n = -n
+	}
+	var buf [12]byte
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	if neg {
+		i--
+		buf[i] = '-'
+	}
+	return string(buf[i:])
 }
 
 // POST /api/v1/storefront/{slug}/promos/validate — buyer-entered code check.
@@ -594,25 +957,27 @@ func (h *StorefrontHandler) GetOrder(w http.ResponseWriter, r *http.Request) {
 			"whatsapp_number": store.WhatsAppNumber,
 		},
 		"order": map[string]any{
-			"id":               order.ID.String(),
-			"order_number":     order.OrderNumber,
-			"status":           order.Status,
-			"payment_status":   order.PaymentStatus,
-			"payment_method":   order.PaymentMethod,
-			"subtotal_cents":   order.SubtotalCents,
-			"shipping_cents":   order.ShippingCents,
-			"discount_cents":   order.DiscountCents,
-			"promo_code":       order.PromoCode,
-			"total_cents":      order.TotalCents,
-			"courier":          order.Courier,
-			"tracking_number":  order.TrackingNumber,
-			"customer_name":    order.CustomerName,
-			"customer_whatsapp": order.CustomerWhatsApp,
-			"customer_address": order.CustomerAddress,
-			"customer_city":    order.CustomerCity,
-			"payment_url":      order.PaymentURL,
-			"created_at":       order.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-			"items":            itemsOut,
+			"id":                 order.ID.String(),
+			"order_number":       order.OrderNumber,
+			"status":             order.Status,
+			"payment_status":     order.PaymentStatus,
+			"payment_method":     order.PaymentMethod,
+			"subtotal_cents":     order.SubtotalCents,
+			"shipping_cents":     order.ShippingCents,
+			"discount_cents":     order.DiscountCents,
+			"promo_code":         order.PromoCode,
+			"total_cents":        order.TotalCents,
+			"courier":            order.Courier,
+			"tracking_number":    order.TrackingNumber,
+			"customer_name":      order.CustomerName,
+			"customer_whatsapp":  order.CustomerWhatsApp,
+			"customer_address":   order.CustomerAddress,
+			"customer_city":      order.CustomerCity,
+			"payment_url":        order.PaymentURL,
+			"payment_proof_url":  order.PaymentProofURL,
+			"payment_proof_note": order.PaymentProofNote,
+			"created_at":         order.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			"items":              itemsOut,
 		},
 		"bank_accounts": banksOut,
 	})
@@ -766,6 +1131,131 @@ func (h *StorefrontHandler) ShippingQuote(w http.ResponseWriter, r *http.Request
 		"seller_city":                   originCity,
 		"free_shipping":                 freeShipping,
 		"free_shipping_threshold_cents": store.FreeShippingThresholdCents,
+	})
+}
+
+// POST /api/v1/storefront/{slug}/orders/{number}/payment-proof
+//
+// Buyer upload bukti transfer (image) + catatan opsional. Endpoint
+// public — auth via {slug}+{number}. Setelah upload, payment_status
+// otomatis move ke "pending" supaya seller dapat sinyal verifikasi
+// di dashboard.
+//
+// Multipart: field "file" (image jpg/png/webp) + "note" (text opsional).
+// File disimpan di Supabase: stores/{store_id}/payment_proofs/{stamp}.ext
+func (h *StorefrontHandler) UploadPaymentProof(w http.ResponseWriter, r *http.Request) {
+	slug := chi.URLParam(r, "slug")
+	orderNum := chi.URLParam(r, "number")
+
+	store, err := h.stores.FindBySlug(r.Context(), slug)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "toko tidak ditemukan")
+		return
+	}
+	order, err := h.orders.FindByOrderNumber(r.Context(), store.ID, orderNum)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "pesanan tidak ditemukan")
+		return
+	}
+	if order.PaymentStatus == "paid" {
+		response.Error(w, http.StatusBadRequest, "pesanan sudah lunas — tidak perlu kirim bukti lagi")
+		return
+	}
+	// One-shot guard: kalau bukti sudah pernah di-upload sebelumnya,
+	// tolak upload baru. Mencegah pihak jahil yang tahu URL endpoint
+	// (slug + order_number publik) spam-overwrite bukti yang sah.
+	// Kalau ternyata pembeli mau ganti bukti (mis. salah upload),
+	// minta lewat WhatsApp ke penjual — penjual bisa reset proof
+	// dari dashboard di future iteration.
+	if order.PaymentProofURL != "" {
+		response.Error(w, http.StatusConflict,
+			"Bukti transfer sudah pernah dikirim untuk pesanan ini. Kalau ada masalah, hubungi penjual lewat WhatsApp.")
+		return
+	}
+	if h.storage == nil || !h.storage.IsConfigured() {
+		response.Error(w, http.StatusServiceUnavailable, "upload belum dikonfigurasi di server")
+		return
+	}
+
+	// 10 MB cap — cukup untuk screenshot transfer dari HP modern.
+	r.Body = http.MaxBytesReader(w, r.Body, 10*1024*1024)
+	if err := r.ParseMultipartForm(10 * 1024 * 1024); err != nil {
+		response.Error(w, http.StatusBadRequest, "file terlalu besar (maks 10 MB)")
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "field 'file' wajib")
+		return
+	}
+	defer file.Close()
+
+	contentType := header.Header.Get("Content-Type")
+	switch contentType {
+	case "image/jpeg", "image/png", "image/webp":
+		// ok
+	default:
+		response.Error(w, http.StatusBadRequest, "format harus JPG / PNG / WebP")
+		return
+	}
+
+	body, err := io.ReadAll(file)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "gagal baca file")
+		return
+	}
+
+	ext := "jpg"
+	switch contentType {
+	case "image/png":
+		ext = "png"
+	case "image/webp":
+		ext = "webp"
+	}
+	key, err := storage.RandomKey(store.ID.String()+"/payment_proofs/"+order.ID.String(), ext)
+	if err != nil {
+		h.logger.Error("random key", "err", err)
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	res, err := h.storage.Upload(r.Context(), key, contentType, body)
+	if err != nil {
+		h.logger.Error("supabase upload payment proof", "err", err, "order", order.ID)
+		response.Error(w, http.StatusBadGateway, "gagal upload bukti")
+		return
+	}
+
+	note := strings.TrimSpace(r.FormValue("note"))
+	if err := h.orders.SetPaymentProof(r.Context(), order.ID, res.PublicURL, note); err != nil {
+		h.logger.Error("set payment proof", "err", err)
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	// Auto-mark sebagai pending kalau masih unpaid agar seller punya
+	// trigger di dashboard untuk verifikasi.
+	if order.PaymentStatus == "unpaid" {
+		_ = h.orders.SetPaymentStatus(r.Context(), store.ID, order.ID, "pending", order.PaymentMethod)
+	}
+
+	// Audit + notify seller via broker (SSE) supaya badge order baru
+	// nyala kalau seller lagi buka dashboard.
+	h.auditLog.Log(r.Context(), store.ID, audit.Event{
+		Action:     "order.payment_proof_uploaded",
+		EntityType: "order",
+		EntityID:   order.ID.String(),
+		Summary:    "Pembeli kirim bukti transfer untuk #" + order.OrderNumber,
+		Metadata: map[string]any{
+			"order_number": order.OrderNumber,
+			"proof_url":    res.PublicURL,
+			"has_note":     note != "",
+		},
+	})
+
+	response.JSON(w, http.StatusOK, map[string]any{
+		"ok":         true,
+		"proof_url":  res.PublicURL,
+		"proof_note": note,
 	})
 }
 

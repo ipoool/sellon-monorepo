@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/sellon/sellon/api/internal/audit"
 	"github.com/sellon/sellon/api/internal/auth"
 	"github.com/sellon/sellon/api/internal/pkg/response"
 	"github.com/sellon/sellon/api/internal/repository"
@@ -18,11 +19,12 @@ import (
 type CategoryHandler struct {
 	categories *repository.CategoryRepo
 	stores     *repository.StoreRepo
+	audit      *audit.Logger
 	logger     *slog.Logger
 }
 
-func NewCategoryHandler(c *repository.CategoryRepo, s *repository.StoreRepo, logger *slog.Logger) *CategoryHandler {
-	return &CategoryHandler{categories: c, stores: s, logger: logger}
+func NewCategoryHandler(c *repository.CategoryRepo, s *repository.StoreRepo, audit *audit.Logger, logger *slog.Logger) *CategoryHandler {
+	return &CategoryHandler{categories: c, stores: s, audit: audit, logger: logger}
 }
 
 type categoryDTO struct {
@@ -82,6 +84,13 @@ func (h *CategoryHandler) Create(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, "gagal simpan")
 		return
 	}
+	h.audit.Log(r.Context(), store.ID, audit.Event{
+		Action:     "category.created",
+		EntityType: "category",
+		EntityID:   c.ID.String(),
+		Summary:    "Tambah kategori " + c.Name,
+		Metadata:   map[string]any{"name": c.Name},
+	})
 	response.JSON(w, http.StatusCreated, map[string]any{
 		"category": categoryDTO{ID: c.ID.String(), Name: c.Name, SortOrder: c.SortOrder},
 	})
@@ -117,6 +126,13 @@ func (h *CategoryHandler) Update(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, "gagal update")
 		return
 	}
+	h.audit.Log(r.Context(), store.ID, audit.Event{
+		Action:     "category.updated",
+		EntityType: "category",
+		EntityID:   id.String(),
+		Summary:    "Rename kategori jadi " + name,
+		Metadata:   map[string]any{"new_name": name},
+	})
 	response.JSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -140,6 +156,12 @@ func (h *CategoryHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, "gagal hapus")
 		return
 	}
+	h.audit.Log(r.Context(), store.ID, audit.Event{
+		Action:     "category.deleted",
+		EntityType: "category",
+		EntityID:   id.String(),
+		Summary:    "Hapus kategori",
+	})
 	response.JSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 

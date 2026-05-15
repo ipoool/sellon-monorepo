@@ -120,16 +120,16 @@ function StarRating({ value }: { value: number }) {
 export function Testimonials() {
   const trackRef = useRef<HTMLUListElement>(null);
   const [index, setIndex] = useState(0);
-  const [paused, setPaused] = useState(false);
+  const pausedRef = useRef(false);
 
   // Auto-advance — pauses on hover/focus so users can read at their pace.
   useEffect(() => {
-    if (paused) return;
     const t = setInterval(() => {
+      if (pausedRef.current) return;
       setIndex((i) => (i + 1) % testimonials.length);
     }, 5500);
     return () => clearInterval(t);
-  }, [paused]);
+  }, []);
 
   // Whenever index changes, scroll the corresponding card into view. Native
   // scroll-snap on the parent keeps the card pinned to the start, so this
@@ -162,17 +162,25 @@ export function Testimonials() {
             <span className="text-gradient-brand">SellOn</span>
           </h2>
           <p className="mt-4 text-lg text-neutral-600">
-            Ratusan seller, dari kuliner sampai craft, sudah jualan tanpa
-            potongan transaksi.
+            Dari kuliner rumahan, fashion lokal, sampai kerajinan tangan -
+            mereka jualan tanpa potongan transaksi.
           </p>
         </div>
 
         <div
           className="relative"
-          onMouseEnter={() => setPaused(true)}
-          onMouseLeave={() => setPaused(false)}
-          onFocus={() => setPaused(true)}
-          onBlur={() => setPaused(false)}
+          onMouseEnter={() => {
+            pausedRef.current = true;
+          }}
+          onMouseLeave={() => {
+            pausedRef.current = false;
+          }}
+          onFocus={() => {
+            pausedRef.current = true;
+          }}
+          onBlur={() => {
+            pausedRef.current = false;
+          }}
         >
           <ul
             ref={trackRef}

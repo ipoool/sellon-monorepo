@@ -22,6 +22,7 @@ type Store struct {
 	Category                   string
 	City                       string
 	WhatsAppNumber             string
+	NotificationWhatsAppNumber string
 	Instagram                  string
 	TikTok                     string
 	OpenHours                  []byte // raw JSONB
@@ -32,6 +33,7 @@ type Store struct {
 	EnabledCouriers            []string
 	FreeShippingThresholdCents int64
 	ThemeHue                   int
+	ProductLayout              string // grid|list|showcase
 	ShowHoursPublic            bool
 	ShowSocialPublic           bool
 	FooterText                 string
@@ -50,30 +52,31 @@ func NewStoreRepo(pool *pgxpool.Pool) *StoreRepo {
 var ErrStoreNotFound = errors.New("store not found")
 
 const storeColumns = `id, owner_id, slug, name, description, logo_url, banner_url, tagline,
-	category, city, whatsapp_number, instagram, tiktok, open_hours, is_open,
+	category, city, whatsapp_number, notification_whatsapp_number, instagram, tiktok, open_hours, is_open,
 	shipping_origin_city, shipping_origin_city_id, shipping_origin_city_name,
 	enabled_couriers, free_shipping_threshold_cents,
-	theme_hue, show_hours_public, show_social_public, footer_text,
+	theme_hue, product_layout, show_hours_public, show_social_public, footer_text,
 	created_at, updated_at`
 
 // Same column list but qualified with the `s.` alias, used in joins.
 const qualifiedStoreColumns = `s.id, s.owner_id, s.slug, s.name, s.description,
 	s.logo_url, s.banner_url, s.tagline, s.category, s.city,
-	s.whatsapp_number, s.instagram, s.tiktok, s.open_hours, s.is_open,
+	s.whatsapp_number, s.notification_whatsapp_number, s.instagram, s.tiktok, s.open_hours, s.is_open,
 	s.shipping_origin_city, s.shipping_origin_city_id, s.shipping_origin_city_name,
 	s.enabled_couriers, s.free_shipping_threshold_cents,
-	s.theme_hue, s.show_hours_public, s.show_social_public, s.footer_text,
+	s.theme_hue, s.product_layout, s.show_hours_public, s.show_social_public, s.footer_text,
 	s.created_at, s.updated_at`
 
 func scanStore(row pgx.Row, s *Store) error {
 	return row.Scan(
 		&s.ID, &s.OwnerID, &s.Slug, &s.Name, &s.Description, &s.LogoURL,
 		&s.BannerURL, &s.Tagline,
-		&s.Category, &s.City, &s.WhatsAppNumber, &s.Instagram, &s.TikTok,
+		&s.Category, &s.City, &s.WhatsAppNumber, &s.NotificationWhatsAppNumber,
+		&s.Instagram, &s.TikTok,
 		&s.OpenHours, &s.IsOpen,
 		&s.ShippingOriginCity, &s.ShippingOriginCityID, &s.ShippingOriginCityName,
 		&s.EnabledCouriers, &s.FreeShippingThresholdCents,
-		&s.ThemeHue, &s.ShowHoursPublic, &s.ShowSocialPublic, &s.FooterText,
+		&s.ThemeHue, &s.ProductLayout, &s.ShowHoursPublic, &s.ShowSocialPublic, &s.FooterText,
 		&s.CreatedAt, &s.UpdatedAt,
 	)
 }
@@ -82,6 +85,20 @@ func (r *StoreRepo) FindBySlug(ctx context.Context, slug string) (*Store, error)
 	q := `SELECT ` + storeColumns + ` FROM stores WHERE slug = $1`
 	var s Store
 	if err := scanStore(r.pool.QueryRow(ctx, q, slug), &s); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrStoreNotFound
+		}
+		return nil, err
+	}
+	return &s, nil
+}
+
+// FindByID looks up a store by its UUID. Used by background jobs and
+// webhooks where we have the store_id but not the slug.
+func (r *StoreRepo) FindByID(ctx context.Context, id uuid.UUID) (*Store, error) {
+	q := `SELECT ` + storeColumns + ` FROM stores WHERE id = $1`
+	var s Store
+	if err := scanStore(r.pool.QueryRow(ctx, q, id), &s); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrStoreNotFound
 		}
@@ -126,30 +143,57 @@ type CreateStoreInput struct {
 }
 
 func (r *StoreRepo) Create(ctx context.Context, in CreateStoreInput) (*Store, error) {
-	q := `
+	// Wajib dalam satu transaksi: kalau owner-membership gagal di-insert,
+	// store yang baru di-create harus ikut rollback. Tanpa membership,
+	// FindByOwnerID/Member balik null → user kena loop /setup → /dashboard
+	// → /setup karena dashboard layout lihat "store tidak ada".
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	var s Store
+	if err := scanStore(tx.QueryRow(ctx, `
 		INSERT INTO stores (owner_id, slug, name, category, city)
 		VALUES ($1, $2, $3, $4, $5)
-		RETURNING ` + storeColumns
-	var s Store
-	if err := scanStore(r.pool.QueryRow(ctx, q, in.OwnerID, in.Slug, in.Name, in.Category, in.City), &s); err != nil {
+		RETURNING `+storeColumns,
+		in.OwnerID, in.Slug, in.Name, in.Category, in.City,
+	), &s); err != nil {
+		return nil, err
+	}
+
+	// Insert owner membership. ON CONFLICT DO NOTHING jaga-jaga kalau
+	// ada race condition (mis. paralel double-submit) — store_members
+	// punya PK (store_id, user_id).
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO store_members (store_id, user_id, role)
+		VALUES ($1, $2, 'owner')
+		ON CONFLICT (store_id, user_id) DO NOTHING
+	`, s.ID, in.OwnerID); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
 	return &s, nil
 }
 
 type UpdateStoreInput struct {
-	Name           string
-	Description    string
-	LogoURL        string
-	BannerURL      string
-	Tagline        string
-	Category       string
-	City           string
-	WhatsAppNumber string
-	Instagram      string
-	TikTok         string
-	OpenHoursJSON  []byte // raw JSON; nil = don't update
-	IsOpen         bool
+	Name                       string
+	Description                string
+	LogoURL                    string
+	BannerURL                  string
+	Tagline                    string
+	Category                   string
+	City                       string
+	WhatsAppNumber             string
+	NotificationWhatsAppNumber string
+	Instagram                  string
+	TikTok                     string
+	OpenHoursJSON              []byte // raw JSON; nil = don't update
+	IsOpen                     bool
 }
 
 type UpdateStorefrontInput struct {
@@ -157,30 +201,39 @@ type UpdateStorefrontInput struct {
 	BannerURL        string
 	Tagline          string
 	ThemeHue         int
+	ProductLayout    string
 	ShowHoursPublic  bool
 	ShowSocialPublic bool
 	FooterText       string
 }
 
 // UpdateStorefront is a narrow updater for the Pengaturan → Storefront page
-// (logo + banner + tagline + theme hue + visibility toggles + footer).
+// (logo + banner + tagline + theme hue + product layout + visibility + footer).
 func (r *StoreRepo) UpdateStorefront(ctx context.Context, id uuid.UUID, in UpdateStorefrontInput) (*Store, error) {
 	hue := in.ThemeHue
 	if hue < 0 || hue > 360 {
 		hue = 145
 	}
+	layout := in.ProductLayout
+	switch layout {
+	case "grid", "list", "showcase", "compact", "magazine", "feed":
+		// ok
+	default:
+		layout = "grid"
+	}
 	q := `
 		UPDATE stores
 		SET logo_url = $2, banner_url = $3, tagline = $4,
-		    theme_hue = $5, show_hours_public = $6, show_social_public = $7,
-		    footer_text = $8,
+		    theme_hue = $5, product_layout = $6,
+		    show_hours_public = $7, show_social_public = $8,
+		    footer_text = $9,
 		    updated_at = now()
 		WHERE id = $1
 		RETURNING ` + storeColumns
 	var s Store
 	if err := scanStore(r.pool.QueryRow(ctx, q, id,
 		in.LogoURL, in.BannerURL, in.Tagline,
-		hue, in.ShowHoursPublic, in.ShowSocialPublic,
+		hue, layout, in.ShowHoursPublic, in.ShowSocialPublic,
 		in.FooterText,
 	), &s); err != nil {
 		return nil, err
@@ -220,15 +273,34 @@ func (r *StoreRepo) UpdateShipping(ctx context.Context, id uuid.UUID, in UpdateS
 	return &s, nil
 }
 
+// SetIsOpen flips the is_open flag without touching other fields. Dipakai
+// oleh flow yang butuh force-offline toko sementara (mis. rotate webhook
+// token Midtrans — seller harus paste URL baru sebelum order baru bisa
+// proses pembayaran). Caller separate audit log sendiri.
+func (r *StoreRepo) SetIsOpen(ctx context.Context, id uuid.UUID, open bool) error {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE stores SET is_open = $2, updated_at = now() WHERE id = $1
+	`, id, open)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrStoreNotFound
+	}
+	return nil
+}
+
 func (r *StoreRepo) Update(ctx context.Context, id uuid.UUID, in UpdateStoreInput) (*Store, error) {
 	q := `
 		UPDATE stores
 		SET name = $2, description = $3, logo_url = $4,
 		    banner_url = $5, tagline = $6,
 		    category = $7, city = $8,
-		    whatsapp_number = $9, instagram = $10, tiktok = $11,
-		    open_hours = COALESCE($12::jsonb, open_hours),
-		    is_open = $13,
+		    whatsapp_number = $9,
+		    notification_whatsapp_number = $10,
+		    instagram = $11, tiktok = $12,
+		    open_hours = COALESCE($13::jsonb, open_hours),
+		    is_open = $14,
 		    updated_at = now()
 		WHERE id = $1
 		RETURNING ` + storeColumns
@@ -237,7 +309,8 @@ func (r *StoreRepo) Update(ctx context.Context, id uuid.UUID, in UpdateStoreInpu
 		in.Name, in.Description, in.LogoURL,
 		in.BannerURL, in.Tagline,
 		in.Category, in.City,
-		in.WhatsAppNumber, in.Instagram, in.TikTok,
+		in.WhatsAppNumber, in.NotificationWhatsAppNumber,
+		in.Instagram, in.TikTok,
 		in.OpenHoursJSON, in.IsOpen,
 	), &s); err != nil {
 		return nil, err

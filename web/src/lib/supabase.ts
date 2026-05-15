@@ -50,3 +50,20 @@ export async function uploadImage(
 
 // Backwards-compatible alias for the previous product-photo helper.
 export const uploadProductPhoto = (file: File) => uploadImage(file, "product");
+
+// deleteUploaded fires a best-effort delete on the storage object that
+// `url` points to. Callers should not block UX on this — Promise yang
+// gagal di-swallow (404/500/network). Backend has a cross-tenant guard.
+export async function deleteUploaded(url: string): Promise<void> {
+  if (!url) return;
+  try {
+    await fetch(`${apiBase}/api/v1/uploads/delete`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+  } catch {
+    // Swallow — orphan file di storage tidak mempengaruhi user flow.
+  }
+}

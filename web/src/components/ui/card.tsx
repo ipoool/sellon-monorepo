@@ -12,59 +12,34 @@ const variantClasses: Record<Variant, string> = {
 
 export interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
   variant?: Variant;
+  ref?: React.Ref<HTMLDivElement>;
 }
 
-export const Card = React.forwardRef<HTMLDivElement, CardProps>(
-  ({ className, variant = "default", ...props }, ref) => (
+export function Card({
+  className,
+  variant = "default",
+  ref,
+  ...props
+}: CardProps) {
+  return (
     <div
       ref={ref}
-      className={cn(
-        "rounded-xl p-6",
-        variantClasses[variant],
-        className,
-      )}
+      className={cn("rounded-xl p-6", variantClasses[variant], className)}
       {...props}
     />
-  ),
-);
-Card.displayName = "Card";
+  );
+}
 
-export const CardHeader = React.forwardRef<
-  HTMLDivElement,
-  React.HTMLAttributes<HTMLDivElement>
->(({ className, ...props }, ref) => (
-  <div ref={ref} className={cn("mb-4 flex flex-col gap-1", className)} {...props} />
-));
-CardHeader.displayName = "CardHeader";
+type CardContentProps = React.HTMLAttributes<HTMLDivElement> & {
+  ref?: React.Ref<HTMLDivElement>;
+};
 
-export const CardTitle = React.forwardRef<
-  HTMLHeadingElement,
-  React.HTMLAttributes<HTMLHeadingElement>
->(({ className, ...props }, ref) => (
-  <h3
-    ref={ref}
-    className={cn("text-base font-semibold text-neutral-900", className)}
-    {...props}
-  />
-));
-CardTitle.displayName = "CardTitle";
-
-export const CardDescription = React.forwardRef<
-  HTMLParagraphElement,
-  React.HTMLAttributes<HTMLParagraphElement>
->(({ className, ...props }, ref) => (
-  <p
-    ref={ref}
-    className={cn("text-sm text-neutral-500", className)}
-    {...props}
-  />
-));
-CardDescription.displayName = "CardDescription";
-
-export const CardContent = React.forwardRef<
-  HTMLDivElement,
-  React.HTMLAttributes<HTMLDivElement>
->(({ className, ...props }, ref) => (
-  <div ref={ref} className={cn("flex flex-col gap-3", className)} {...props} />
-));
-CardContent.displayName = "CardContent";
+export function CardContent({ className, ref, ...props }: CardContentProps) {
+  return (
+    <div
+      ref={ref}
+      className={cn("flex flex-col gap-3", className)}
+      {...props}
+    />
+  );
+}

@@ -29,6 +29,7 @@ type Order struct {
 	TrackingNumber     string
 	CustomerName       string
 	CustomerWhatsApp   string
+	CustomerEmail      string
 	CustomerAddress    string
 	CustomerCity       string
 	Notes              string
@@ -39,8 +40,16 @@ type Order struct {
 	CompletedAt        *time.Time
 	CancelledAt        *time.Time
 	CancellationReason string
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	RefundAmountCents  int64
+	RefundReason       string
+	RefundedAt         *time.Time
+	// Bukti transfer manual yang di-upload pembeli (untuk pembayaran
+	// non-gateway: transfer manual, QRIS statis, WA konfirmasi).
+	PaymentProofURL  string
+	PaymentProofNote string
+	PaymentProofAt   *time.Time
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 type OrderItem struct {
@@ -51,6 +60,7 @@ type OrderItem struct {
 	UnitPriceCents int64
 	Quantity       int
 	SubtotalCents  int64
+	ProductType    string // "physical" | "digital"
 }
 
 type OrderItemInput struct {
@@ -60,12 +70,14 @@ type OrderItemInput struct {
 	VariantName string
 	UnitCents   int64
 	Quantity    int
+	ProductType string // "physical" | "digital" — when "digital", Create skips stock decrement
 }
 
 type CreateOrderInput struct {
 	StoreID         uuid.UUID
 	CustomerName    string
 	CustomerWA      string
+	CustomerEmail   string // optional for physical orders, required at handler level for digital
 	CustomerAddress string
 	CustomerCity    string
 	Courier         string
@@ -92,15 +104,22 @@ type ListOrdersFilter struct {
 	Status        string // "" = all
 	PaymentStatus string // "" = all
 	Limit         int
+	Offset        int
 }
 
 func (r *OrderRepo) ListByStore(ctx context.Context, storeID uuid.UUID, limit int) ([]Order, error) {
-	return r.List(ctx, ListOrdersFilter{StoreID: storeID, Limit: limit})
+	rows, _, err := r.List(ctx, ListOrdersFilter{StoreID: storeID, Limit: limit})
+	return rows, err
 }
 
-func (r *OrderRepo) List(ctx context.Context, f ListOrdersFilter) ([]Order, error) {
+// List returns rows + the total row count matching the filter (so callers
+// can render server-side pagination without a second query).
+func (r *OrderRepo) List(ctx context.Context, f ListOrdersFilter) ([]Order, int, error) {
 	if f.Limit <= 0 || f.Limit > 1000 {
 		f.Limit = 50
+	}
+	if f.Offset < 0 {
+		f.Offset = 0
 	}
 	args := []any{f.StoreID}
 	where := "store_id = $1"
@@ -116,7 +135,15 @@ func (r *OrderRepo) List(ctx context.Context, f ListOrdersFilter) ([]Order, erro
 		args = append(args, f.PaymentStatus)
 		where += " AND payment_status = $" + itoa(len(args))
 	}
-	args = append(args, f.Limit)
+
+	var total int
+	if err := r.pool.QueryRow(ctx,
+		"SELECT COUNT(*) FROM orders WHERE "+where, args...,
+	).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	args = append(args, f.Limit, f.Offset)
 	q := `
 		SELECT id, store_id, order_number, status, payment_status, payment_method,
 		       subtotal_cents, shipping_cents, total_cents, courier,
@@ -124,11 +151,11 @@ func (r *OrderRepo) List(ctx context.Context, f ListOrdersFilter) ([]Order, erro
 		FROM orders
 		WHERE ` + where + `
 		ORDER BY created_at DESC
-		LIMIT $` + itoa(len(args))
+		LIMIT $` + itoa(len(args)-1) + ` OFFSET $` + itoa(len(args))
 
 	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 
@@ -140,11 +167,11 @@ func (r *OrderRepo) List(ctx context.Context, f ListOrdersFilter) ([]Order, erro
 			&o.SubtotalCents, &o.ShippingCents, &o.TotalCents, &o.Courier,
 			&o.CustomerName, &o.CustomerWhatsApp, &o.CustomerCity, &o.CreatedAt,
 		); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		out = append(out, o)
 	}
-	return out, rows.Err()
+	return out, total, rows.Err()
 }
 
 func (r *OrderRepo) ListByCustomer(ctx context.Context, storeID, customerID uuid.UUID, limit int) ([]Order, error) {
@@ -181,10 +208,12 @@ func (r *OrderRepo) ListByCustomer(ctx context.Context, storeID, customerID uuid
 }
 
 func (r *OrderRepo) StatsForStore(ctx context.Context, storeID uuid.UUID) (todayCount int, monthRevenueCents int64, err error) {
+	// Month revenue excludes cancelled orders even when paid — they were
+	// almost certainly refunded out of band (see BUG-012).
 	err = r.pool.QueryRow(ctx, `
 		SELECT
 		    COUNT(*) FILTER (WHERE created_at >= date_trunc('day', now())),
-		    COALESCE(SUM(total_cents) FILTER (WHERE created_at >= date_trunc('month', now()) AND payment_status = 'paid'), 0)
+		    COALESCE(SUM(total_cents) FILTER (WHERE created_at >= date_trunc('month', now()) AND payment_status = 'paid' AND status <> 'cancelled'), 0)
 		FROM orders WHERE store_id = $1
 	`, storeID).Scan(&todayCount, &monthRevenueCents)
 	return
@@ -193,15 +222,39 @@ func (r *OrderRepo) StatsForStore(ctx context.Context, storeID uuid.UUID) (today
 var ErrOrderNotFound = errors.New("order not found")
 var ErrInvalidTransition = errors.New("invalid status transition")
 
+// SetPaymentProof menyimpan URL bukti transfer + catatan pembeli pada
+// order. Dipanggil dari endpoint storefront (no-auth) — caller pastikan
+// order_number + store_slug match. Idempotent: kalau pembeli upload
+// ulang, baris di-overwrite (note + timestamp ikut update).
+func (r *OrderRepo) SetPaymentProof(ctx context.Context, orderID uuid.UUID, proofURL, note string) error {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE orders
+		SET payment_proof_url = $2,
+		    payment_proof_note = $3,
+		    payment_proof_at = now(),
+		    updated_at = now()
+		WHERE id = $1
+	`, orderID, proofURL, note)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrOrderNotFound
+	}
+	return nil
+}
+
 // FindByID returns full order with all fields. Tenant-isolated by storeID.
 func (r *OrderRepo) FindByID(ctx context.Context, storeID, id uuid.UUID) (*Order, error) {
 	const q = `
 		SELECT id, store_id, order_number, status, payment_status, payment_method,
 		       subtotal_cents, shipping_cents, discount_cents, promo_code, total_cents,
 		       courier, courier_service, tracking_number,
-		       customer_name, customer_whatsapp, customer_address, customer_city,
+		       customer_name, customer_whatsapp, customer_email, customer_address, customer_city,
 		       notes, seller_notes, payment_url,
 		       paid_at, shipped_at, completed_at, cancelled_at, cancellation_reason,
+		       refund_amount_cents, refund_reason, refunded_at,
+		       payment_proof_url, payment_proof_note, payment_proof_at,
 		       created_at, updated_at
 		FROM orders WHERE id = $1 AND store_id = $2
 	`
@@ -210,9 +263,11 @@ func (r *OrderRepo) FindByID(ctx context.Context, storeID, id uuid.UUID) (*Order
 		&o.ID, &o.StoreID, &o.OrderNumber, &o.Status, &o.PaymentStatus, &o.PaymentMethod,
 		&o.SubtotalCents, &o.ShippingCents, &o.DiscountCents, &o.PromoCode, &o.TotalCents,
 		&o.Courier, &o.CourierService, &o.TrackingNumber,
-		&o.CustomerName, &o.CustomerWhatsApp, &o.CustomerAddress, &o.CustomerCity,
+		&o.CustomerName, &o.CustomerWhatsApp, &o.CustomerEmail, &o.CustomerAddress, &o.CustomerCity,
 		&o.Notes, &o.SellerNotes, &o.PaymentURL,
 		&o.PaidAt, &o.ShippedAt, &o.CompletedAt, &o.CancelledAt, &o.CancellationReason,
+		&o.RefundAmountCents, &o.RefundReason, &o.RefundedAt,
+		&o.PaymentProofURL, &o.PaymentProofNote, &o.PaymentProofAt,
 		&o.CreatedAt, &o.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -226,7 +281,7 @@ func (r *OrderRepo) FindByID(ctx context.Context, storeID, id uuid.UUID) (*Order
 
 func (r *OrderRepo) ListItems(ctx context.Context, orderID uuid.UUID) ([]OrderItem, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, product_id, product_name, variant_name, unit_price_cents, quantity, subtotal_cents
+		SELECT id, product_id, product_name, variant_name, unit_price_cents, quantity, subtotal_cents, product_type
 		FROM order_items WHERE order_id = $1 ORDER BY created_at ASC
 	`, orderID)
 	if err != nil {
@@ -238,7 +293,7 @@ func (r *OrderRepo) ListItems(ctx context.Context, orderID uuid.UUID) ([]OrderIt
 		var it OrderItem
 		if err := rows.Scan(
 			&it.ID, &it.ProductID, &it.ProductName, &it.VariantName,
-			&it.UnitPriceCents, &it.Quantity, &it.SubtotalCents,
+			&it.UnitPriceCents, &it.Quantity, &it.SubtotalCents, &it.ProductType,
 		); err != nil {
 			return nil, err
 		}
@@ -336,6 +391,7 @@ func (r *OrderRepo) Cancel(ctx context.Context, storeID, id uuid.UUID, reason st
 
 	// Restore stock for every line item — orders that get to "cancelled"
 	// should give the stock back so the seller can sell it again.
+	// Digital items skip this (they had no stock decrement to begin with).
 	if _, err := tx.Exec(ctx, `
 		UPDATE products p
 		SET stock = p.stock + oi.quantity, updated_at = now()
@@ -343,6 +399,7 @@ func (r *OrderRepo) Cancel(ctx context.Context, storeID, id uuid.UUID, reason st
 		WHERE oi.order_id = $1
 		  AND oi.product_id = p.id
 		  AND oi.variant_id IS NULL
+		  AND oi.product_type = 'physical'
 	`, id); err != nil {
 		return fmt.Errorf("restore product stock: %w", err)
 	}
@@ -352,8 +409,132 @@ func (r *OrderRepo) Cancel(ctx context.Context, storeID, id uuid.UUID, reason st
 		FROM order_items oi
 		WHERE oi.order_id = $1
 		  AND oi.variant_id = pv.id
+		  AND oi.product_type = 'physical'
 	`, id); err != nil {
 		return fmt.Errorf("restore variant stock: %w", err)
+	}
+
+	// Return the promo allocation back to its pool. Mirrors the stock
+	// restore above — sellers running scarcity-style campaigns shouldn't
+	// have their quota burned by cancelled orders. GREATEST guards against
+	// going negative if the original increment was somehow lost (BUG-013).
+	// The subquery yields NULL for orders without a promo, which matches
+	// no row.
+	if _, err := tx.Exec(ctx, `
+		UPDATE promos SET used_count = GREATEST(0, used_count - 1),
+		                  updated_at = now()
+		WHERE id = (
+		    SELECT promo_id FROM orders
+		    WHERE id = $1 AND promo_id IS NOT NULL
+		)
+	`, id); err != nil {
+		return fmt.Errorf("decrement promo usage: %w", err)
+	}
+
+	return tx.Commit(ctx)
+}
+
+// ErrRefundNotAllowed is returned by Refund when the order is not in a state
+// that can be refunded (must be paid, must not already be refunded, amount
+// must be > 0 and <= total_cents).
+var ErrRefundNotAllowed = errors.New("refund not allowed")
+
+// Refund records that the seller refunded the buyer out of band (via their
+// Midtrans dashboard or a manual transfer). SellOn is a facilitator and never
+// holds buyer funds, so this method only updates DB state — money movement
+// is the seller's responsibility.
+//
+// Validation:
+//   - Order must be paid (payment_status = 'paid').
+//   - Order must not already be refunded.
+//   - amountCents must be > 0 and <= total_cents.
+//
+// Side effects:
+//   - payment_status → 'refunded', refunded_at = now(), refund_amount_cents,
+//     refund_reason recorded.
+//   - If the order is not already cancelled, status → 'cancelled' and stock is
+//     restored for every physical line item (mirrors Cancel). This guarantees
+//     a refunded order never sits in a non-final fulfillment state.
+//   - Promo usage decrement mirrors Cancel for the same reason.
+func (r *OrderRepo) Refund(ctx context.Context, storeID, id uuid.UUID, amountCents int64, reason string) error {
+	if amountCents <= 0 {
+		return ErrRefundNotAllowed
+	}
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	// Atomic gate: only paid + non-refunded rows transition. The CHECK on
+	// amount <= total_cents lives here so concurrent edits to total can't
+	// let a stale refund through.
+	var prevStatus string
+	err = tx.QueryRow(ctx, `
+		UPDATE orders
+		SET payment_status = 'refunded',
+		    refund_amount_cents = $3,
+		    refund_reason = $4,
+		    refunded_at = now(),
+		    updated_at = now()
+		WHERE id = $1 AND store_id = $2
+		  AND payment_status = 'paid'
+		  AND $3 <= total_cents
+		RETURNING status
+	`, id, storeID, amountCents, reason).Scan(&prevStatus)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrRefundNotAllowed
+	}
+	if err != nil {
+		return fmt.Errorf("update order refund: %w", err)
+	}
+
+	// If the order wasn't already cancelled, transition it now and restore
+	// stock + promo. We mirror Cancel's logic so refunded orders never leak
+	// stock or skew promo counters.
+	if prevStatus != "cancelled" {
+		if _, err := tx.Exec(ctx, `
+			UPDATE orders
+			SET status = 'cancelled',
+			    cancellation_reason = COALESCE(NULLIF($3, ''), 'Refund'),
+			    cancelled_at = COALESCE(cancelled_at, now()),
+			    updated_at = now()
+			WHERE id = $1 AND store_id = $2
+		`, id, storeID, reason); err != nil {
+			return fmt.Errorf("cancel on refund: %w", err)
+		}
+
+		if _, err := tx.Exec(ctx, `
+			UPDATE products p
+			SET stock = p.stock + oi.quantity, updated_at = now()
+			FROM order_items oi
+			WHERE oi.order_id = $1
+			  AND oi.product_id = p.id
+			  AND oi.variant_id IS NULL
+			  AND oi.product_type = 'physical'
+		`, id); err != nil {
+			return fmt.Errorf("restore product stock on refund: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE product_variants pv
+			SET stock = pv.stock + oi.quantity
+			FROM order_items oi
+			WHERE oi.order_id = $1
+			  AND oi.variant_id = pv.id
+			  AND oi.product_type = 'physical'
+		`, id); err != nil {
+			return fmt.Errorf("restore variant stock on refund: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE promos SET used_count = GREATEST(0, used_count - 1),
+			                  updated_at = now()
+			WHERE id = (
+			    SELECT promo_id FROM orders
+			    WHERE id = $1 AND promo_id IS NOT NULL
+			)
+		`, id); err != nil {
+			return fmt.Errorf("decrement promo usage on refund: %w", err)
+		}
 	}
 
 	return tx.Commit(ctx)
@@ -366,9 +547,11 @@ func (r *OrderRepo) FindByOrderNumber(ctx context.Context, storeID uuid.UUID, or
 		SELECT id, store_id, order_number, status, payment_status, payment_method,
 		       subtotal_cents, shipping_cents, discount_cents, promo_code, total_cents,
 		       courier, courier_service, tracking_number,
-		       customer_name, customer_whatsapp, customer_address, customer_city,
+		       customer_name, customer_whatsapp, customer_email, customer_address, customer_city,
 		       notes, seller_notes, payment_url,
 		       paid_at, shipped_at, completed_at, cancelled_at, cancellation_reason,
+		       refund_amount_cents, refund_reason, refunded_at,
+		       payment_proof_url, payment_proof_note, payment_proof_at,
 		       created_at, updated_at
 		FROM orders WHERE store_id = $1 AND order_number = $2
 	`
@@ -377,9 +560,11 @@ func (r *OrderRepo) FindByOrderNumber(ctx context.Context, storeID uuid.UUID, or
 		&o.ID, &o.StoreID, &o.OrderNumber, &o.Status, &o.PaymentStatus, &o.PaymentMethod,
 		&o.SubtotalCents, &o.ShippingCents, &o.DiscountCents, &o.PromoCode, &o.TotalCents,
 		&o.Courier, &o.CourierService, &o.TrackingNumber,
-		&o.CustomerName, &o.CustomerWhatsApp, &o.CustomerAddress, &o.CustomerCity,
+		&o.CustomerName, &o.CustomerWhatsApp, &o.CustomerEmail, &o.CustomerAddress, &o.CustomerCity,
 		&o.Notes, &o.SellerNotes, &o.PaymentURL,
 		&o.PaidAt, &o.ShippedAt, &o.CompletedAt, &o.CancelledAt, &o.CancellationReason,
+		&o.RefundAmountCents, &o.RefundReason, &o.RefundedAt,
+		&o.PaymentProofURL, &o.PaymentProofNote, &o.PaymentProofAt,
 		&o.CreatedAt, &o.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -403,6 +588,59 @@ func (r *OrderRepo) SetPaymentStatus(ctx context.Context, storeID, id uuid.UUID,
 		WHERE id = $1 AND store_id = $2
 	`, id, storeID, paymentStatus, paymentMethod)
 	return err
+}
+
+// PrepareDigitalFulfillment fetches every digital line item for the
+// order and reports whether the order is exclusively digital.
+//
+// When allDigital == true the order is also flipped to status='completed'
+// (digital fulfillment needs no physical handling). When the cart is
+// mixed (digital + physical), digital items are still returned so the
+// caller can mint download tokens — physical fulfillment continues
+// through the seller's manual workflow (BUG-022: previously the
+// mixed-cart path returned nil and digital tokens were never minted).
+func (r *OrderRepo) PrepareDigitalFulfillment(ctx context.Context, orderID uuid.UUID) (items []OrderItem, allDigital bool, err error) {
+	var physicalCount int
+	if err = r.pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM order_items
+		WHERE order_id = $1 AND product_type = 'physical'
+	`, orderID).Scan(&physicalCount); err != nil {
+		return nil, false, err
+	}
+	allDigital = physicalCount == 0
+
+	if allDigital {
+		if _, err = r.pool.Exec(ctx, `
+			UPDATE orders
+			SET status = 'completed',
+			    completed_at = COALESCE(completed_at, now()),
+			    updated_at = now()
+			WHERE id = $1 AND status NOT IN ('completed', 'cancelled')
+		`, orderID); err != nil {
+			return nil, false, err
+		}
+	}
+
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, product_id, product_name, variant_name,
+		       unit_price_cents, quantity, subtotal_cents, product_type
+		FROM order_items WHERE order_id = $1 AND product_type = 'digital'
+	`, orderID)
+	if err != nil {
+		return nil, allDigital, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var it OrderItem
+		if err = rows.Scan(
+			&it.ID, &it.ProductID, &it.ProductName, &it.VariantName,
+			&it.UnitPriceCents, &it.Quantity, &it.SubtotalCents, &it.ProductType,
+		); err != nil {
+			return nil, allDigital, err
+		}
+		items = append(items, it)
+	}
+	return items, allDigital, rows.Err()
 }
 
 // SetPaymentURL stores the Midtrans Snap redirect URL on the order.
@@ -488,62 +726,71 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 		INSERT INTO orders (store_id, customer_id, order_number, status, payment_status,
 		                   payment_method, subtotal_cents, shipping_cents, discount_cents,
 		                   promo_code, promo_id, total_cents,
-		                   courier, customer_name, customer_whatsapp, customer_address, customer_city,
+		                   courier, customer_name, customer_whatsapp, customer_email,
+		                   customer_address, customer_city,
 		                   notes)
-		VALUES ($1, $2, $3, 'pending', 'unpaid', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+		VALUES ($1, $2, $3, 'pending', 'unpaid', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 		RETURNING id, store_id, order_number, status, payment_status, payment_method,
 		          subtotal_cents, shipping_cents, discount_cents, promo_code, total_cents, courier,
-		          customer_name, customer_whatsapp, customer_city, created_at
+		          customer_name, customer_whatsapp, customer_email, customer_city, created_at
 	`,
 		in.StoreID, customerID, orderNum,
 		in.PaymentMethod, subtotal, in.ShippingCents, discount,
 		in.PromoCode, in.PromoID, total,
-		in.Courier, in.CustomerName, in.CustomerWA, in.CustomerAddress, in.CustomerCity, in.Notes,
+		in.Courier, in.CustomerName, in.CustomerWA, in.CustomerEmail,
+		in.CustomerAddress, in.CustomerCity, in.Notes,
 	).Scan(
 		&o.ID, &o.StoreID, &o.OrderNumber, &o.Status, &o.PaymentStatus, &o.PaymentMethod,
 		&o.SubtotalCents, &o.ShippingCents, &o.DiscountCents, &o.PromoCode, &o.TotalCents, &o.Courier,
-		&o.CustomerName, &o.CustomerWhatsApp, &o.CustomerCity, &o.CreatedAt,
+		&o.CustomerName, &o.CustomerWhatsApp, &o.CustomerEmail, &o.CustomerCity, &o.CreatedAt,
 	); err != nil {
 		return nil, fmt.Errorf("insert order: %w", err)
 	}
 
 	for _, it := range in.Items {
-		// Decrement stock atomically. The WHERE stock >= qty guard prevents
-		// overselling under concurrent checkouts — if rows-affected is 0 the
-		// item is out of stock and the whole order rolls back.
-		var rowsAffected int64
-		if it.VariantID != nil {
-			tag, err := tx.Exec(ctx, `
-				UPDATE product_variants
-				SET stock = stock - $2
-				WHERE id = $1 AND stock >= $2
-			`, *it.VariantID, it.Quantity)
-			if err != nil {
-				return nil, fmt.Errorf("decrement variant stock: %w", err)
+		isDigital := it.ProductType == "digital"
+
+		// Stock decrement only applies to physical items. Digital items
+		// have unlimited stock semantics — they don't deplete on order.
+		if !isDigital {
+			var rowsAffected int64
+			if it.VariantID != nil {
+				tag, err := tx.Exec(ctx, `
+					UPDATE product_variants
+					SET stock = stock - $2
+					WHERE id = $1 AND stock >= $2
+				`, *it.VariantID, it.Quantity)
+				if err != nil {
+					return nil, fmt.Errorf("decrement variant stock: %w", err)
+				}
+				rowsAffected = tag.RowsAffected()
+			} else {
+				tag, err := tx.Exec(ctx, `
+					UPDATE products
+					SET stock = stock - $2, updated_at = now()
+					WHERE id = $1 AND stock >= $2
+				`, it.ProductID, it.Quantity)
+				if err != nil {
+					return nil, fmt.Errorf("decrement product stock: %w", err)
+				}
+				rowsAffected = tag.RowsAffected()
 			}
-			rowsAffected = tag.RowsAffected()
-		} else {
-			tag, err := tx.Exec(ctx, `
-				UPDATE products
-				SET stock = stock - $2, updated_at = now()
-				WHERE id = $1 AND stock >= $2
-			`, it.ProductID, it.Quantity)
-			if err != nil {
-				return nil, fmt.Errorf("decrement product stock: %w", err)
+			if rowsAffected == 0 {
+				return nil, ErrStockInsufficient
 			}
-			rowsAffected = tag.RowsAffected()
-		}
-		if rowsAffected == 0 {
-			return nil, ErrStockInsufficient
 		}
 
+		productType := it.ProductType
+		if productType != "digital" {
+			productType = "physical"
+		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO order_items (order_id, product_id, variant_id, product_name, variant_name,
-			                         unit_price_cents, quantity, subtotal_cents)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			                         unit_price_cents, quantity, subtotal_cents, product_type)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		`,
 			o.ID, it.ProductID, it.VariantID, it.ProductName, it.VariantName,
-			it.UnitCents, it.Quantity, it.UnitCents*int64(it.Quantity),
+			it.UnitCents, it.Quantity, it.UnitCents*int64(it.Quantity), productType,
 		); err != nil {
 			return nil, fmt.Errorf("insert order_item: %w", err)
 		}
@@ -560,9 +807,13 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 var ErrStockInsufficient = errors.New("stok tidak cukup")
 
 // CountThisMonth returns the number of orders this calendar month for the
-// given store, used for tier-quota enforcement. Cancelled orders are
-// included — buyers should not be able to bypass the cap by cancelling
-// + re-ordering.
+// given store, used by the seller dashboard to display "X / Y pesanan"
+// usage. Cancelled orders are included so the meter matches what the
+// quota enforcer (HasOrdersThisMonthAtLeast) sees.
+//
+// Hot-path quota checks must use HasOrdersThisMonthAtLeast instead — its
+// cost is bounded by the limit, not by the number of orders the store
+// has placed.
 func (r *OrderRepo) CountThisMonth(ctx context.Context, storeID uuid.UUID) (int, error) {
 	var n int
 	err := r.pool.QueryRow(ctx, `
@@ -570,6 +821,26 @@ func (r *OrderRepo) CountThisMonth(ctx context.Context, storeID uuid.UUID) (int,
 		WHERE store_id = $1 AND created_at >= date_trunc('month', now())
 	`, storeID).Scan(&n)
 	return n, err
+}
+
+// HasOrdersThisMonthAtLeast returns true if the store has at least n
+// orders in the current calendar month. Bounded probe: stops scanning
+// at row n+1, so the check stays cheap even when a hot store places
+// thousands of orders per month.
+func (r *OrderRepo) HasOrdersThisMonthAtLeast(ctx context.Context, storeID uuid.UUID, n int) (bool, error) {
+	if n <= 0 {
+		return true, nil
+	}
+	var x int
+	err := r.pool.QueryRow(ctx, `
+		SELECT 1 FROM orders
+		WHERE store_id = $1 AND created_at >= date_trunc('month', now())
+		OFFSET $2 LIMIT 1
+	`, storeID, n-1).Scan(&x)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 func generateOrderNumber() string {

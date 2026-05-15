@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, type FormEvent } from "react";
+import { showError, showSuccess } from "@/lib/toast";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -79,13 +80,12 @@ export function SetupWizard({
   firstName: string;
   email: string;
 }) {
-  const router = useRouter();
+  const { push, refresh } = useRouter();
   const [step, setStep] = useState(1);
   const [form, setForm] = useState<FormState>(initialState);
   // User can manually edit slug; if they haven't, we keep it auto-derived.
   const [slugTouched, setSlugTouched] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
 
   const autoSlug = useMemo(() => slugify(form.name), [form.name]);
@@ -101,10 +101,9 @@ export function SetupWizard({
 
   function handleNext(e?: FormEvent) {
     e?.preventDefault();
-    setError(null);
     if (step === 1) {
       if (!step1Valid) {
-        setError("Nama minimal 2 karakter dan slug minimal 3 karakter.");
+        showError("Nama minimal 2 karakter dan slug minimal 3 karakter.");
         return;
       }
       // Lock the auto-slug if user never edited
@@ -117,7 +116,6 @@ export function SetupWizard({
 
   async function handleSubmit() {
     setSubmitting(true);
-    setError(null);
     try {
       // 1. Create the store
       const slug = (slugTouched ? form.slug : autoSlug).trim();
@@ -167,11 +165,11 @@ export function SetupWizard({
       setDone(true);
       // Brief celebration screen, then redirect.
       setTimeout(() => {
-        router.push("/dasbor");
-        router.refresh();
+        push("/dashboard");
+        refresh();
       }, 1800);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal membuat toko");
+      showError(err);
     } finally {
       setSubmitting(false);
     }
@@ -283,7 +281,6 @@ export function SetupWizard({
                 <Input
                   id="name"
                   required
-                  autoFocus
                   value={form.name}
                   onChange={(e) => update("name", e.target.value)}
                   placeholder="Warung Bu Sari"
@@ -323,7 +320,7 @@ export function SetupWizard({
                   value={form.category}
                   onChange={(e) => update("category", e.target.value)}
                 >
-                  <option value="">— Pilih kategori —</option>
+                  <option value="">- Pilih kategori -</option>
                   {categories.map((c) => (
                     <option key={c} value={c}>
                       {c}
@@ -332,10 +329,7 @@ export function SetupWizard({
                 </Select>
               </div>
 
-              {error && (
-                <p className="text-sm font-medium text-danger">{error}</p>
-              )}
-
+              
               <div className="mt-2 flex justify-end">
                 <Button type="submit" size="md" disabled={!step1Valid}>
                   Lanjut
@@ -352,7 +346,7 @@ export function SetupWizard({
                   Kontak & lokasi
                 </h2>
                 <p className="mt-1 text-sm text-neutral-600">
-                  Bantu pembeli mengenal toko-mu. Semua field di sini opsional —
+                  Bantu pembeli mengenal toko-mu. Semua field di sini opsional -
                   bisa diisi nanti.
                 </p>
               </div>
@@ -397,10 +391,7 @@ export function SetupWizard({
                 </div>
               </div>
 
-              {error && (
-                <p className="text-sm font-medium text-danger">{error}</p>
-              )}
-
+              
               <div className="mt-2 flex items-center justify-between">
                 <Button
                   type="button"
@@ -426,7 +417,7 @@ export function SetupWizard({
                   Review terakhir
                 </h2>
                 <p className="mt-1 text-sm text-neutral-600">
-                  Cek dulu — kalau sudah pas, klik &ldquo;Buat Toko&rdquo;. Kamu bisa
+                  Cek dulu - kalau sudah pas, klik &ldquo;Buat Toko&rdquo;. Kamu bisa
                   edit detail apapun setelah masuk dasbor.
                 </p>
               </div>
@@ -454,10 +445,7 @@ export function SetupWizard({
                 </ul>
               </div>
 
-              {error && (
-                <p className="text-sm font-medium text-danger">{error}</p>
-              )}
-
+              
               <div className="mt-2 flex items-center justify-between">
                 <Button
                   type="button"
@@ -521,7 +509,7 @@ function Row({
           value ? "font-medium text-neutral-900" : "text-neutral-400",
         )}
       >
-        {value || "—"}
+        {value || "-"}
       </dd>
     </div>
   );

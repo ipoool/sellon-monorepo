@@ -3,6 +3,10 @@ export type Me = {
   email: string;
   name: string;
   picture_url: string;
+  role?: "user" | "admin";
+  is_impersonated?: boolean;
+  impersonator_id?: string;
+  impersonator_email?: string;
 };
 
 declare global {

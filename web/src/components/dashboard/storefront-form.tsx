@@ -1,15 +1,34 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
+import { showError, showSuccess } from "@/lib/toast";
+import { deleteUploaded } from "@/lib/supabase";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Save, Palette, Eye, ExternalLink } from "lucide-react";
+import {
+  Save,
+  Palette,
+  Eye,
+  ExternalLink,
+  Lock,
+  Crown,
+  LayoutGrid,
+  List as ListIcon,
+  Star,
+  LayoutDashboard,
+  LayoutPanelTop,
+  Rows3,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
 import { ImageUploadInput } from "@/components/dashboard/image-upload-input";
+import { LayoutPreviewDialog } from "@/components/dashboard/layout-preview-dialog";
+import { usePlan } from "@/components/dashboard/plan-context";
 import { cn } from "@/lib/utils";
 import type { Store } from "@/lib/types";
 
@@ -30,53 +49,105 @@ const themePresets: { hue: number; label: string; swatch: string }[] = [
 ];
 
 export function StorefrontForm({ initial }: { initial: Store }) {
-  const router = useRouter();
+  const { refresh } = useRouter();
+  const plan = usePlan();
+  const themeLocked = plan !== "pro" && plan !== "bisnis";
   const [logoUrl, setLogoUrl] = useState(initial.logo_url ?? "");
   const [bannerUrl, setBannerUrl] = useState(initial.banner_url ?? "");
   const [tagline, setTagline] = useState(initial.tagline ?? "");
   const [themeHue, setThemeHue] = useState<number>(initial.theme_hue ?? 145);
+  const [productLayout, setProductLayout] = useState<LayoutKey>(
+    initial.product_layout ?? "grid",
+  );
+  // Buka preview dialog dari card layout. Null = closed; string = layout
+  // yang sedang di-preview (boleh beda dari yang ter-save).
+  const [previewLayout, setPreviewLayout] = useState<LayoutKey | null>(null);
   const [showHours, setShowHours] = useState(initial.show_hours_public ?? true);
   const [showSocial, setShowSocial] = useState(
     initial.show_social_public ?? true,
   );
   const [footerText, setFooterText] = useState(initial.footer_text ?? "");
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
+  // Refs tracking URL gambar yang sudah benar-benar ter-save di server.
+  // Pakai untuk hapus file lama di Supabase Storage saat seller ganti
+  // logo / banner. Tidak pakai initial.{logo,banner}_url langsung karena
+  // setelah save pertama, "URL lama" jadi yang baru di-save, bukan yang
+  // di-mount-saat-load.
+  const savedLogoRef = useRef<string>(initial.logo_url ?? "");
+  const savedBannerRef = useRef<string>(initial.banner_url ?? "");
+
+  // Single source of truth untuk PUT storefront. onSubmit + onApply
+  // layout sama-sama panggil ini, beda hanya nilai product_layout
+  // yang dikirim.
+  async function persistStorefront(layoutOverride?: LayoutKey) {
+    const res = await fetch(`${apiBase}/api/v1/store/storefront`, {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        logo_url: logoUrl,
+        banner_url: bannerUrl,
+        tagline: tagline.trim(),
+        theme_hue: themeHue,
+        product_layout: layoutOverride ?? productLayout,
+        show_hours_public: showHours,
+        show_social_public: showSocial,
+        footer_text: footerText.trim(),
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+
+    // Setelah PUT sukses, bersihkan file lama di Supabase Storage agar
+    // tidak orphan. Fire-and-forget — backend punya cross-tenant guard
+    // dan akan abaikan URL non-Supabase. Ref di-update agar save
+    // berikutnya pakai baseline yang benar.
+    if (savedLogoRef.current && savedLogoRef.current !== logoUrl) {
+      void deleteUploaded(savedLogoRef.current);
+    }
+    if (savedBannerRef.current && savedBannerRef.current !== bannerUrl) {
+      void deleteUploaded(savedBannerRef.current);
+    }
+    savedLogoRef.current = logoUrl;
+    savedBannerRef.current = bannerUrl;
+    return data;
+  }
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setPending(true);
-    setError(null);
-    setSaved(false);
     try {
-      const res = await fetch(`${apiBase}/api/v1/store/storefront`, {
-        method: "PUT",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          logo_url: logoUrl,
-          banner_url: bannerUrl,
-          tagline: tagline.trim(),
-          theme_hue: themeHue,
-          show_hours_public: showHours,
-          show_social_public: showSocial,
-          footer_text: footerText.trim(),
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2500);
-      router.refresh();
+      await persistStorefront();
+      showSuccess("Tersimpan");
+      refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal simpan");
+      showError(err);
     } finally {
       setPending(false);
     }
   }
 
-  // Live preview accent for the theme swatch — same OKLCH at lightness 500.
+  // onApply dari LayoutPreviewDialog: langsung persist + refresh, jadi
+  // storefront publik update tanpa user harus klik "Simpan" lagi.
+  // Field lain di form yang masih dirty (tagline, banner, dll) ikut
+  // di-snapshot sesuai state form saat ini — sama seperti tombol
+  // Simpan biasa.
+  async function applyLayout(picked: LayoutKey) {
+    setProductLayout(picked);
+    setPreviewLayout(null);
+    setPending(true);
+    try {
+      await persistStorefront(picked);
+      showSuccess(`Layout "${layoutLabels[picked]}" diterapkan ke storefront.`);
+      refresh();
+    } catch (err) {
+      showError(err);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  // Live preview accent for the theme swatch - same OKLCH at lightness 500.
   const previewSwatch = `oklch(0.71 0.18 ${themeHue})`;
 
   return (
@@ -142,18 +213,46 @@ export function StorefrontForm({ initial }: { initial: Store }) {
         </div>
       </Card>
 
-      <Card>
+      <Card className={cn(themeLocked && "border-warning/40 bg-warning/5")}>
         <div className="mb-4 flex items-start gap-3">
-          <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
-            <Palette className="size-5" aria-hidden />
+          <div
+            className={cn(
+              "flex size-10 shrink-0 items-center justify-center rounded-xl",
+              themeLocked
+                ? "bg-warning/15 text-warning"
+                : "bg-brand-50 text-brand-600",
+            )}
+          >
+            {themeLocked ? (
+              <Lock className="size-5" aria-hidden />
+            ) : (
+              <Palette className="size-5" aria-hidden />
+            )}
           </div>
-          <div>
-            <h2 className="font-semibold text-neutral-900">Warna Tema</h2>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="font-semibold text-neutral-900">Warna Tema</h2>
+              {themeLocked && (
+                <Badge variant="warning" className="gap-1">
+                  <Crown className="size-3" aria-hidden />
+                  Pro & Bisnis
+                </Badge>
+              )}
+            </div>
             <p className="mt-0.5 text-sm text-neutral-500">
-              Warna ini dipakai untuk tombol, badge, dan aksen di halaman
-              publik toko.
+              {themeLocked
+                ? "Custom warna brand untuk halaman publik toko. Upgrade ke Pro untuk pilih dari 8 preset warna."
+                : "Warna ini dipakai untuk tombol, badge, dan aksen di halaman publik toko."}
             </p>
           </div>
+          {themeLocked && (
+            <Link href="/settings/subscription" className="shrink-0">
+              <Button size="sm">
+                <Crown className="size-3.5" aria-hidden />
+                Upgrade
+              </Button>
+            </Link>
+          )}
         </div>
 
         <div className="grid grid-cols-4 gap-3 sm:grid-cols-8">
@@ -164,11 +263,12 @@ export function StorefrontForm({ initial }: { initial: Store }) {
                 key={p.hue}
                 type="button"
                 onClick={() => setThemeHue(p.hue)}
+                disabled={themeLocked}
                 className={cn(
-                  "flex flex-col items-center gap-1.5 rounded-lg border p-2 text-xs font-medium transition-colors",
+                  "flex flex-col items-center gap-1.5 rounded-lg border p-2 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
                   active
                     ? "border-neutral-900 bg-neutral-50 text-neutral-900 ring-2 ring-neutral-900/10"
-                    : "border-neutral-200 text-neutral-600 hover:border-neutral-300",
+                    : "border-neutral-200 text-neutral-600 hover:border-neutral-300 disabled:hover:border-neutral-200",
                 )}
                 title={p.label}
                 aria-label={`Pilih tema ${p.label}`}
@@ -193,12 +293,29 @@ export function StorefrontForm({ initial }: { initial: Store }) {
           <div className="flex-1">
             <p className="font-medium text-neutral-900">Preview warna utama</p>
             <p className="text-xs text-neutral-600">
-              Hue OKLCH: {themeHue} — sama dipakai untuk seluruh skala
+              Hue OKLCH: {themeHue} - sama dipakai untuk seluruh skala
               brand-50 sampai brand-950.
             </p>
           </div>
         </div>
       </Card>
+
+      <ProductLayoutCard
+        locked={themeLocked}
+        value={productLayout}
+        onChange={setProductLayout}
+        onPreview={setPreviewLayout}
+      />
+
+      {previewLayout && (
+        <LayoutPreviewDialog
+          storeSlug={initial.slug}
+          initialLayout={previewLayout}
+          currentLayout={productLayout}
+          onClose={() => setPreviewLayout(null)}
+          onApply={applyLayout}
+        />
+      )}
 
       <Card>
         <div className="mb-4">
@@ -209,7 +326,10 @@ export function StorefrontForm({ initial }: { initial: Store }) {
         </div>
 
         <div className="flex flex-col gap-3">
-          <label className="flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-neutral-200 bg-white px-4 py-3">
+          <label
+            htmlFor="show_hours_toggle"
+            className="flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-neutral-200 bg-white px-4 py-3"
+          >
             <div>
               <p className="text-sm font-medium text-neutral-900">
                 Tampilkan jam buka
@@ -220,11 +340,15 @@ export function StorefrontForm({ initial }: { initial: Store }) {
               </p>
             </div>
             <Switch
+              id="show_hours_toggle"
               checked={showHours}
               onChange={(e) => setShowHours(e.target.checked)}
             />
           </label>
-          <label className="flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-neutral-200 bg-white px-4 py-3">
+          <label
+            htmlFor="show_social_toggle"
+            className="flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-neutral-200 bg-white px-4 py-3"
+          >
             <div>
               <p className="text-sm font-medium text-neutral-900">
                 Tampilkan kontak sosial
@@ -235,6 +359,7 @@ export function StorefrontForm({ initial }: { initial: Store }) {
               </p>
             </div>
             <Switch
+              id="show_social_toggle"
               checked={showSocial}
               onChange={(e) => setShowSocial(e.target.checked)}
             />
@@ -256,16 +381,302 @@ export function StorefrontForm({ initial }: { initial: Store }) {
         </div>
       </Card>
 
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-sm">
-          {saved && <span className="font-medium text-success">✓ Tersimpan</span>}
-          {error && <span className="font-medium text-danger">{error}</span>}
-        </span>
+      <div className="flex items-center justify-end">
         <Button type="submit" disabled={pending}>
           <Save className="size-4" aria-hidden />
           {pending ? "Menyimpan…" : "Simpan"}
         </Button>
       </div>
     </form>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// ProductLayoutCard — picker untuk 3 layout produk di storefront.
+// Free tier: locked dengan upgrade CTA; Pro/Bisnis: clickable.
+// ─────────────────────────────────────────────────────────────────────
+
+type LayoutKey =
+  | "grid"
+  | "list"
+  | "showcase"
+  | "compact"
+  | "magazine"
+  | "feed";
+
+// Label bahasa Indonesia untuk tiap layout — dipakai di toast dan
+// tempat lain yang menampilkan nama layout ke seller. Harus tetap
+// sinkron dengan LAYOUTS di layout-preview-dialog.tsx.
+const layoutLabels: Record<LayoutKey, string> = {
+  grid: "Grid",
+  list: "Daftar",
+  showcase: "Sorotan",
+  compact: "Padat",
+  magazine: "Majalah",
+  feed: "Feed",
+};
+
+const LAYOUTS: Array<{
+  key: LayoutKey;
+  label: string;
+  description: string;
+  icon: typeof LayoutGrid;
+}> = [
+  {
+    key: "grid",
+    label: "Grid",
+    description: "Card sama besar, multi-kolom. Cocok untuk katalog umum.",
+    icon: LayoutGrid,
+  },
+  {
+    key: "list",
+    label: "Daftar",
+    description:
+      "Satu kolom dengan thumbnail kecil + info di samping. Cocok untuk produk dengan deskripsi panjang.",
+    icon: ListIcon,
+  },
+  {
+    key: "showcase",
+    label: "Sorotan",
+    description:
+      "Produk pertama tampil besar, sisanya grid 2 kolom. Cocok untuk brand fashion / hero product.",
+    icon: Star,
+  },
+  {
+    key: "compact",
+    label: "Padat",
+    description:
+      "Grid sangat dense, thumbnail kecil. Cocok untuk warung/sembako dengan banyak SKU mirip.",
+    icon: LayoutDashboard,
+  },
+  {
+    key: "magazine",
+    label: "Majalah",
+    description:
+      "Layout asymmetric editorial — produk pertama besar di kiri, dua kecil di kanan. Cocok untuk brand bergaya.",
+    icon: LayoutPanelTop,
+  },
+  {
+    key: "feed",
+    label: "Feed",
+    description:
+      "Satu kolom Instagram-style, foto square besar per produk. Cocok untuk fashion, makanan, atau produk fotogenik.",
+    icon: Rows3,
+  },
+];
+
+function ProductLayoutCard({
+  locked,
+  value,
+  onChange,
+  onPreview,
+}: {
+  locked: boolean;
+  value: LayoutKey;
+  onChange: (key: LayoutKey) => void;
+  onPreview: (key: LayoutKey) => void;
+}) {
+  return (
+    <Card className={cn(locked && "border-warning/40 bg-warning/5")}>
+      <div className="mb-4 flex items-start gap-3">
+        <div
+          className={cn(
+            "flex size-10 shrink-0 items-center justify-center rounded-xl",
+            locked
+              ? "bg-warning/15 text-warning"
+              : "bg-brand-50 text-brand-600",
+          )}
+        >
+          {locked ? (
+            <Lock className="size-5" aria-hidden />
+          ) : (
+            <LayoutGrid className="size-5" aria-hidden />
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="font-semibold text-neutral-900">Layout Produk</h2>
+            {locked && (
+              <Badge variant="warning" className="gap-1">
+                <Crown className="size-3" aria-hidden />
+                Pro & Bisnis
+              </Badge>
+            )}
+          </div>
+          <p className="mt-0.5 text-sm text-neutral-500">
+            {locked
+              ? "Pilih tampilan produk di halaman publik toko. Upgrade ke Pro untuk akses 3 template."
+              : "Pilih tampilan produk di halaman publik. Klik Preview untuk lihat live preview desktop + mobile."}
+          </p>
+        </div>
+        {locked && (
+          <Link href="/settings/subscription" className="shrink-0">
+            <Button size="sm">
+              <Crown className="size-3.5" aria-hidden />
+              Upgrade
+            </Button>
+          </Link>
+        )}
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-3">
+        {LAYOUTS.map((opt) => {
+          const active = value === opt.key;
+          const Icon = opt.icon;
+          return (
+            <div
+              key={opt.key}
+              className={cn(
+                "flex flex-col gap-3 rounded-xl border p-3 transition-colors",
+                active
+                  ? "border-brand-500 bg-brand-50/40 ring-2 ring-brand-500/15"
+                  : "border-neutral-200 bg-white",
+                locked && "opacity-60",
+              )}
+            >
+              <button
+                type="button"
+                onClick={() => !locked && onChange(opt.key)}
+                disabled={locked}
+                className="flex w-full flex-col items-start gap-2 text-left disabled:cursor-not-allowed"
+                aria-pressed={active}
+              >
+                <LayoutThumbnail variant={opt.key} active={active} />
+                <div className="flex items-center gap-1.5">
+                  <Icon
+                    className={cn(
+                      "size-4",
+                      active ? "text-brand-600" : "text-neutral-500",
+                    )}
+                    aria-hidden
+                  />
+                  <span
+                    className={cn(
+                      "text-sm font-semibold",
+                      active ? "text-brand-700" : "text-neutral-900",
+                    )}
+                  >
+                    {opt.label}
+                  </span>
+                  {active && (
+                    <Badge variant="brand" className="text-[10px]">
+                      Aktif
+                    </Badge>
+                  )}
+                </div>
+                <p className="text-xs leading-relaxed text-neutral-600">
+                  {opt.description}
+                </p>
+              </button>
+              <button
+                type="button"
+                onClick={() => !locked && onPreview(opt.key)}
+                disabled={locked}
+                className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-neutral-200 bg-white text-xs font-medium text-neutral-700 transition-colors hover:border-brand-300 hover:text-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Eye className="size-3.5" aria-hidden />
+                Preview
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
+// LayoutThumbnail — mini mockup untuk masing-masing variant. Tidak load
+// data; cuma rectangles + abstract shapes untuk hint visual.
+function LayoutThumbnail({
+  variant,
+  active,
+}: {
+  variant: LayoutKey;
+  active: boolean;
+}) {
+  const tileBg = active ? "bg-brand-200" : "bg-neutral-200";
+  const wrap = cn(
+    "aspect-[4/3] w-full overflow-hidden rounded-md border bg-neutral-50 p-2",
+    active ? "border-brand-300" : "border-neutral-200",
+  );
+
+  if (variant === "list") {
+    return (
+      <div className={wrap}>
+        <div className="flex h-full flex-col gap-1.5">
+          {[0, 1, 2].map((i) => (
+            <div
+              key={i}
+              className="flex items-center gap-1.5 rounded bg-white p-1 shadow-sm"
+            >
+              <div className={cn("size-6 shrink-0 rounded", tileBg)} />
+              <div className="flex-1 space-y-1">
+                <div className={cn("h-1 w-3/4 rounded", tileBg)} />
+                <div className={cn("h-1 w-1/2 rounded opacity-60", tileBg)} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  if (variant === "showcase") {
+    return (
+      <div className={wrap}>
+        <div className="flex h-full flex-col gap-1.5">
+          <div className={cn("h-10 rounded", tileBg)} />
+          <div className="grid flex-1 grid-cols-2 gap-1.5">
+            <div className={cn("rounded", tileBg)} />
+            <div className={cn("rounded", tileBg)} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+  if (variant === "compact") {
+    return (
+      <div className={wrap}>
+        <div className="grid h-full grid-cols-4 gap-1">
+          {Array.from({ length: 12 }).map((_, i) => (
+            <div key={i} className={cn("rounded-sm", tileBg)} />
+          ))}
+        </div>
+      </div>
+    );
+  }
+  if (variant === "magazine") {
+    return (
+      <div className={wrap}>
+        <div className="grid h-full grid-cols-3 grid-rows-2 gap-1.5">
+          <div className={cn("col-span-2 row-span-2 rounded", tileBg)} />
+          <div className={cn("rounded", tileBg)} />
+          <div className={cn("rounded", tileBg)} />
+        </div>
+      </div>
+    );
+  }
+  if (variant === "feed") {
+    return (
+      <div className={wrap}>
+        <div className="mx-auto flex h-full max-w-[60%] flex-col gap-1.5">
+          {[0, 1].map((i) => (
+            <div
+              key={i}
+              className={cn("aspect-square w-full rounded", tileBg)}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
+  // grid
+  return (
+    <div className={wrap}>
+      <div className="grid h-full grid-cols-3 gap-1.5">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className={cn("rounded", tileBg)} />
+        ))}
+      </div>
+    </div>
   );
 }

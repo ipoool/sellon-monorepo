@@ -1,5 +1,12 @@
-import type { Metadata } from "next";
-import { CheckCircle2, Globe, Database, Server, CreditCard, Mail, Bell } from "lucide-react";
+import {
+  CheckCircle2,
+  AlertTriangle,
+  XCircle,
+  Globe,
+  Server,
+  Database,
+  Info,
+} from "lucide-react";
 
 import { Container } from "@/components/layout/container";
 import { Header } from "@/components/layout/header";
@@ -7,60 +14,107 @@ import { Footer } from "@/components/layout/footer";
 import { Section } from "@/components/layout/section";
 import { Badge } from "@/components/ui/badge";
 import { getMe } from "@/lib/server-auth";
+import { pageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
-  title: "Status Layanan — SellOn",
+// Status page is realtime — we don't want Google to cache stale "all
+// systems operational" snapshots, so it's noindex.
+export const metadata = pageMetadata({
+  title: "Status Layanan",
   description:
-    "Status real-time dari semua layanan SellOn — API, web, database, payment gateway.",
-};
+    "Status real-time layanan SellOn - diperbarui setiap kali halaman diakses.",
+  path: "/status",
+  noindex: true,
+});
 
-type Service = {
-  icon: React.ComponentType<{ className?: string; "aria-hidden"?: boolean }>;
+// Status checks are intentionally simple. We probe two endpoints
+// server-side at request time:
+//   - GET /health  → liveness; if it answers OK, the API process is up.
+//   - GET /api/v1/info → catches DB-down/migrations-stuck where /health
+//     would still return OK. The handler reads cfg, which loads even
+//     without a DB, so this is mostly a serialization/router probe.
+// We don't store history - there's no monitoring backend yet. Honesty
+// over fake 99.99% bars.
+
+type ServiceStatus = "operational" | "degraded" | "down";
+type ServiceCheck = {
   name: string;
   description: string;
-  status: "operational" | "degraded" | "down";
+  icon: React.ComponentType<{ className?: string; "aria-hidden"?: boolean }>;
+  status: ServiceStatus;
+  detail?: string;
 };
 
-const services: Service[] = [
-  {
-    icon: Globe,
-    name: "Aplikasi Web",
-    description: "sellon.id dan dasbor seller",
-    status: "operational",
-  },
-  {
-    icon: Server,
-    name: "API",
-    description: "Endpoint utama untuk auth, produk, pesanan",
-    status: "operational",
-  },
-  {
-    icon: Database,
-    name: "Database",
-    description: "Penyimpanan data toko, produk, pesanan",
-    status: "operational",
-  },
-  {
-    icon: CreditCard,
-    name: "Payment Gateway (Midtrans/Xendit)",
-    description: "Integrasi dengan PJP",
-    status: "operational",
-  },
-  {
-    icon: Mail,
-    name: "Email Notifikasi",
-    description: "Email transaksional ke pembeli dan penjual",
-    status: "operational",
-  },
-];
+const apiInternal =
+  process.env.API_INTERNAL_URL ||
+  process.env.NEXT_PUBLIC_API_URL ||
+  "http://localhost:8080";
 
-// Last 90 days, all-clear placeholder.
-const uptimeBars = Array.from({ length: 90 }, () => "operational" as const);
+async function probe(path: string, timeoutMs = 4000): Promise<{ ok: boolean; status: number; ms: number }> {
+  const t0 = Date.now();
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${apiInternal}${path}`, {
+      cache: "no-store",
+      signal: ctrl.signal,
+    });
+    return { ok: res.ok, status: res.status, ms: Date.now() - t0 };
+  } catch {
+    return { ok: false, status: 0, ms: Date.now() - t0 };
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export default async function StatusPage() {
-  const me = await getMe();
-  const allOk = services.every((s) => s.status === "operational");
-  const lastUpdated = new Date().toLocaleString("id-ID", {
+  // Run me + probes in parallel.
+  const [me, health, info] = await Promise.all([
+    getMe(),
+    probe("/health"),
+    probe("/api/v1/info"),
+  ]);
+
+  const apiStatus: ServiceStatus = health.ok ? "operational" : "down";
+  const apiDetail = health.ok
+    ? `OK · ${health.ms}ms`
+    : `Tidak merespon (HTTP ${health.status || "-"})`;
+
+  const dbStatus: ServiceStatus = info.ok ? "operational" : "down";
+  const dbDetail = info.ok
+    ? `OK · ${info.ms}ms`
+    : `Tidak merespon (HTTP ${info.status || "-"})`;
+
+  const services: ServiceCheck[] = [
+    {
+      name: "Aplikasi Web",
+      description: "Halaman ini sedang ter-render - berarti web app aktif.",
+      icon: Globe,
+      status: "operational",
+      detail: "OK",
+    },
+    {
+      name: "API",
+      description: "Endpoint utama untuk auth, produk, dan pesanan.",
+      icon: Server,
+      status: apiStatus,
+      detail: apiDetail,
+    },
+    {
+      name: "Database & layanan internal",
+      description: "Probe via /api/v1/info - gagal kalau DB / config bermasalah.",
+      icon: Database,
+      status: dbStatus,
+      detail: dbDetail,
+    },
+  ];
+
+  const overall: ServiceStatus = services.some((s) => s.status === "down")
+    ? "down"
+    : services.some((s) => s.status === "degraded")
+      ? "degraded"
+      : "operational";
+
+  const lastChecked = new Date().toLocaleString("id-ID", {
     timeZone: "Asia/Jakarta",
     dateStyle: "long",
     timeStyle: "short",
@@ -70,28 +124,28 @@ export default async function StatusPage() {
     <>
       <Header me={me} />
       <main>
-        {/* Overall status banner */}
+        {/* Overall banner */}
         <section
           className={
-            allOk
+            overall === "operational"
               ? "border-b border-success/20 bg-success/5 py-12"
-              : "border-b border-warning/20 bg-warning/5 py-12"
+              : overall === "degraded"
+                ? "border-b border-warning/30 bg-warning/10 py-12"
+                : "border-b border-danger/30 bg-danger/5 py-12"
           }
         >
           <Container>
             <div className="mx-auto max-w-3xl text-center">
-              <div className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-1.5 text-sm font-medium text-success shadow-soft">
-                <CheckCircle2 className="size-4" aria-hidden />
-                {allOk ? "Semua sistem normal" : "Ada gangguan"}
-              </div>
+              <OverallPill status={overall} />
               <h1 className="mt-6 font-display text-4xl font-semibold tracking-tight text-neutral-900 sm:text-5xl">
                 Status SellOn
               </h1>
               <p className="mt-4 text-lg text-neutral-600">
-                Real-time status untuk semua layanan SellOn.
+                Hasil probe langsung saat halaman ini diakses - tidak ada
+                cache, tidak ada riwayat palsu.
               </p>
               <p className="mt-2 text-sm text-neutral-500">
-                Terakhir di-update {lastUpdated} WIB
+                Dicek pada {lastChecked} WIB
               </p>
             </div>
           </Container>
@@ -105,130 +159,68 @@ export default async function StatusPage() {
                 {services.map((s) => (
                   <li
                     key={s.name}
-                    className="flex items-center gap-4 rounded-xl border border-neutral-200 bg-white p-5 shadow-card"
+                    className="flex flex-col gap-3 rounded-xl border border-neutral-200 bg-white p-5 shadow-card sm:flex-row sm:items-center sm:gap-4"
                   >
                     <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-neutral-100 text-neutral-600">
                       <s.icon className="size-5" aria-hidden />
                     </div>
-                    <div className="flex-1">
+                    <div className="min-w-0 flex-1">
                       <p className="font-semibold text-neutral-900">{s.name}</p>
                       <p className="text-sm text-neutral-600">
                         {s.description}
                       </p>
+                      {s.detail && (
+                        <p className="mt-1 font-mono text-xs text-neutral-500">
+                          {s.detail}
+                        </p>
+                      )}
                     </div>
                     <StatusBadge status={s.status} />
                   </li>
                 ))}
               </ul>
+
+              <div className="mt-6 flex items-start gap-3 rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-700">
+                <Info className="mt-0.5 size-4 shrink-0 text-neutral-500" aria-hidden />
+                <p className="leading-relaxed">
+                  Halaman ini self-reported. SellOn belum punya monitoring
+                  pihak ketiga (StatusPage, BetterStack, dsb.). Kami tampilkan
+                  hasil probe yang baru saja dijalankan dari server web - bukan
+                  uptime historis.
+                </p>
+              </div>
             </div>
           </Container>
         </Section>
 
-        {/* 90-day uptime */}
+        {/* Got an issue? */}
         <Section bg="alt" tight>
           <Container>
-            <div className="mx-auto max-w-3xl">
-              <div className="flex items-baseline justify-between">
-                <h2 className="font-display text-2xl font-semibold tracking-tight text-neutral-900">
-                  Uptime 90 hari terakhir
-                </h2>
-                <span className="text-sm font-medium text-success">
-                  100,00% uptime
-                </span>
-              </div>
-              <p className="mt-2 text-sm text-neutral-600">
-                Setiap bar mewakili 1 hari. Hover untuk detail.
-              </p>
-
-              <div className="mt-6 flex items-end gap-[2px]">
-                {uptimeBars.map((status, i) => (
-                  <div
-                    key={i}
-                    title={`${90 - i} hari yang lalu — Normal`}
-                    className={
-                      status === "operational"
-                        ? "h-9 flex-1 rounded-sm bg-success/70 transition-all hover:bg-success"
-                        : "h-9 flex-1 rounded-sm bg-warning"
-                    }
-                  />
-                ))}
-              </div>
-
-              <div className="mt-3 flex items-center justify-between text-xs text-neutral-500">
-                <span>90 hari lalu</span>
-                <span>Hari ini</span>
-              </div>
-            </div>
-          </Container>
-        </Section>
-
-        {/* Recent incidents */}
-        <Section tight>
-          <Container>
-            <div className="mx-auto max-w-3xl">
-              <h2 className="font-display text-2xl font-semibold tracking-tight text-neutral-900">
-                Insiden Terbaru
-              </h2>
-
-              <div className="mt-6 rounded-xl border border-neutral-200 bg-white p-12 text-center shadow-card">
-                <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-success/10 text-success">
-                  <CheckCircle2 className="size-6" aria-hidden />
-                </div>
-                <p className="mt-4 font-medium text-neutral-900">
-                  Tidak ada insiden dalam 90 hari terakhir
-                </p>
-                <p className="mt-1 text-sm text-neutral-600">
-                  Semua sistem berjalan normal. Riwayat insiden akan muncul di
-                  sini ketika ada gangguan.
-                </p>
-              </div>
-            </div>
-          </Container>
-        </Section>
-
-        {/* Subscribe CTA */}
-        <Section bg="brand-soft" tight>
-          <Container>
             <div className="mx-auto max-w-2xl text-center">
-              <div className="inline-flex size-12 items-center justify-center rounded-full bg-white text-brand-600 shadow-soft">
-                <Bell className="size-5" aria-hidden />
-              </div>
-              <h2 className="mt-4 font-display text-2xl font-semibold tracking-tight text-neutral-900 sm:text-3xl">
-                Dapat notifikasi saat ada gangguan
+              <h2 className="font-display text-2xl font-semibold tracking-tight text-neutral-900 sm:text-3xl">
+                Kalau halaman ini bilang &ldquo;normal&rdquo; tapi kamu tetap
+                bermasalah
               </h2>
               <p className="mt-3 text-neutral-700">
-                Subscribe untuk dapat email saat insiden terdeteksi dan saat
-                resolusi tersedia.
+                Probe kami bisa pass meski ada bug spesifik di fitur tertentu.
+                Hubungi support untuk laporkan masalah:
               </p>
-              <form className="mt-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-center">
-                <label htmlFor="status-email" className="sr-only">
-                  Email
-                </label>
-                <input
-                  id="status-email"
-                  type="email"
-                  placeholder="kamu@email.com"
-                  className="rounded-lg border border-neutral-200 bg-white px-4 py-2.5 text-sm shadow-soft placeholder:text-neutral-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 sm:w-72"
-                />
-                <button
-                  type="button"
-                  className="rounded-lg bg-brand-500 px-5 py-2.5 text-sm font-medium text-white shadow-soft transition-colors hover:bg-brand-600"
-                  title="Akan segera hadir"
-                  disabled
-                >
-                  Subscribe
-                </button>
-              </form>
-              <p className="mt-3 text-xs text-neutral-500">
-                Atau follow{" "}
+              <div className="mt-6 flex flex-col items-center gap-2 sm:flex-row sm:justify-center">
                 <a
-                  href="#"
-                  className="font-medium text-brand-600 hover:text-brand-700"
+                  href="mailto:halo@sellon.id"
+                  className="inline-flex h-10 items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-4 text-sm font-medium text-neutral-800 transition-colors hover:border-neutral-300"
                 >
-                  @sellonid
-                </a>{" "}
-                untuk update real-time.
-              </p>
+                  halo@sellon.id
+                </a>
+                <a
+                  href="https://wa.me/6281291006534"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-success px-4 text-sm font-semibold text-white transition-colors hover:bg-success/90"
+                >
+                  WhatsApp 0812-9100-6534
+                </a>
+              </div>
             </div>
           </Container>
         </Section>
@@ -238,12 +230,33 @@ export default async function StatusPage() {
   );
 }
 
-function StatusBadge({ status }: { status: Service["status"] }) {
+function OverallPill({ status }: { status: ServiceStatus }) {
   if (status === "operational") {
-    return <Badge variant="success">● Normal</Badge>;
+    return (
+      <div className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-1.5 text-sm font-medium text-success shadow-soft">
+        <CheckCircle2 className="size-4" aria-hidden />
+        Semua sistem normal
+      </div>
+    );
   }
   if (status === "degraded") {
-    return <Badge variant="warning">● Gangguan</Badge>;
+    return (
+      <div className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-1.5 text-sm font-medium text-neutral-800 shadow-soft">
+        <AlertTriangle className="size-4 text-warning" aria-hidden />
+        Kinerja menurun
+      </div>
+    );
   }
-  return <Badge variant="default">● Down</Badge>;
+  return (
+    <div className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-1.5 text-sm font-medium text-danger shadow-soft">
+      <XCircle className="size-4" aria-hidden />
+      Ada layanan yang turun
+    </div>
+  );
+}
+
+function StatusBadge({ status }: { status: ServiceStatus }) {
+  if (status === "operational") return <Badge variant="success">● Normal</Badge>;
+  if (status === "degraded") return <Badge variant="warning">● Menurun</Badge>;
+  return <Badge variant="danger">● Down</Badge>;
 }

@@ -17,16 +17,16 @@ export function CtaBanner() {
               backgroundSize: "20px 20px",
             }}
           />
-          <div className="relative mx-auto max-w-2xl">
+          <div className="relative mx-auto max-w-3xl">
             <h2 className="font-display text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-              Siap mulai jualan tanpa potongan?
+              5 menit untuk berhenti balas &ldquo;ready kak?&rdquo;.
             </h2>
             <p className="mt-4 text-lg text-white/90">
-              Gratis selamanya untuk toko kecil. Tidak butuh kartu kredit.
-              Cuma butuh akun Google dan 5 menit.
+              Login Google, foto produk, share link ke grup WA.
+              Gratis selamanya untuk toko kecil.
             </p>
             <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-              <Link href="/masuk">
+              <Link href="/login">
                 <Button
                   size="lg"
                   variant="secondary"
