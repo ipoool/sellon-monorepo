@@ -153,15 +153,18 @@ func defaultEmail(email, phone string) string {
 	return phone + "@buyer.sellon.id"
 }
 
-// Ping verifies that the server key is valid by hitting a lightweight
-// authenticated endpoint. Midtrans Core /v2/ping returns "pong" on success;
-// 401/403 means the key is invalid for that environment.
+// Ping verifies that the server key is valid by hitting Core /v2/{id}/status
+// with a fake order ID. Midtrans authenticates the request before checking
+// whether the order exists, so:
+//   - 404 "Transaction doesn't exist" → auth passed → key is valid
+//   - 401 / 403 → key is invalid or wrong environment
 func (c *MidtransClient) Ping(serverKey string, isSandbox bool) error {
 	base := coreSandboxBase
 	if !isSandbox {
 		base = coreProdBase
 	}
-	req, err := http.NewRequest(http.MethodGet, base+"/ping", nil)
+	// Fake order ID — guaranteed to not exist, but Midtrans checks auth first.
+	req, err := http.NewRequest(http.MethodGet, base+"/sellon-verify-00000000/status", nil)
 	if err != nil {
 		return err
 	}
@@ -170,22 +173,20 @@ func (c *MidtransClient) Ping(serverKey string, isSandbox bool) error {
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("hubungi Midtrans: %w", err)
+		return fmt.Errorf("tidak dapat terhubung ke Midtrans: %w", err)
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 
 	switch resp.StatusCode {
-	case http.StatusOK:
+	case http.StatusOK, http.StatusNotFound:
+		// 404 = order not found but auth passed → key valid.
 		return nil
 	case http.StatusUnauthorized, http.StatusForbidden:
-		return fmt.Errorf("server key Midtrans ditolak — pastikan key benar dan cocok dengan mode aktif (sandbox/production)")
-	case http.StatusNotFound:
-		// /v2/ping doesn't exist on all envs; treat 404 as "auth header was
-		// processed" (otherwise would be 401). Best-effort success.
-		return nil
+		return fmt.Errorf("server key ditolak Midtrans — pastikan key benar dan sesuai mode (%s)",
+			map[bool]string{true: "sandbox", false: "production"}[isSandbox])
 	default:
-		return fmt.Errorf("midtrans ping returned %d: %s", resp.StatusCode, string(body))
+		return fmt.Errorf("Midtrans membalas %d: %s", resp.StatusCode, string(body))
 	}
 }
 

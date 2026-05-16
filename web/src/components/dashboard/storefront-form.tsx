@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { showError, showSuccess } from "@/lib/toast";
 import { deleteUploaded } from "@/lib/supabase";
 import Link from "next/link";
@@ -21,6 +21,10 @@ import {
   MonitorSmartphone,
   BookOpen,
   RectangleVertical,
+  Settings2,
+  Plus,
+  Trash2,
+  X,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -33,7 +37,7 @@ import { ImageUploadInput } from "@/components/dashboard/image-upload-input";
 import { LayoutPreviewDialog } from "@/components/dashboard/layout-preview-dialog";
 import { usePlan } from "@/components/dashboard/plan-context";
 import { cn } from "@/lib/utils";
-import type { Store } from "@/lib/types";
+import type { Store, LayoutConfig } from "@/lib/types";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
@@ -70,7 +74,11 @@ export function StorefrontForm({ initial }: { initial: Store }) {
     initial.show_social_public ?? true,
   );
   const [footerText, setFooterText] = useState(initial.footer_text ?? "");
+  const [layoutConfig, setLayoutConfig] = useState<LayoutConfig>(
+    initial.layout_config ?? {},
+  );
   const [pending, setPending] = useState(false);
+  const [kioskConfigOpen, setKioskConfigOpen] = useState(false);
   // Refs tracking URL gambar yang sudah benar-benar ter-save di server.
   // Pakai untuk hapus file lama di Supabase Storage saat seller ganti
   // logo / banner. Tidak pakai initial.{logo,banner}_url langsung karena
@@ -78,11 +86,15 @@ export function StorefrontForm({ initial }: { initial: Store }) {
   // di-mount-saat-load.
   const savedLogoRef = useRef<string>(initial.logo_url ?? "");
   const savedBannerRef = useRef<string>(initial.banner_url ?? "");
+  const savedSlidesRef = useRef<string[]>(
+    (initial.layout_config?.kiosk?.banner_slides ?? []).map((s) => s.image_url),
+  );
 
   // Single source of truth untuk PUT storefront. onSubmit + onApply
   // layout sama-sama panggil ini, beda hanya nilai product_layout
   // yang dikirim.
   async function persistStorefront(layoutOverride?: LayoutKey) {
+    const effectiveLayout = layoutOverride ?? productLayout;
     const res = await fetch(`${apiBase}/api/v1/store/storefront`, {
       method: "PUT",
       credentials: "include",
@@ -92,10 +104,11 @@ export function StorefrontForm({ initial }: { initial: Store }) {
         banner_url: bannerUrl,
         tagline: tagline.trim(),
         theme_hue: themeHue,
-        product_layout: layoutOverride ?? productLayout,
+        product_layout: effectiveLayout,
         show_hours_public: showHours,
         show_social_public: showSocial,
         footer_text: footerText.trim(),
+        layout_config: layoutConfig,
       }),
     });
     const data = await res.json().catch(() => ({}));
@@ -113,6 +126,15 @@ export function StorefrontForm({ initial }: { initial: Store }) {
     }
     savedLogoRef.current = logoUrl;
     savedBannerRef.current = bannerUrl;
+
+    const currentSlides =
+      layoutConfig.kiosk?.banner_slides?.map((s) => s.image_url) ?? [];
+    for (const oldUrl of savedSlidesRef.current) {
+      if (oldUrl && !currentSlides.includes(oldUrl)) {
+        void deleteUploaded(oldUrl);
+      }
+    }
+    savedSlidesRef.current = currentSlides;
     return data;
   }
 
@@ -308,6 +330,14 @@ export function StorefrontForm({ initial }: { initial: Store }) {
         value={productLayout}
         onChange={applyLayout}
         onPreview={setPreviewLayout}
+        onConfigClick={() => setKioskConfigOpen(true)}
+      />
+
+      <KioskConfigDialog
+        open={kioskConfigOpen}
+        onClose={() => setKioskConfigOpen(false)}
+        config={layoutConfig.kiosk ?? { banner_enabled: false, banner_slides: [] }}
+        onChange={(kiosk) => setLayoutConfig((prev) => ({ ...prev, kiosk }))}
       />
 
       {previewLayout && (
@@ -500,11 +530,13 @@ function ProductLayoutCard({
   value,
   onChange,
   onPreview,
+  onConfigClick,
 }: {
   locked: boolean;
   value: LayoutKey;
   onChange: (key: LayoutKey) => void;
   onPreview: (key: LayoutKey) => void;
+  onConfigClick?: () => void;
 }) {
   return (
     <Card className={cn(locked && "border-warning/40 bg-warning/5")}>
@@ -596,6 +628,17 @@ function ProductLayoutCard({
 
               {/* Actions */}
               <div className="mt-auto flex gap-2">
+                {opt.key === "kiosk" && active && onConfigClick && (
+                  <button
+                    type="button"
+                    onClick={onConfigClick}
+                    title="Konfigurasi Kiosk"
+                    aria-label="Konfigurasi Kiosk"
+                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-neutral-200 bg-white text-neutral-600 transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-brand-700"
+                  >
+                    <Settings2 className="size-3.5" aria-hidden />
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => !locked && onPreview(opt.key)}
@@ -765,5 +808,232 @@ function LayoutThumbnail({
         ))}
       </div>
     </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// KioskConfigDialog — konfigurasi banner kiosk dalam dialog.
+// ─────────────────────────────────────────────────────────────────────
+
+type KioskConfig = {
+  banner_enabled: boolean;
+  banner_slides: { image_url: string }[];
+  slide_duration_ms?: number;
+  cta_label?: string;
+};
+
+const MAX_SLIDES = 5;
+
+function KioskConfigDialog({
+  open,
+  onClose,
+  config,
+  onChange,
+}: {
+  open: boolean;
+  onClose: () => void;
+  config: KioskConfig;
+  onChange: (cfg: KioskConfig) => void;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    const d = dialogRef.current;
+    if (!d) return;
+    if (open && !d.open) d.showModal();
+    if (!open && d.open) d.close();
+  }, [open]);
+
+  useEffect(() => {
+    const d = dialogRef.current;
+    if (!d) return;
+    const onCancel = (e: Event) => { e.preventDefault(); onClose(); };
+    const onClick = (e: MouseEvent) => { if (e.target === d) onClose(); };
+    d.addEventListener("cancel", onCancel);
+    d.addEventListener("click", onClick);
+    return () => {
+      d.removeEventListener("cancel", onCancel);
+      d.removeEventListener("click", onClick);
+    };
+  }, [onClose]);
+
+  function setEnabled(enabled: boolean) {
+    onChange({ ...config, banner_enabled: enabled });
+  }
+
+  function setSlide(idx: number, url: string) {
+    const slides = [...config.banner_slides];
+    slides[idx] = { image_url: url };
+    onChange({ ...config, banner_slides: slides });
+  }
+
+  function addSlide() {
+    if (config.banner_slides.length >= MAX_SLIDES) return;
+    onChange({ ...config, banner_slides: [...config.banner_slides, { image_url: "" }] });
+  }
+
+  function removeSlide(idx: number) {
+    onChange({ ...config, banner_slides: config.banner_slides.filter((_, i) => i !== idx) });
+  }
+
+  return (
+    <dialog
+      ref={dialogRef}
+      aria-labelledby="kiosk-cfg-title"
+      className="fixed left-1/2 top-1/2 m-0 w-[min(560px,95vw)] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-neutral-200 bg-white p-0 shadow-popout backdrop:bg-neutral-900/40 backdrop:backdrop-blur-sm"
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between gap-3 border-b border-neutral-200 px-5 py-3.5">
+        <div className="flex items-center gap-2.5">
+          <Settings2 className="size-4 text-brand-600" aria-hidden />
+          <h2 id="kiosk-cfg-title" className="font-display text-base font-semibold text-neutral-900">
+            Konfigurasi Kiosk
+          </h2>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Tutup"
+          className="-mr-1 -mt-1 inline-flex size-8 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900"
+        >
+          <X className="size-4" aria-hidden />
+        </button>
+      </div>
+
+      {/* Body */}
+      <div className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto px-5 py-4">
+        {/* Toggle */}
+        <label
+          htmlFor="kiosk_banner_toggle"
+          className="flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-neutral-200 bg-neutral-50 px-4 py-3"
+        >
+          <div>
+            <p className="text-sm font-medium text-neutral-900">Tampilkan banner intro</p>
+            <p className="text-xs text-neutral-600">
+              Gambar promo fullscreen saat toko dibuka. Pembeli tap &ldquo;Order Now&rdquo; untuk masuk ke menu.
+            </p>
+          </div>
+          <Switch
+            id="kiosk_banner_toggle"
+            checked={config.banner_enabled}
+            onChange={(e) => setEnabled(e.target.checked)}
+          />
+        </label>
+
+        {/* Slide duration */}
+        {config.banner_enabled && (
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <label htmlFor="kiosk_duration" className="text-sm font-medium text-neutral-900">
+                Durasi tiap slide
+              </label>
+              <span className="text-sm font-semibold tabular-nums text-brand-700">
+                {Math.round((config.slide_duration_ms ?? 3000) / 1000)} detik
+              </span>
+            </div>
+            <input
+              id="kiosk_duration"
+              type="range"
+              min={5}
+              max={60}
+              step={1}
+              value={Math.round((config.slide_duration_ms ?? 3000) / 1000)}
+              onChange={(e) =>
+                onChange({ ...config, slide_duration_ms: Number(e.target.value) * 1000 })
+              }
+              className="h-2 w-full cursor-pointer accent-brand-500"
+            />
+            <div className="flex justify-between text-[10px] text-neutral-400">
+              <span>5 dtk</span>
+              <span>60 dtk</span>
+            </div>
+          </div>
+        )}
+
+        {/* CTA label */}
+        {config.banner_enabled && (
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="kiosk_cta_label">Label tombol masuk</Label>
+            <Input
+              id="kiosk_cta_label"
+              type="text"
+              placeholder="Order Now"
+              maxLength={30}
+              value={config.cta_label ?? ""}
+              onChange={(e) =>
+                onChange({ ...config, cta_label: e.target.value })
+              }
+            />
+            <p className="text-xs text-neutral-500">
+              Kosongkan untuk menggunakan teks default &ldquo;Order Now&rdquo;.
+            </p>
+          </div>
+        )}
+
+        {/* Slide slots */}
+        {config.banner_enabled && (
+          <div className="flex flex-col gap-3">
+            <p className="text-sm font-medium text-neutral-900">
+              Slide gambar ({config.banner_slides.length}/{MAX_SLIDES})
+            </p>
+
+            {config.banner_slides.map((slide, idx) => (
+              <div
+                key={idx}
+                className="flex items-start gap-3 rounded-lg border border-neutral-200 bg-neutral-50 p-3"
+              >
+                <div className="flex-1">
+                  <p className="mb-1.5 text-xs font-medium text-neutral-700">Slide {idx + 1}</p>
+                  <ImageUploadInput
+                    value={slide.image_url}
+                    onChange={(url) => setSlide(idx, url)}
+                    kind="banner"
+                    shape="wide"
+                  />
+                </div>
+                {config.banner_slides.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => removeSlide(idx)}
+                    aria-label={`Hapus slide ${idx + 1}`}
+                    className="mt-6 inline-flex size-8 shrink-0 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-red-50 hover:text-red-600"
+                  >
+                    <Trash2 className="size-4" aria-hidden />
+                  </button>
+                )}
+              </div>
+            ))}
+
+            {config.banner_slides.length === 0 && (
+              <p className="text-sm text-neutral-500">
+                Belum ada slide. Klik &ldquo;Tambah Slide&rdquo; untuk upload gambar pertama.
+              </p>
+            )}
+
+            {config.banner_slides.length < MAX_SLIDES && (
+              <button
+                type="button"
+                onClick={addSlide}
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-dashed border-neutral-300 px-3 text-sm font-medium text-neutral-600 transition-colors hover:border-brand-400 hover:text-brand-700"
+              >
+                <Plus className="size-4" aria-hidden />
+                Tambah Slide
+              </button>
+            )}
+
+            <p className="text-xs text-neutral-500">
+              Gunakan gambar landscape (16:9 atau 4:3). Minimum 1 slide jika banner diaktifkan.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Footer */}
+      <div className="flex items-center justify-end border-t border-neutral-200 bg-neutral-50 px-5 py-3">
+        <Button type="button" size="sm" onClick={onClose}>
+          Selesai
+        </Button>
+      </div>
+    </dialog>
   );
 }

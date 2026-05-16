@@ -84,6 +84,7 @@ function formatRelative(iso: string): string {
     day: "numeric",
     month: "short",
     year: "numeric",
+    timeZone: "Asia/Jakarta",
   });
 }
 
@@ -94,6 +95,7 @@ function formatExact(iso: string): string {
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: "Asia/Jakarta",
   });
 }
 

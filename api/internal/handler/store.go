@@ -61,6 +61,7 @@ type storeDTO struct {
 	CustomDomain               *string         `json:"custom_domain"`
 	DomainStatus               string          `json:"domain_status"`
 	DomainVerifiedAt           *string         `json:"domain_verified_at"`
+	LayoutConfig               json.RawMessage `json:"layout_config,omitempty"`
 }
 
 func toStoreDTO(s *repository.Store) storeDTO {
@@ -99,6 +100,7 @@ func toStoreDTO(s *repository.Store) storeDTO {
 		CustomDomain:     s.CustomDomain,
 		DomainStatus:     s.DomainStatus,
 		DomainVerifiedAt: formatTimePtr(s.DomainVerifiedAt),
+		LayoutConfig:     json.RawMessage(s.LayoutConfig),
 	}
 }
 
@@ -248,14 +250,15 @@ func (h *StoreHandler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateStorefrontReq struct {
-	LogoURL          string `json:"logo_url"`
-	BannerURL        string `json:"banner_url"`
-	Tagline          string `json:"tagline"`
-	ThemeHue         int    `json:"theme_hue"`
-	ProductLayout    string `json:"product_layout"`
-	ShowHoursPublic  bool   `json:"show_hours_public"`
-	ShowSocialPublic bool   `json:"show_social_public"`
-	FooterText       string `json:"footer_text"`
+	LogoURL          string          `json:"logo_url"`
+	BannerURL        string          `json:"banner_url"`
+	Tagline          string          `json:"tagline"`
+	ThemeHue         int             `json:"theme_hue"`
+	ProductLayout    string          `json:"product_layout"`
+	ShowHoursPublic  bool            `json:"show_hours_public"`
+	ShowSocialPublic bool            `json:"show_social_public"`
+	FooterText       string          `json:"footer_text"`
+	LayoutConfig     json.RawMessage `json:"layout_config,omitempty"`
 }
 
 // PUT /api/v1/store/storefront — narrow updater for the Storefront page.
@@ -297,6 +300,7 @@ func (h *StoreHandler) UpdateStorefront(w http.ResponseWriter, r *http.Request) 
 		ShowHoursPublic:  req.ShowHoursPublic,
 		ShowSocialPublic: req.ShowSocialPublic,
 		FooterText:       strings.TrimSpace(req.FooterText),
+		LayoutConfigJSON: []byte(req.LayoutConfig),
 	})
 	if err != nil {
 		h.logger.Error("update storefront", "err", err)

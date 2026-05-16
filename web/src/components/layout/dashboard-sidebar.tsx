@@ -19,7 +19,7 @@ import {
   UserCog,
   X,
   Zap,
-  Building2,
+  Crown,
   type LucideIcon,
 } from "lucide-react";
 
@@ -142,7 +142,7 @@ function SidebarContent({
         <Link href="/settings/subscription" aria-label="Lihat langganan">
           <Badge variant={tierVariant} className="inline-flex items-center gap-1">
             {plan === "pro" && <Zap className="size-3" aria-hidden />}
-            {plan === "bisnis" && <Building2 className="size-3" aria-hidden />}
+            {plan === "bisnis" && <Crown className="size-3" aria-hidden />}
             {tierLabel}
           </Badge>
         </Link>

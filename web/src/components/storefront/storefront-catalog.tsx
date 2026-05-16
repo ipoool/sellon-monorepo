@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { Search, Package, Star, Sparkles, RotateCcw, ShoppingBag, ShoppingCart, Plus, Minus } from "lucide-react";
@@ -8,6 +8,8 @@ import { Search, Package, Star, Sparkles, RotateCcw, ShoppingBag, ShoppingCart, 
 import { formatRupiah } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useOptionalCart } from "@/components/storefront/cart-context";
+import { KioskSplash } from "@/components/storefront/kiosk-splash";
+import type { LayoutConfig } from "@/lib/types";
 
 type StorefrontProduct = {
   id: string;
@@ -61,6 +63,7 @@ type Props = {
   // viewport asli, jadi di dalam frame max-w-sm kita perlu override
   // manual ke kolom-kolom yang masuk akal untuk layar HP.
   forceMobile?: boolean;
+  layoutConfig?: LayoutConfig;
 };
 
 export function StorefrontCatalog({
@@ -69,9 +72,30 @@ export function StorefrontCatalog({
   categories,
   layout = "grid",
   forceMobile = false,
+  layoutConfig,
 }: Props) {
   const [query, setQuery] = useState("");
   const [activeCategoryId, setActiveCategoryId] = useState<string>("");
+
+  const kioskConfig = layoutConfig?.kiosk;
+  const showSplash =
+    layout === "kiosk" &&
+    !!kioskConfig?.banner_enabled &&
+    (kioskConfig?.banner_slides?.filter((s) => s.image_url).length ?? 0) > 0;
+
+  // Initialize to showSplash so server HTML, client hydration, and first paint
+  // all start with products hidden — eliminating the flash of products before splash.
+  // useEffect then immediately clears it if the user already dismissed this session.
+  const [splashActive, setSplashActive] = useState(showSplash);
+
+  useEffect(() => {
+    if (!showSplash) return;
+    const dismissed =
+      sessionStorage.getItem(`${storeSlug}:kiosk-splash-dismissed`) === "1";
+    if (dismissed) setSplashActive(false);
+  // showSplash and storeSlug are stable across renders; run once on mount.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Categories with at least 1 product
   const usedCategories = useMemo(() => {
@@ -111,7 +135,18 @@ export function StorefrontCatalog({
 
   return (
     <>
-      <div
+      {showSplash && splashActive && (
+        <KioskSplash
+          storeSlug={storeSlug}
+          slides={kioskConfig!.banner_slides.filter((s) => s.image_url)}
+          slideDurationMs={kioskConfig!.slide_duration_ms}
+          ctaLabel={kioskConfig!.cta_label}
+          onDismiss={() => setSplashActive(false)}
+        />
+      )}
+      {!splashActive && (
+      <><div
+        id="produk"
         className={cn(
           "mb-6 flex flex-col gap-3",
           !forceMobile && "sm:flex-row sm:items-center sm:justify-between",
@@ -317,6 +352,7 @@ export function StorefrontCatalog({
           )}
         </>
       )}
+      </>)}
     </>
   );
 }

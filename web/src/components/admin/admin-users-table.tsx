@@ -41,6 +41,7 @@ function formatDate(iso: string) {
     day: "numeric",
     month: "short",
     year: "numeric",
+    timeZone: "Asia/Jakarta",
   });
 }
 
@@ -104,6 +105,7 @@ export function AdminUsersTable({ initial, initialQuery }: Props) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogState>(null);
   const [menuPos, setMenuPos] = useState<{ id: string; top: number; right: number } | null>(null);
+  const [grantSubUser, setGrantSubUser] = useState<AdminUser | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const triggerRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
 
@@ -340,13 +342,14 @@ export function AdminUsersTable({ initial, initialQuery }: Props) {
                                   Detail
                                 </Link>
                                 {!isAdmin && u.store_id && (
-                                  <AdminGrantSubscriptionDialog
-                                    storeId={u.store_id}
-                                    storeName={u.name || u.email}
-                                    currentPlan={u.plan}
-                                    triggerVariant="menu"
-                                    onOpen={() => setMenuPos(null)}
-                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => { setMenuPos(null); setGrantSubUser(u); }}
+                                    className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50"
+                                  >
+                                    <Crown className="size-4 shrink-0 text-neutral-400" aria-hidden />
+                                    Atur Langganan
+                                  </button>
                                 )}
                                 {!isAdmin && !banned && (
                                   <button
@@ -397,6 +400,17 @@ export function AdminUsersTable({ initial, initialQuery }: Props) {
             </tbody>
           </table>
         </div>
+      )}
+
+      {grantSubUser?.store_id && (
+        <AdminGrantSubscriptionDialog
+          storeId={grantSubUser.store_id}
+          storeName={grantSubUser.name || grantSubUser.email}
+          currentPlan={grantSubUser.plan}
+          triggerVariant="none"
+          externalOpen={true}
+          onExternalClose={() => setGrantSubUser(null)}
+        />
       )}
 
       <ConfirmDialog

@@ -17,7 +17,7 @@ import { StorefrontCatalog } from "@/components/storefront/storefront-catalog";
 import { StoreHoursPopup } from "@/components/storefront/store-hours-popup";
 import { waLink } from "@/lib/whatsapp";
 import { themeStyleForHue } from "@/lib/storefront-theme";
-import type { OpenHours, DayOfWeek } from "@/lib/types";
+import type { OpenHours, DayOfWeek, LayoutConfig } from "@/lib/types";
 
 const apiBase =
   process.env.API_INTERNAL_URL ||
@@ -52,6 +52,7 @@ type StorefrontStore = {
   show_hours_public?: boolean;
   show_social_public?: boolean;
   footer_text?: string;
+  layout_config?: LayoutConfig;
 };
 
 type StorefrontProduct = {
@@ -191,11 +192,7 @@ export default async function StorefrontPage({
                   )
                 ) : null}
               </div>
-              {store.tagline && (
-                <p className="mt-1 text-sm font-medium text-brand-700">
-                  {store.tagline}
-                </p>
-              )}
+
               {store.description && (
                 <p className="mt-2 text-sm leading-relaxed text-neutral-600">
                   {store.description}
@@ -316,6 +313,7 @@ export default async function StorefrontPage({
             products={products}
             categories={categories}
             layout={store.product_layout ?? "grid"}
+            layoutConfig={store.layout_config}
           />
         </Container>
       </main>

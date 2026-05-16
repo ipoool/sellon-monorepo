@@ -33,9 +33,12 @@ type Props = {
   storeId: string;
   storeName: string;
   currentPlan?: string;
-  triggerVariant?: "default" | "outline" | "ghost" | "menu";
+  triggerVariant?: "default" | "outline" | "ghost" | "menu" | "none";
   triggerLabel?: string;
   onOpen?: () => void;
+  // External control — when provided, overrides internal open state.
+  externalOpen?: boolean;
+  onExternalClose?: () => void;
 };
 
 export function AdminGrantSubscriptionDialog({
@@ -45,9 +48,19 @@ export function AdminGrantSubscriptionDialog({
   triggerVariant = "outline",
   triggerLabel = "Atur Langganan",
   onOpen,
+  externalOpen,
+  onExternalClose,
 }: Props) {
   const { refresh } = useRouter();
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = externalOpen !== undefined ? externalOpen : internalOpen;
+  function setOpen(val: boolean) {
+    if (externalOpen !== undefined) {
+      if (!val) onExternalClose?.();
+    } else {
+      setInternalOpen(val);
+    }
+  }
   const [plan, setPlan] = useState<Plan>("pro");
   const [mode, setMode] = useState<Mode>("months");
   const [months, setMonths] = useState(1);
@@ -125,7 +138,7 @@ export function AdminGrantSubscriptionDialog({
           <Crown className="size-4 shrink-0 text-neutral-400" aria-hidden />
           {triggerLabel}
         </button>
-      ) : (
+      ) : triggerVariant !== "none" ? (
       <Button
         size="sm"
         variant={triggerVariant as "default" | "outline" | "ghost"}
@@ -138,7 +151,7 @@ export function AdminGrantSubscriptionDialog({
         <Crown className="size-3.5" aria-hidden />
         {triggerLabel}
       </Button>
-      )}
+      ) : null}
 
       <dialog
         ref={dialogRef}
@@ -319,5 +332,6 @@ function monthsToDateLabel(months: number): string {
     day: "numeric",
     month: "long",
     year: "numeric",
+    timeZone: "Asia/Jakarta",
   });
 }

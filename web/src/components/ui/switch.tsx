@@ -24,7 +24,7 @@ export function Switch({
       ? { track: "h-5 w-9", thumb: "size-4 peer-checked:translate-x-4" }
       : { track: "h-6 w-11", thumb: "size-5 peer-checked:translate-x-5" };
   return (
-    <span
+    <label
       className={cn(
         "relative inline-flex shrink-0 cursor-pointer select-none items-center",
         disabled && "cursor-not-allowed opacity-50",
@@ -52,6 +52,6 @@ export function Switch({
           dims.thumb,
         )}
       />
-    </span>
+    </label>
   );
 }

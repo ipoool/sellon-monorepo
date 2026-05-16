@@ -154,8 +154,9 @@ type publicStoreDTO struct {
 	// the seller has the store toggled closed OR has hit the monthly order
 	// quota for their tier. Reason carries a stable token the UI keys on:
 	// "store_closed" | "order_limit" | "" (when accepting).
-	AcceptingOrders       bool   `json:"accepting_orders"`
-	AcceptingOrdersReason string `json:"accepting_orders_reason"`
+	AcceptingOrders       bool            `json:"accepting_orders"`
+	AcceptingOrdersReason string          `json:"accepting_orders_reason"`
+	LayoutConfig          json.RawMessage `json:"layout_config,omitempty"`
 }
 
 type publicProductDTO struct {
@@ -204,6 +205,7 @@ func toPublicStore(s *repository.Store) publicStoreDTO {
 		// request context override these with the real check.
 		AcceptingOrders:       s.IsOpen,
 		AcceptingOrdersReason: "",
+		LayoutConfig:          json.RawMessage(s.LayoutConfig),
 	}
 }
 

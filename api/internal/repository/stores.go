@@ -47,6 +47,7 @@ type Store struct {
 	CustomDomain               *string    // nullable; set by Bisnis sellers
 	DomainStatus               string     // none|pending|active|failed
 	DomainVerifiedAt           *time.Time // nullable
+	LayoutConfig               []byte     // raw JSONB per-layout config
 	CreatedAt                  time.Time
 	UpdatedAt                  time.Time
 }
@@ -72,6 +73,7 @@ const storeColumns = `id, owner_id, slug, name, description, logo_url, banner_ur
 	segment_vip_threshold, segment_loyal_threshold,
 	segment_baru_name, segment_reguler_name, segment_loyal_name, segment_vip_name,
 	custom_domain, domain_status, domain_verified_at,
+	layout_config,
 	created_at, updated_at`
 
 // Same column list but qualified with the `s.` alias, used in joins.
@@ -84,6 +86,7 @@ const qualifiedStoreColumns = `s.id, s.owner_id, s.slug, s.name, s.description,
 	s.segment_vip_threshold, s.segment_loyal_threshold,
 	s.segment_baru_name, s.segment_reguler_name, s.segment_loyal_name, s.segment_vip_name,
 	s.custom_domain, s.domain_status, s.domain_verified_at,
+	s.layout_config,
 	s.created_at, s.updated_at`
 
 func scanStore(row pgx.Row, s *Store) error {
@@ -99,6 +102,7 @@ func scanStore(row pgx.Row, s *Store) error {
 		&s.SegmentVipThreshold, &s.SegmentLoyalThreshold,
 		&s.SegmentBaruName, &s.SegmentRegulerName, &s.SegmentLoyalName, &s.SegmentVipName,
 		&s.CustomDomain, &s.DomainStatus, &s.DomainVerifiedAt,
+		&s.LayoutConfig,
 		&s.CreatedAt, &s.UpdatedAt,
 	)
 }
@@ -267,6 +271,7 @@ type UpdateStorefrontInput struct {
 	ShowHoursPublic  bool
 	ShowSocialPublic bool
 	FooterText       string
+	LayoutConfigJSON []byte // nil = don't update; non-nil = replace
 }
 
 // UpdateStorefront is a narrow updater for the Pengaturan → Storefront page
@@ -283,12 +288,17 @@ func (r *StoreRepo) UpdateStorefront(ctx context.Context, id uuid.UUID, in Updat
 	default:
 		layout = "grid"
 	}
+	var layoutConfigArg interface{}
+	if len(in.LayoutConfigJSON) > 0 {
+		layoutConfigArg = string(in.LayoutConfigJSON)
+	}
 	q := `
 		UPDATE stores
 		SET logo_url = $2, banner_url = $3, tagline = $4,
 		    theme_hue = $5, product_layout = $6,
 		    show_hours_public = $7, show_social_public = $8,
 		    footer_text = $9,
+		    layout_config = COALESCE($10::jsonb, layout_config),
 		    updated_at = now()
 		WHERE id = $1
 		RETURNING ` + storeColumns
@@ -296,7 +306,7 @@ func (r *StoreRepo) UpdateStorefront(ctx context.Context, id uuid.UUID, in Updat
 	if err := scanStore(r.pool.QueryRow(ctx, q, id,
 		in.LogoURL, in.BannerURL, in.Tagline,
 		hue, layout, in.ShowHoursPublic, in.ShowSocialPublic,
-		in.FooterText,
+		in.FooterText, layoutConfigArg,
 	), &s); err != nil {
 		return nil, err
 	}

@@ -261,8 +261,8 @@ func (h *PaymentHandler) Save(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/v1/payments/midtrans/verify
 //
-// Calls Midtrans Core /v2/ping with the seller's decrypted server key for the
-// active env. Treats 200 (and 404) as success; 401/403 as invalid key.
+// Tests connectivity to Midtrans for the requested tab (sandbox or production).
+// Body: { "tab": "sandbox" | "production" } — defaults to the active DB mode.
 func (h *PaymentHandler) Verify(w http.ResponseWriter, r *http.Request) {
 	store, err := h.storeFor(r)
 	if err != nil {
@@ -271,18 +271,35 @@ func (h *PaymentHandler) Verify(w http.ResponseWriter, r *http.Request) {
 	}
 	g, err := h.gateways.Get(r.Context(), store.ID, "midtrans")
 	if err != nil {
-		response.Error(w, http.StatusBadRequest, "gateway belum dikonfigurasi")
+		response.Error(w, http.StatusBadRequest, "gateway belum dikonfigurasi — simpan kunci terlebih dahulu")
 		return
 	}
+
+	var body struct {
+		Tab string `json:"tab"` // "sandbox" | "production"
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+
+	// Determine which environment to test: use requested tab, fall back to active mode.
+	testSandbox := g.IsSandbox
+	if body.Tab == "sandbox" {
+		testSandbox = true
+	} else if body.Tab == "production" {
+		testSandbox = false
+	}
+
 	var encryptedKey []byte
-	if g.IsSandbox {
+	if testSandbox {
 		encryptedKey = g.ServerKeySandboxEncrypted
 	} else {
 		encryptedKey = g.ServerKeyProdEncrypted
 	}
+
+	envLabel := map[bool]string{true: "Sandbox", false: "Production"}[testSandbox]
+
 	if len(encryptedKey) == 0 {
 		response.Error(w, http.StatusBadRequest,
-			"Server Key untuk mode aktif belum diisi")
+			"Server Key "+envLabel+" belum tersimpan — simpan kunci terlebih dahulu")
 		return
 	}
 	keyBytes, err := h.encryptor.Decrypt(encryptedKey)
@@ -292,12 +309,7 @@ func (h *PaymentHandler) Verify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	envLabel := "sandbox"
-	if !g.IsSandbox {
-		envLabel = "production"
-	}
-
-	if err := h.midtrans.Ping(string(keyBytes), g.IsSandbox); err != nil {
+	if err := h.midtrans.Ping(string(keyBytes), testSandbox); err != nil {
 		_ = h.gateways.MarkVerified(r.Context(), store.ID, "midtrans", "failed")
 		response.Error(w, http.StatusBadRequest, err.Error())
 		return

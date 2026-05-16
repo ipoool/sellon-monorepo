@@ -2,6 +2,17 @@ export type DayOfWeek = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
 type DayHours = { open: string; close: string; closed?: boolean };
 export type OpenHours = Partial<Record<DayOfWeek, DayHours>>;
 
+export type KioskLayoutConfig = {
+  banner_enabled: boolean;
+  banner_slides: { image_url: string }[];
+  slide_duration_ms?: number; // autoplay interval; default 3000
+  cta_label?: string; // "Order Now" button label; default "Order Now"
+};
+
+export type LayoutConfig = {
+  kiosk?: KioskLayoutConfig;
+};
+
 export type Store = {
   id: string;
   slug: string;
@@ -46,6 +57,7 @@ export type Store = {
   custom_domain?: string | null;
   domain_status?: "none" | "pending" | "active" | "failed";
   domain_verified_at?: string | null;
+  layout_config?: LayoutConfig;
 };
 
 export type BankAccount = {

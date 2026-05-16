@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { FlaskConical, ArrowRight, X } from "lucide-react";
 
@@ -11,8 +11,21 @@ type Props = { visible: boolean };
 
 export function SandboxBanner({ visible }: Props) {
   const [dismissed, setDismissed] = useState(true); // default hidden to avoid flash
+  const prevVisibleRef = useRef(false);
 
   useEffect(() => {
+    const justBecameVisible = visible && !prevVisibleRef.current;
+    prevVisibleRef.current = visible;
+
+    if (justBecameVisible) {
+      // Mode switched to sandbox — reset dismissal so banner always shows fresh.
+      localStorage.removeItem(STORAGE_KEY);
+      setDismissed(false);
+      return;
+    }
+
+    if (!visible) return;
+
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const dismissedAt = parseInt(raw, 10);
@@ -22,7 +35,7 @@ export function SandboxBanner({ visible }: Props) {
       }
     }
     setDismissed(false);
-  }, []);
+  }, [visible]);
 
   if (!visible || dismissed) return null;
 

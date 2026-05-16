@@ -15,6 +15,7 @@ export function formatDateID(iso: string): string {
     day: "numeric",
     month: "short",
     year: "numeric",
+    timeZone: "Asia/Jakarta",
   });
 }
 
@@ -24,6 +25,7 @@ export function formatDateTimeID(iso: string): string {
     month: "short",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: "Asia/Jakarta",
   });
 }
 

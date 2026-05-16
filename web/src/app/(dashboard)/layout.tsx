@@ -64,7 +64,7 @@ export default async function DashboardLayout({
   const expClass = showExpiry
     ? "[--exp-h:5rem] sm:[--exp-h:3rem]"
     : "[--exp-h:0px]";
-  const showSandbox = !!gateway && gateway.is_configured && gateway.is_sandbox;
+  const showSandbox = !!gateway && gateway.is_sandbox;
   const sbxClass = showSandbox
     ? "[--sbx-h:5rem] sm:[--sbx-h:3rem]"
     : "[--sbx-h:0px]";
