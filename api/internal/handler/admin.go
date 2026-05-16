@@ -81,23 +81,49 @@ func (h *AdminHandler) Stats(w http.ResponseWriter, r *http.Request) {
 // === Users ===
 
 type adminUserDTO struct {
-	ID         string `json:"id"`
-	Email      string `json:"email"`
-	Name       string `json:"name"`
-	PictureURL string `json:"picture_url"`
-	Role       string `json:"role"`
-	BannedAt   string `json:"banned_at,omitempty"`
-	CreatedAt  string `json:"created_at"`
+	ID         string  `json:"id"`
+	Email      string  `json:"email"`
+	Name       string  `json:"name"`
+	PictureURL string  `json:"picture_url"`
+	Role       string  `json:"role"`
+	BannedAt   string  `json:"banned_at,omitempty"`
+	CreatedAt  string  `json:"created_at"`
+	StoreID    *string `json:"store_id,omitempty"`
+	Plan       string  `json:"plan"`
+	SubStatus  string  `json:"sub_status"`
+	PeriodEnd  *string `json:"period_end,omitempty"`
 }
 
 func toAdminUserDTO(u repository.User) adminUserDTO {
 	out := adminUserDTO{
 		ID: u.ID.String(), Email: u.Email, Name: u.Name,
 		PictureURL: u.PictureURL, Role: u.Role,
+		Plan: "free", SubStatus: "active",
 		CreatedAt: u.CreatedAt.Format(time.RFC3339),
 	}
 	if u.BannedAt != nil {
 		out.BannedAt = u.BannedAt.Format(time.RFC3339)
+	}
+	return out
+}
+
+func toAdminUserRowDTO(u repository.AdminUserRow) adminUserDTO {
+	out := adminUserDTO{
+		ID: u.ID.String(), Email: u.Email, Name: u.Name,
+		PictureURL: u.PictureURL, Role: u.Role,
+		Plan: u.Plan, SubStatus: u.SubStatus,
+		CreatedAt: u.CreatedAt.Format(time.RFC3339),
+	}
+	if u.BannedAt != nil {
+		out.BannedAt = u.BannedAt.Format(time.RFC3339)
+	}
+	if u.StoreID != nil {
+		s := u.StoreID.String()
+		out.StoreID = &s
+	}
+	if u.PeriodEnd != nil {
+		v := u.PeriodEnd.Format(time.RFC3339)
+		out.PeriodEnd = &v
 	}
 	return out
 }
@@ -114,7 +140,7 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	users, err := h.users.SearchAll(r.Context(), q.Get("q"), limit, before)
+	users, err := h.admin.ListUsers(r.Context(), q.Get("q"), limit, before)
 	if err != nil {
 		h.logger.Error("admin list users", "err", err)
 		response.Error(w, http.StatusInternalServerError, "internal error")
@@ -122,7 +148,7 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]adminUserDTO, 0, len(users))
 	for _, u := range users {
-		out = append(out, toAdminUserDTO(u))
+		out = append(out, toAdminUserRowDTO(u))
 	}
 	response.JSON(w, http.StatusOK, map[string]any{"users": out})
 }
@@ -473,27 +499,34 @@ func (h *AdminHandler) ExitImpersonation(w http.ResponseWriter, r *http.Request)
 // === Stores ===
 
 type storeSummaryDTO struct {
-	ID            string `json:"id"`
-	Slug          string `json:"slug"`
-	Name          string `json:"name"`
-	OwnerUserID   string `json:"owner_user_id"`
-	OwnerEmail    string `json:"owner_email"`
-	OwnerName     string `json:"owner_name"`
-	IsOpen        bool   `json:"is_open"`
-	Plan          string `json:"plan"`
-	SubStatus     string `json:"sub_status"`
-	ProductsCount int    `json:"products_count"`
-	OrdersCount   int    `json:"orders_count"`
-	RevenueCents  int64  `json:"revenue_cents"`
-	CreatedAt     string `json:"created_at"`
+	ID            string  `json:"id"`
+	Slug          string  `json:"slug"`
+	Name          string  `json:"name"`
+	OwnerUserID   string  `json:"owner_user_id"`
+	OwnerEmail    string  `json:"owner_email"`
+	OwnerName     string  `json:"owner_name"`
+	IsOpen        bool    `json:"is_open"`
+	Plan          string  `json:"plan"`
+	SubStatus     string  `json:"sub_status"`
+	PeriodEnd     *string `json:"period_end"`
+	ProductsCount int     `json:"products_count"`
+	OrdersCount   int     `json:"orders_count"`
+	RevenueCents  int64   `json:"revenue_cents"`
+	CreatedAt     string  `json:"created_at"`
 }
 
 func toStoreSummaryDTO(s repository.StoreSummary) storeSummaryDTO {
+	var periodEnd *string
+	if s.PeriodEnd != nil {
+		v := s.PeriodEnd.Format(time.RFC3339)
+		periodEnd = &v
+	}
 	return storeSummaryDTO{
 		ID: s.ID.String(), Slug: s.Slug, Name: s.Name,
 		OwnerUserID: s.OwnerUserID.String(),
 		OwnerEmail:  s.OwnerEmail, OwnerName: s.OwnerName,
 		IsOpen: s.IsOpen, Plan: s.Plan, SubStatus: s.SubStatus,
+		PeriodEnd:     periodEnd,
 		ProductsCount: s.ProductsCount, OrdersCount: s.OrdersCount,
 		RevenueCents: s.RevenueCents,
 		CreatedAt:    s.CreatedAt.Format(time.RFC3339),

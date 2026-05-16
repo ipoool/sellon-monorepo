@@ -10,6 +10,7 @@ import {
   ArrowRight,
   Mail,
   MessageCircle,
+  FileText,
   type LucideIcon,
 } from "lucide-react";
 
@@ -21,6 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { getMe } from "@/lib/server-auth";
 import {
   helpCategories,
+  helpArticles,
   articlesByCategory,
   type HelpCategorySlug,
 } from "@/lib/help-articles";
@@ -42,8 +44,19 @@ const iconBySlug: Record<HelpCategorySlug, LucideIcon> = {
   berlangganan: Crown,
 };
 
-export default async function BantuanPage() {
-  const me = await getMe();
+type SearchParams = Promise<{ q?: string }>;
+
+function normalize(s: string) {
+  return s.toLowerCase().replace(/[-_]/g, " ");
+}
+
+export default async function BantuanPage({
+  searchParams,
+}: {
+  searchParams: SearchParams;
+}) {
+  const [me, params] = await Promise.all([getMe(), searchParams]);
+  const q = params.q?.trim() ?? "";
 
   return (
     <>
@@ -65,7 +78,7 @@ export default async function BantuanPage() {
                 Cari jawaban dari panduan, FAQ, atau hubungi tim kami langsung.
               </p>
 
-              <div className="mt-8">
+              <form method="GET" className="mt-8">
                 <label htmlFor="bantuan-search" className="sr-only">
                   Cari bantuan
                 </label>
@@ -78,72 +91,127 @@ export default async function BantuanPage() {
                   </span>
                   <input
                     id="bantuan-search"
+                    name="q"
                     type="search"
+                    defaultValue={q}
                     placeholder="Misal: cara setup QRIS, refund, ubah harga…"
                     className="w-full rounded-xl border border-neutral-200 bg-white py-4 pl-12 pr-4 text-base shadow-card transition-all placeholder:text-neutral-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
                   />
                 </div>
-                <p className="mt-2 text-xs text-neutral-500">
-                  Pencarian akan segera hadir. Untuk sekarang, jelajahi
-                  kategori di bawah.
-                </p>
-              </div>
+              </form>
             </div>
           </Container>
         </section>
 
-        {/* Categories grid */}
+        {/* Search results or categories grid */}
         <Section>
           <Container>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {helpCategories.map(({ slug, title }) => {
-                const Icon = iconBySlug[slug];
-                const articles = articlesByCategory(slug);
-                return (
-                  <div
-                    key={slug}
-                    className="group flex flex-col gap-4 rounded-xl border border-neutral-200 bg-white p-6 shadow-card transition-all hover:-translate-y-0.5 hover:shadow-elevated"
-                  >
-                    <div className="flex items-start justify-between">
+            {q ? (
+              (() => {
+                const results = helpArticles.filter((a) => {
+                  const nq = normalize(q);
+                  return (
+                    normalize(a.title).includes(nq) ||
+                    normalize(a.excerpt).includes(nq)
+                  );
+                });
+                return results.length === 0 ? (
+                  <div className="flex flex-col items-center gap-3 py-16 text-center">
+                    <div className="flex size-12 items-center justify-center rounded-full bg-neutral-100 text-neutral-500">
+                      <Search className="size-6" aria-hidden />
+                    </div>
+                    <p className="font-medium text-neutral-900">
+                      Tidak ada hasil untuk &ldquo;{q}&rdquo;
+                    </p>
+                    <p className="text-sm text-neutral-600">
+                      Coba kata kunci lain atau jelajahi kategori di bawah.
+                    </p>
+                    <Link
+                      href="/help"
+                      className="mt-2 text-sm font-medium text-brand-600 hover:text-brand-700"
+                    >
+                      Lihat semua artikel
+                    </Link>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    <p className="mb-2 text-sm text-neutral-500">
+                      {results.length} artikel ditemukan untuk &ldquo;{q}&rdquo;
+                    </p>
+                    {results.map((a) => (
+                      <Link
+                        key={a.slug}
+                        href={`/help/${a.slug}`}
+                        className="group flex items-center gap-4 rounded-xl border border-neutral-200 bg-white p-4 shadow-card transition-all hover:-translate-y-0.5 hover:shadow-elevated"
+                      >
+                        <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600 transition-colors group-hover:bg-brand-100">
+                          <FileText className="size-4" strokeWidth={2} aria-hidden />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium text-neutral-900">
+                            {a.title}
+                          </p>
+                          <p className="truncate text-sm text-neutral-500">
+                            {a.excerpt}
+                          </p>
+                        </div>
+                        <ArrowRight className="size-4 shrink-0 text-neutral-400 transition-transform group-hover:translate-x-0.5 group-hover:text-brand-600" aria-hidden />
+                      </Link>
+                    ))}
+                  </div>
+                );
+              })()
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {helpCategories.map(({ slug, title }) => {
+                  const Icon = iconBySlug[slug];
+                  const articles = articlesByCategory(slug);
+                  return (
+                    <div
+                      key={slug}
+                      className="group flex flex-col gap-4 rounded-xl border border-neutral-200 bg-white p-6 shadow-card transition-all hover:-translate-y-0.5 hover:shadow-elevated"
+                    >
                       <div className="flex size-10 items-center justify-center rounded-lg bg-brand-50 text-brand-600 transition-colors group-hover:bg-brand-100">
                         <Icon className="size-5" strokeWidth={2} aria-hidden />
                       </div>
-                      <span className="text-xs font-medium text-neutral-500">
-                        {articles.length} artikel
-                      </span>
-                    </div>
 
-                    <div>
-                      <h2 className="font-semibold text-neutral-900">
-                        {title}
-                      </h2>
-                      <ul className="mt-3 flex flex-col gap-1.5 text-sm">
-                        {articles.map((a) => (
-                          <li key={a.slug}>
-                            <Link
-                              href={`/help/${a.slug}`}
-                              className="text-neutral-600 transition-colors hover:text-brand-700"
-                            >
-                              · {a.title}
-                            </Link>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
+                      <div>
+                        <h2 className="font-semibold text-neutral-900">
+                          {title}
+                        </h2>
+                        <ul className="mt-3 flex flex-col gap-1.5 text-sm">
+                          {articles.slice(0, 5).map((a) => (
+                            <li key={a.slug}>
+                              <Link
+                                href={`/help/${a.slug}`}
+                                className="text-neutral-600 transition-colors hover:text-brand-700"
+                              >
+                                · {a.title}
+                              </Link>
+                            </li>
+                          ))}
+                          {articles.length > 5 && (
+                            <li className="text-xs text-neutral-400">
+                              · +{articles.length - 5} artikel lainnya
+                            </li>
+                          )}
+                        </ul>
+                      </div>
 
-                    {articles[0] && (
-                      <Link
-                        href={`/help/${articles[0].slug}`}
-                        className="mt-auto inline-flex items-center gap-1 text-sm font-medium text-brand-600 hover:text-brand-700"
-                      >
-                        Mulai baca
-                        <ArrowRight className="size-3.5" aria-hidden />
-                      </Link>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+                      {articles[0] && (
+                        <Link
+                          href={`/help/${articles[0].slug}`}
+                          className="mt-auto inline-flex items-center gap-1 text-sm font-medium text-brand-600 hover:text-brand-700"
+                        >
+                          Mulai baca
+                          <ArrowRight className="size-3.5" aria-hidden />
+                        </Link>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </Container>
         </Section>
 

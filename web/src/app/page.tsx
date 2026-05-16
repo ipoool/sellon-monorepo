@@ -106,7 +106,7 @@ const fallbackPlans: PublicPlan[] = [
     features: [
       "Semua fitur Pro",
       "Tema toko custom (warna brand)",
-      "Domain custom (segera)",
+      "Analisa AI (tren penjualan & saran stok)",
       "Support via email & WhatsApp",
     ],
     cta_label: "Pilih Bisnis",

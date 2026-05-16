@@ -3,7 +3,6 @@ import {
   Hammer,
   Rocket,
   Lightbulb,
-  ThumbsUp,
   type LucideIcon,
 } from "lucide-react";
 
@@ -19,7 +18,7 @@ import { pageMetadata } from "@/lib/seo";
 export const metadata = pageMetadata({
   title: "Roadmap",
   description:
-    "Apa yang sedang dibangun di SellOn. Public roadmap dengan ETA, voting, dan request fitur dari komunitas UMKM.",
+    "Apa yang sedang dibangun di SellOn. Public roadmap dengan fitur yang sudah rilis, sedang dikerjakan, dan yang akan datang.",
   path: "/roadmap",
 });
 
@@ -28,7 +27,6 @@ type Status = "shipped" | "in-progress" | "next" | "considering";
 type RoadmapItem = {
   title: string;
   description: string;
-  votes: number;
   eta?: string;
 };
 
@@ -49,20 +47,63 @@ const columns: Column[] = [
     items: [
       {
         title: "Login Google SSO",
-        description: "Daftar dan login dengan akun Google. Akun otomatis dibuat.",
-        votes: 142,
+        description:
+          "Daftar dan masuk dengan akun Google. Tidak perlu isi formulir — toko langsung bisa dibuat.",
       },
       {
-        title: "Halaman dasbor v1",
+        title: "Storefront publik + 6 layout",
         description:
-          "Greeting time-based, quick actions, 4 metric stat dengan sparkline.",
-        votes: 98,
+          "Halaman katalog yang bisa dibagikan via WhatsApp. Pilih tampilan: Grid, List, Showcase, Compact, Magazine, atau Feed.",
       },
       {
-        title: "Theme system editable",
+        title: "Manajemen produk lengkap",
         description:
-          "Founder bisa rebrand seluruh app via 1 file globals.css (OKLCH).",
-        votes: 45,
+          "Upload foto, atur stok & varian, kategori, bulk upload via XLSX, duplikat produk, produk digital dengan auto-delivery.",
+      },
+      {
+        title: "Pembayaran Midtrans + manual",
+        description:
+          "Koneksi akun Midtrans sendiri (QRIS dinamis, GoPay, ShopeePay, VA). Juga tersedia transfer manual + QRIS statis.",
+      },
+      {
+        title: "Manajemen pesanan",
+        description:
+          "Tracking status pesanan dari pending sampai selesai, input nomor resi, export CSV, notifikasi WhatsApp otomatis ke pembeli.",
+      },
+      {
+        title: "Integrasi kurir (ongkos kirim)",
+        description:
+          "Hitung ongkir dari berbagai kurir (JNE, J&T, SiCepat, dll.) langsung di checkout pembeli.",
+      },
+      {
+        title: "Manajemen pelanggan + segmentasi",
+        description:
+          "Database pelanggan dengan segmentasi otomatis (VIP, Loyal, Reguler, Baru) berdasarkan frekuensi dan total belanja.",
+      },
+      {
+        title: "Promo & kode diskon",
+        description:
+          "Buat kode promo persentase, nominal tetap, atau free ongkir. Atur limit pemakaian, minimum pembelian, dan masa berlaku.",
+      },
+      {
+        title: "Laporan penjualan",
+        description:
+          "Overview revenue, top produk, top pelanggan. Grafik tren per periode. Tersedia untuk paket Pro ke atas.",
+      },
+      {
+        title: "Multi-staf dengan role",
+        description:
+          "Undang staf via email. Role Admin (akses penuh) dan Staff (hanya update pesanan). Audit log setiap aksi.",
+      },
+      {
+        title: "Custom domain",
+        description:
+          "Pakai domain sendiri (mis. toko.namabrand.com) sebagai alamat storefront. SSL otomatis.",
+      },
+      {
+        title: "Paket berlangganan Pro & Bisnis",
+        description:
+          "Upgrade via transfer atau Midtrans. Fitur terkunci (laporan, multi-staf, bulk upload) terbuka sesuai paket.",
       },
     ],
   },
@@ -73,24 +114,21 @@ const columns: Column[] = [
     description: "Ada di pipeline saat ini.",
     items: [
       {
-        title: "Manajemen produk",
+        title: "Auto-renewal langganan",
         description:
-          "Upload foto, atur stok, varian, kategori. Drag-and-drop untuk reorder.",
-        votes: 287,
+          "Perpanjang langganan otomatis via Midtrans tanpa perlu transfer manual setiap periode.",
         eta: "Q3 2026",
       },
       {
-        title: "Integrasi Midtrans QRIS",
+        title: "Push notification pesanan baru",
         description:
-          "Connect akun Midtrans seller, generate QR code per pesanan, webhook payment confirmed.",
-        votes: 261,
+          "Notifikasi real-time ke browser / HP seller saat ada pesanan masuk — tidak perlu cek dasbor terus.",
         eta: "Q3 2026",
       },
       {
-        title: "Halaman katalog publik",
+        title: "Review & ulasan produk",
         description:
-          "Link katalog yang bisa dibagikan ke WhatsApp, dilihat tanpa login.",
-        votes: 198,
+          "Pembeli bisa beri rating dan ulasan setelah pesanan selesai. Seller bisa reply dan moderasi.",
         eta: "Q3 2026",
       },
     ],
@@ -102,31 +140,27 @@ const columns: Column[] = [
     description: "Setelah yang sedang dikerjakan beres.",
     items: [
       {
-        title: "Manajemen pesanan",
+        title: "API publik & webhook",
         description:
-          "Status pesanan (baru/diproses/dikirim/selesai), kirim resi, riwayat.",
-        votes: 245,
+          "Untuk seller yang punya developer in-house atau mau connect ke automation tools (Zapier, Make, dll.).",
         eta: "Q4 2026",
       },
       {
-        title: "Otomasi WhatsApp",
+        title: "Program afiliasi & referral",
         description:
-          "Konfirmasi pesanan, reminder pembayaran, status pengiriman - auto-send via WA.",
-        votes: 312,
+          "Beri komisi ke influencer atau pelanggan yang mereferensikan pembeli baru ke toko kamu.",
         eta: "Q4 2026",
       },
       {
-        title: "Integrasi kurir (Biteship)",
+        title: "Analitik konversi",
         description:
-          "Hitung ongkir dari berbagai kurir, generate resi, lacak pengiriman.",
-        votes: 178,
+          "Funnel checkout, abandonment rate, sumber traffic. Bantu identifikasi di mana pembeli drop off.",
         eta: "Q4 2026",
       },
       {
-        title: "Multi-staff admin",
+        title: "Ekspor laporan ke PDF",
         description:
-          "Tambah staf dengan role berbeda (admin, kasir, gudang). Audit log.",
-        votes: 134,
+          "Download laporan penjualan bulanan dalam format PDF siap cetak untuk keperluan pembukuan.",
         eta: "Q4 2026",
       },
     ],
@@ -135,37 +169,32 @@ const columns: Column[] = [
     status: "considering",
     icon: Lightbulb,
     title: "Sedang Dipertimbangkan",
-    description: "Belum komit. Vote dan feedback bantu kami prioritaskan.",
+    description: "Belum komit. Feedback dari komunitas bantu kami prioritaskan.",
     items: [
       {
         title: "Aplikasi mobile (iOS + Android)",
         description:
-          "Native app untuk kelola toko dari HP. Mungkin React Native, mungkin native.",
-        votes: 421,
+          "Native app untuk kelola toko dari HP. Notifikasi push, scan barcode, update pesanan on-the-go.",
       },
       {
-        title: "Marketplace plugin (Tokopedia/Shopee)",
+        title: "Sync ke marketplace",
         description:
-          "Sync produk dan stok ke marketplace tanpa input ulang.",
-        votes: 289,
+          "Sinkronisasi produk dan stok ke Tokopedia, Shopee, atau TikTok Shop tanpa input ulang.",
       },
       {
-        title: "POS & barcode scanner",
+        title: "Live chat dengan pembeli",
         description:
-          "Untuk toko yang juga punya cabang fisik. Kasir + scanner + cash drawer.",
-        votes: 167,
+          "Fitur chat toko built-in supaya pembeli bisa tanya langsung sebelum beli.",
       },
       {
-        title: "Bahasa Inggris + multi-currency",
+        title: "POS & kasir toko fisik",
         description:
-          "Untuk seller yang ekspor ke Singapura, Malaysia, atau brand turis.",
-        votes: 89,
+          "Untuk seller yang juga punya toko offline. Scanner barcode, kasir, sinkronisasi stok.",
       },
       {
-        title: "API publik & webhook",
+        title: "Multi-bahasa & multi-currency",
         description:
-          "Untuk seller yang punya developer in-house atau pakai automation tools.",
-        votes: 76,
+          "Untuk seller yang ekspor ke Singapura, Malaysia, atau melayani pembeli asing.",
       },
     ],
   },
@@ -198,11 +227,11 @@ export default async function RoadmapPage() {
                 Yang sedang kami bangun
               </h1>
               <p className="mt-6 text-lg leading-relaxed text-neutral-600">
-                Roadmap ini diperbarui setiap minggu. Vote ide yang penting buat
-                kamu - yang paling banyak vote naik prioritas.
+                Roadmap ini diperbarui secara berkala. Punya ide atau request
+                fitur? Hubungi kami langsung.
               </p>
               <p className="mt-3 text-sm text-neutral-500">
-                Terakhir diperbarui · 8 Mei 2026
+                Terakhir diperbarui · 16 Mei 2026
               </p>
             </div>
           </Container>
@@ -237,7 +266,7 @@ export default async function RoadmapPage() {
                     {col.items.map((item) => (
                       <li
                         key={item.title}
-                        className="flex flex-col gap-3 rounded-xl border border-neutral-200 bg-white p-4 shadow-card transition-all hover:-translate-y-0.5 hover:shadow-elevated"
+                        className="flex flex-col gap-3 rounded-xl border border-neutral-200 bg-white p-4 shadow-card"
                       >
                         <div>
                           <h3 className="text-sm font-semibold text-neutral-900">
@@ -247,24 +276,16 @@ export default async function RoadmapPage() {
                             {item.description}
                           </p>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            className="inline-flex items-center gap-1.5 rounded-md border border-neutral-200 bg-white px-2.5 py-1 text-xs font-medium text-neutral-700 transition-colors hover:border-brand-500 hover:bg-brand-50 hover:text-brand-700 disabled:opacity-60"
-                            disabled
-                            title="Voting akan segera hadir"
-                            aria-label={`Vote ${item.title}`}
-                          >
-                            <ThumbsUp className="size-3" aria-hidden />
-                            <span>{item.votes}</span>
-                          </button>
-                          {item.eta && (
-                            <Badge variant="outline">{item.eta}</Badge>
-                          )}
-                          {col.status === "shipped" && (
-                            <Badge variant="success">Live</Badge>
-                          )}
-                        </div>
+                        {(item.eta || col.status === "shipped") && (
+                          <div className="flex items-center gap-2">
+                            {item.eta && (
+                              <Badge variant="outline">{item.eta}</Badge>
+                            )}
+                            {col.status === "shipped" && (
+                              <Badge variant="success">Live</Badge>
+                            )}
+                          </div>
+                        )}
                       </li>
                     ))}
                   </ul>
@@ -288,20 +309,15 @@ export default async function RoadmapPage() {
               </p>
 
               <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-                <a href="mailto:roadmap@sellon.id?subject=Request fitur SellOn">
+                <a href="mailto:halo@sellon.id?subject=Request fitur SellOn">
                   <Button size="lg">Kirim ide via email</Button>
                 </a>
-                <a href="https://wa.me/6281234567890">
+                <a href="https://wa.me/6281291006534">
                   <Button size="lg" variant="outline">
                     Chat WhatsApp
                   </Button>
                 </a>
               </div>
-
-              <p className="mt-6 text-xs text-neutral-600">
-                Voting fitur akan segera hadir di halaman ini. Untuk sekarang,
-                request via email atau WhatsApp.
-              </p>
             </div>
           </Container>
         </Section>

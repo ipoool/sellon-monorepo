@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 
 import { CartProvider } from "@/components/storefront/cart-context";
 import { CartFab } from "@/components/storefront/cart-fab";
+import { CookieConsent } from "@/components/storefront/cookie-consent";
 
 type Params = Promise<{ slug: string }>;
 
@@ -21,6 +22,7 @@ export default async function StorefrontLayout({
     <CartProvider storeSlug={slug}>
       {children}
       <CartFab storeSlug={slug} />
+      <CookieConsent />
     </CartProvider>
   );
 }

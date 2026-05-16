@@ -278,7 +278,7 @@ func (r *StoreRepo) UpdateStorefront(ctx context.Context, id uuid.UUID, in Updat
 	}
 	layout := in.ProductLayout
 	switch layout {
-	case "grid", "list", "showcase", "compact", "magazine", "feed":
+	case "grid", "list", "showcase", "compact", "magazine", "feed", "kiosk", "katalog", "poster":
 		// ok
 	default:
 		layout = "grid"

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, type FormEvent } from "react";
+import { useState, useTransition, useEffect, useRef, type FormEvent } from "react";
 import { showError, showSuccess } from "@/lib/toast";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -13,6 +13,9 @@ import {
   UserCog,
   Loader2,
   Trash2,
+  Crown,
+  AlertTriangle,
+  MoreHorizontal,
 } from "lucide-react";
 
 import { Avatar } from "@/components/ui/avatar";
@@ -20,6 +23,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { AdminGrantSubscriptionDialog } from "@/components/admin/admin-grant-subscription-dialog";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { AdminUser } from "@/lib/types";
@@ -40,6 +44,55 @@ function formatDate(iso: string) {
   });
 }
 
+function PlanCell({ plan, subStatus, periodEnd }: {
+  plan: string;
+  subStatus: string;
+  periodEnd?: string | null;
+}) {
+  const isPaid = plan === "pro" || plan === "bisnis";
+
+  const planBadge = isPaid ? (
+    <Badge variant="warning" className="gap-1">
+      <Crown className="size-3" aria-hidden />
+      {plan === "pro" ? "Pro" : "Bisnis"}
+    </Badge>
+  ) : (
+    <Badge variant="outline">Gratis</Badge>
+  );
+
+  if (!isPaid || !periodEnd) return planBadge;
+
+  const date = new Date(periodEnd);
+  const now = new Date();
+  const diffDays = Math.ceil((date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+  const label = formatDate(periodEnd);
+
+  let expiryNode: React.ReactNode;
+  if (subStatus === "expired" || diffDays < 0) {
+    expiryNode = (
+      <span className="inline-flex items-center gap-1 rounded-full bg-danger/10 px-2 py-0.5 text-xs font-medium text-danger">
+        Expired
+      </span>
+    );
+  } else if (diffDays <= 3) {
+    expiryNode = (
+      <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
+        <AlertTriangle className="size-3" aria-hidden />
+        {label}
+      </span>
+    );
+  } else {
+    expiryNode = <span className="text-xs text-neutral-500">{label}</span>;
+  }
+
+  return (
+    <div className="flex flex-col items-start gap-1">
+      {planBadge}
+      {expiryNode}
+    </div>
+  );
+}
+
 type DialogKind = "ban" | "impersonate" | "delete";
 type DialogState = { kind: DialogKind; user: AdminUser } | null;
 
@@ -50,6 +103,33 @@ export function AdminUsersTable({ initial, initialQuery }: Props) {
   const [pending, startTransition] = useTransition();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogState>(null);
+  const [menuPos, setMenuPos] = useState<{ id: string; top: number; right: number } | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+
+  useEffect(() => {
+    if (!menuPos) return;
+    const currentId = menuPos.id;
+    function onMouseDown(e: MouseEvent) {
+      const trigger = triggerRefs.current.get(currentId);
+      if (
+        menuRef.current && !menuRef.current.contains(e.target as Node) &&
+        trigger && !trigger.contains(e.target as Node)
+      ) {
+        setMenuPos(null);
+      }
+    }
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, [menuPos]);
+
+  function toggleMenu(id: string) {
+    if (menuPos?.id === id) { setMenuPos(null); return; }
+    const btn = triggerRefs.current.get(id);
+    const rect = btn?.getBoundingClientRect();
+    if (!rect) return;
+    setMenuPos({ id, top: rect.bottom + 4, right: window.innerWidth - rect.right });
+  }
 
   function onSearch(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -168,6 +248,7 @@ export function AdminUsersTable({ initial, initialQuery }: Props) {
                 <th className="px-4 py-3 sm:px-5">Pengguna</th>
                 <th className="px-4 py-3">Role</th>
                 <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Langganan</th>
                 <th className="px-4 py-3">Bergabung</th>
                 <th className="px-4 py-3 text-right sm:px-5">Aksi</th>
               </tr>
@@ -219,69 +300,94 @@ export function AdminUsersTable({ initial, initialQuery }: Props) {
                         <Badge variant="success">Aktif</Badge>
                       )}
                     </td>
+                    <td className="px-4 py-3">
+                      <PlanCell
+                        plan={u.plan}
+                        subStatus={u.sub_status}
+                        periodEnd={u.period_end}
+                      />
+                    </td>
                     <td className="px-4 py-3 text-neutral-600">
                       {formatDate(u.created_at)}
                     </td>
                     <td className="px-4 py-3 sm:px-5">
-                      <div className="flex flex-wrap items-center justify-end gap-1.5">
-                        <Link href={`/platform/users/${u.id}`}>
-                          <Button variant="ghost" size="sm">
-                            <Eye className="size-3.5" aria-hidden />
-                            Detail
-                          </Button>
-                        </Link>
-                        {!isAdmin && !banned && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setDialog({ kind: "impersonate", user: u })}
-                            disabled={busy}
-                          >
-                            {busy ? (
-                              <Loader2 className="size-3.5 animate-spin" aria-hidden />
-                            ) : (
-                              <UserCog className="size-3.5" aria-hidden />
+                      <div className="flex items-center justify-end">
+                        {busy ? (
+                          <Loader2 className="size-4 animate-spin text-neutral-400" aria-hidden />
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              ref={(el) => { if (el) triggerRefs.current.set(u.id, el); else triggerRefs.current.delete(u.id); }}
+                              onClick={() => toggleMenu(u.id)}
+                              className="inline-flex size-8 items-center justify-center rounded-md border border-neutral-200 text-neutral-600 transition-colors hover:border-brand-500 hover:bg-brand-50 hover:text-brand-700"
+                              aria-label="Aksi"
+                            >
+                              <MoreHorizontal className="size-4" aria-hidden />
+                            </button>
+
+                            {menuPos?.id === u.id && (
+                              <div
+                                ref={menuRef}
+                                style={{ position: "fixed", top: menuPos.top, right: menuPos.right }}
+                                className="z-50 w-44 rounded-lg border border-neutral-200 bg-white py-1 shadow-card">
+                                <Link
+                                  href={`/platform/users/${u.id}`}
+                                  onClick={() => setMenuPos(null)}
+                                  className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50"
+                                >
+                                  <Eye className="size-4 shrink-0 text-neutral-400" aria-hidden />
+                                  Detail
+                                </Link>
+                                {!isAdmin && u.store_id && (
+                                  <AdminGrantSubscriptionDialog
+                                    storeId={u.store_id}
+                                    storeName={u.name || u.email}
+                                    currentPlan={u.plan}
+                                    triggerVariant="menu"
+                                    onOpen={() => setMenuPos(null)}
+                                  />
+                                )}
+                                {!isAdmin && !banned && (
+                                  <button
+                                    type="button"
+                                    onClick={() => { setMenuPos(null); setDialog({ kind: "impersonate", user: u }); }}
+                                    className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50"
+                                  >
+                                    <UserCog className="size-4 shrink-0 text-neutral-400" aria-hidden />
+                                    Impersonate
+                                  </button>
+                                )}
+                                {!isAdmin && (
+                                  <button
+                                    type="button"
+                                    onClick={() => { setMenuPos(null); setDialog({ kind: "ban", user: u }); }}
+                                    className={cn(
+                                      "flex w-full items-center gap-2.5 px-3 py-2 text-sm hover:bg-neutral-50",
+                                      banned ? "text-success" : "text-danger",
+                                    )}
+                                  >
+                                    {banned ? (
+                                      <RotateCcw className="size-4 shrink-0" aria-hidden />
+                                    ) : (
+                                      <Ban className="size-4 shrink-0" aria-hidden />
+                                    )}
+                                    {banned ? "Buka blokir" : "Blokir"}
+                                  </button>
+                                )}
+                                {!isAdmin && (
+                                  <button
+                                    type="button"
+                                    onClick={() => { setMenuPos(null); setDialog({ kind: "delete", user: u }); }}
+                                    className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-danger hover:bg-neutral-50"
+                                  >
+                                    <Trash2 className="size-4 shrink-0" aria-hidden />
+                                    Hapus
+                                  </button>
+                                )}
+                              </div>
                             )}
-                            Impersonate
-                          </Button>
-                        )}
-                        {!isAdmin && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setDialog({ kind: "ban", user: u })}
-                            disabled={busy}
-                            className={cn(
-                              banned
-                                ? "text-success hover:bg-success/10"
-                                : "text-danger hover:bg-danger/10",
-                            )}
-                          >
-                            {busy ? (
-                              <Loader2 className="size-3.5 animate-spin" aria-hidden />
-                            ) : banned ? (
-                              <RotateCcw className="size-3.5" aria-hidden />
-                            ) : (
-                              <Ban className="size-3.5" aria-hidden />
-                            )}
-                            {banned ? "Buka blokir" : "Blokir"}
-                          </Button>
-                        )}
-                        {!isAdmin && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setDialog({ kind: "delete", user: u })}
-                            disabled={busy}
-                            className="text-danger hover:bg-danger/10"
-                          >
-                            {busy ? (
-                              <Loader2 className="size-3.5 animate-spin" aria-hidden />
-                            ) : (
-                              <Trash2 className="size-3.5" aria-hidden />
-                            )}
-                            Hapus
-                          </Button>
+                          </>
                         )}
                       </div>
                     </td>

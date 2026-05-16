@@ -647,6 +647,72 @@ func (r *SubscriptionRepo) AdminGrantSubscription(
 	return s, nil
 }
 
+// ExpiringSubscription is a lightweight projection used by the expiry
+// notification worker — only the fields needed to compose and send the email.
+type ExpiringSubscription struct {
+	StoreID    uuid.UUID
+	StoreName  string
+	Plan       string
+	ExpiresAt  time.Time
+	OwnerEmail string
+	OwnerName  string
+}
+
+// FindExpiringOn returns all paid subscriptions whose period_end falls on the
+// given calendar date (WIB / UTC+7). Used by the H-3 and H-0 email jobs.
+func (r *SubscriptionRepo) FindExpiringOn(ctx context.Context, calendarDate time.Time) ([]*ExpiringSubscription, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT s.store_id, st.name, s.plan, s.current_period_end,
+		       u.email, u.name
+		FROM subscriptions s
+		JOIN stores st ON st.id = s.store_id
+		JOIN users  u  ON u.id  = st.owner_id
+		WHERE s.plan IN ('pro', 'bisnis')
+		  AND s.status IN ('active', 'cancelled')
+		  AND DATE(s.current_period_end AT TIME ZONE 'Asia/Jakarta')
+		      = DATE($1 AT TIME ZONE 'Asia/Jakarta')
+	`, calendarDate)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*ExpiringSubscription
+	for rows.Next() {
+		var e ExpiringSubscription
+		if err := rows.Scan(
+			&e.StoreID, &e.StoreName, &e.Plan, &e.ExpiresAt,
+			&e.OwnerEmail, &e.OwnerName,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, &e)
+	}
+	return out, rows.Err()
+}
+
+// ClaimNotification atomically reserves the send slot for one
+// (store, notification_type, period_end) triple. It returns true exactly
+// when this caller wins the race — i.e. the INSERT succeeded and no other
+// pod (or previous run) had already claimed this slot.
+//
+// The INSERT + RowsAffected check is a single round-trip, so there is no
+// TOCTOU window even under concurrent pods: only one INSERT can win the
+// PRIMARY KEY conflict; every other caller gets RowsAffected == 0 and
+// must skip sending.
+func (r *SubscriptionRepo) ClaimNotification(ctx context.Context,
+	storeID uuid.UUID, notifType string, periodEnd time.Time,
+) (bool, error) {
+	tag, err := r.pool.Exec(ctx, `
+		INSERT INTO subscription_expiry_emails (store_id, notification_type, period_end)
+		VALUES ($1, $2, $3::date)
+		ON CONFLICT DO NOTHING
+	`, storeID, notifType, periodEnd)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
 // ErrInvoiceNotPending is returned by AdminMarkInvoiceFailed when the
 // invoice has already been settled or rejected.
 var ErrInvoiceNotPending = errors.New("invoice not pending")

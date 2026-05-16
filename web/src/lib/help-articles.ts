@@ -210,6 +210,89 @@ export const helpArticles: HelpArticle[] = [
     ],
   },
 
+  {
+    slug: "atur-tampilan-dan-tema-toko",
+    category: "memulai",
+    title: "Mengatur tampilan dan tema toko",
+    excerpt:
+      "Pilih warna, layout produk, logo, dan banner supaya toko tampil konsisten dengan brand kamu.",
+    readingTime: "3 menit",
+    body: [
+      {
+        type: "p",
+        text:
+          "Tampilan toko bisa dikustomisasi lewat Pengaturan → Tampilan Storefront. Semua perubahan langsung live tanpa perlu redeploy.",
+      },
+      { type: "h2", text: "Warna tema" },
+      {
+        type: "p",
+        text:
+          "Geser slider 'Warna Brand' untuk memilih warna utama. Tersedia preview langsung di halaman yang sama. Pilih warna yang konsisten dengan logo atau kemasan produk Anda.",
+      },
+      { type: "h2", text: "Layout produk" },
+      {
+        type: "ul",
+        items: [
+          "Grid — 2 kolom, klasik, cocok untuk produk dengan foto kotak.",
+          "List — 1 baris per produk, cocok untuk katalog makanan dengan deskripsi panjang.",
+          "Showcase — foto besar featured + grid di bawah.",
+          "Compact — 3 kolom, padat, cocok untuk toko dengan banyak produk.",
+          "Magazine — layout editorial dengan aksen besar.",
+          "Feed — tampilan scroll vertikal ala media sosial.",
+        ],
+      },
+      { type: "h2", text: "Logo dan banner" },
+      {
+        type: "p",
+        text:
+          "Upload logo (rasio 1:1, min 256×256 px) dan banner (rasio 16:5, min 1200×375 px). Format JPG/PNG/WebP, maks 5 MB per file.",
+      },
+      {
+        type: "callout",
+        tone: "info",
+        text:
+          "Fitur kustomisasi tampilan (tema warna + layout produk) tersedia untuk paket Pro ke atas.",
+      },
+    ],
+  },
+  {
+    slug: "cara-menggunakan-mode-sandbox",
+    category: "memulai",
+    title: "Cara menggunakan mode sandbox sebelum go live",
+    excerpt:
+      "Uji semua alur pembayaran tanpa uang asli sebelum aktifkan production.",
+    readingTime: "3 menit",
+    body: [
+      {
+        type: "p",
+        text:
+          "Mode sandbox Midtrans memungkinkan Anda menguji seluruh alur checkout — dari halaman pembayaran, webhook, sampai update status pesanan — tanpa memproses uang asli.",
+      },
+      { type: "h2", text: "Setup sandbox" },
+      {
+        type: "ol",
+        items: [
+          "Buka dashboard.sandbox.midtrans.com dan login.",
+          "Dapatkan Sandbox Server Key dari Settings → Access Keys.",
+          "Di SellOn: Pengaturan → Pembayaran → pilih mode 'Sandbox', tempel key.",
+          "Simpan dan klik 'Tes Koneksi' — harus muncul konfirmasi hijau.",
+        ],
+      },
+      { type: "h2", text: "Melakukan test pembayaran" },
+      {
+        type: "p",
+        text:
+          "Buka halaman publik toko Anda di browser lain, buat pesanan, dan bayar menggunakan nomor kartu/QRIS test yang tersedia di dokumentasi Midtrans (docs.midtrans.com → Testing Payment). Webhook akan otomatis update status pesanan di SellOn.",
+      },
+      {
+        type: "callout",
+        tone: "warning",
+        text:
+          "Saat siap go live, ganti ke mode Production dan masukkan key production. Jangan pakai key production di sandbox — dua environment ini tidak saling kenal.",
+      },
+    ],
+  },
+
   // === PRODUK & KATALOG ===
   {
     slug: "upload-produk-foto-bagus",
@@ -349,6 +432,88 @@ export const helpArticles: HelpArticle[] = [
     ],
   },
 
+  {
+    slug: "bulk-upload-produk-excel",
+    category: "produk-katalog",
+    title: "Bulk upload produk via Excel",
+    excerpt:
+      "Upload ratusan produk sekaligus lewat template XLSX — hemat waktu vs input satu per satu.",
+    readingTime: "5 menit",
+    body: [
+      {
+        type: "p",
+        text:
+          "Fitur bulk upload cocok untuk penjual dengan katalog besar (puluhan sampai ratusan SKU). Proses berjalan di background — Anda bisa navigasi halaman lain sambil menunggu.",
+      },
+      { type: "h2", text: "Langkah upload" },
+      {
+        type: "ol",
+        items: [
+          "Dasbor → Produk → klik 'Bulk Upload'.",
+          "Unduh template XLSX dari halaman tersebut.",
+          "Isi kolom: nama, harga, stok, kategori, deskripsi, berat (gram), status.",
+          "Simpan file lalu upload ke halaman Bulk Upload.",
+          "Tunggu notifikasi selesai di pojok kanan atas dasbor.",
+        ],
+      },
+      { type: "h2", text: "Aturan template" },
+      {
+        type: "ul",
+        items: [
+          "Baris pertama adalah header — jangan diubah.",
+          "Harga diisi dalam Rupiah penuh, tanpa titik/koma (mis. 25000).",
+          "Status: 'active', 'inactive', atau 'sold_out'.",
+          "Kategori harus sesuai nama kategori yang sudah Anda buat di Pengaturan → Kategori.",
+          "Maksimal 500 baris per file.",
+        ],
+      },
+      {
+        type: "callout",
+        tone: "info",
+        text:
+          "Bulk upload tersedia untuk paket Pro ke atas. Untuk paket Gratis, tambah produk satu per satu via form.",
+      },
+    ],
+  },
+  {
+    slug: "mengatur-produk-featured",
+    category: "produk-katalog",
+    title: "Mengatur produk unggulan (featured)",
+    excerpt:
+      "Produk featured tampil pertama di katalog dan lebih menonjol di beberapa layout.",
+    readingTime: "2 menit",
+    body: [
+      {
+        type: "p",
+        text:
+          "Produk featured adalah produk yang Anda pilih untuk ditampilkan paling atas atau paling menonjol di halaman publik toko. Cocok untuk best-seller, produk baru, atau promo.",
+      },
+      { type: "h2", text: "Cara mengaktifkan" },
+      {
+        type: "ol",
+        items: [
+          "Buka Dasbor → Produk → klik produk yang ingin di-feature.",
+          "Di halaman edit, cari toggle 'Produk Unggulan' dan aktifkan.",
+          "Simpan. Produk langsung tampil di posisi teratas katalog.",
+        ],
+      },
+      {
+        type: "ul",
+        items: [
+          "Tidak ada limit berapa produk yang bisa di-feature.",
+          "Di layout Showcase, produk pertama yang featured tampil sebagai hero banner besar.",
+          "Urutan featured mengikuti urutan tanggal upload (terbaru di atas).",
+        ],
+      },
+      {
+        type: "callout",
+        tone: "info",
+        text:
+          "Rotasi produk featured secara berkala (setiap minggu atau promo musiman) terbukti meningkatkan engagement pembeli yang balik berkunjung.",
+      },
+    ],
+  },
+
   // === PESANAN ===
   {
     slug: "konfirmasi-dan-proses-pesanan",
@@ -475,6 +640,86 @@ export const helpArticles: HelpArticle[] = [
         tone: "info",
         text:
           "Alur retur formal akan ditambahkan setelah MVP. Untuk sekarang, dokumentasi manual via catatan internal sudah cukup.",
+      },
+    ],
+  },
+
+  {
+    slug: "export-pesanan-csv",
+    category: "pesanan",
+    title: "Export pesanan ke CSV",
+    excerpt:
+      "Download semua pesanan atau filter per rentang tanggal ke file CSV untuk analisis.",
+    readingTime: "2 menit",
+    body: [
+      {
+        type: "p",
+        text:
+          "SellOn menyediakan export CSV dari halaman Pesanan — berguna untuk rekap bulanan, laporan toko, atau import ke Excel/Google Sheets.",
+      },
+      { type: "h2", text: "Cara export" },
+      {
+        type: "ol",
+        items: [
+          "Dasbor → Pesanan.",
+          "Filter tanggal bila perlu (mis. bulan ini saja).",
+          "Klik tombol 'Export CSV' di pojok kanan atas tabel.",
+          "File langsung terunduh ke perangkat Anda.",
+        ],
+      },
+      { type: "h2", text: "Kolom yang tersedia" },
+      {
+        type: "ul",
+        items: [
+          "Nomor pesanan, tanggal, status pesanan, status bayar.",
+          "Nama & WhatsApp pembeli, kota, alamat.",
+          "Produk + varian + kuantitas, subtotal, ongkir, diskon, total.",
+          "Kurir, nomor resi, tanggal kirim.",
+        ],
+      },
+      {
+        type: "callout",
+        tone: "info",
+        text:
+          "Export CSV tidak termasuk catatan internal penjual (seller notes) untuk menjaga privasi workflow internal.",
+      },
+    ],
+  },
+  {
+    slug: "pesanan-digital-delivery",
+    category: "pesanan",
+    title: "Mengelola pesanan produk digital",
+    excerpt:
+      "Produk digital dikirim otomatis via email + link download setelah pembayaran lunas.",
+    readingTime: "3 menit",
+    body: [
+      {
+        type: "p",
+        text:
+          "Untuk produk dengan tipe 'Digital', SellOn otomatis mengirim email ke pembeli berisi link download atau URL akses setelah status pembayaran menjadi 'Lunas'.",
+      },
+      { type: "h2", text: "Setup produk digital" },
+      {
+        type: "ol",
+        items: [
+          "Dasbor → Produk → Tambah/Edit Produk.",
+          "Di bagian 'Tipe Produk', pilih 'Digital'.",
+          "Upload file digital (PDF, ZIP, dll.) atau isi URL akses eksternal.",
+          "Isi instruksi penggunaan yang akan ditampilkan ke pembeli bersama link.",
+          "Simpan produk.",
+        ],
+      },
+      { type: "h2", text: "Alur pengiriman" },
+      {
+        type: "p",
+        text:
+          "Begitu pembayaran dikonfirmasi (webhook Midtrans atau konfirmasi manual), sistem otomatis kirim email dengan link download ke alamat email pembeli. Link berlaku selama 7 hari.",
+      },
+      {
+        type: "callout",
+        tone: "info",
+        text:
+          "Produk digital tidak butuh input resi atau perubahan status ke 'Dikirim' — sistem langsung set ke 'Selesai' setelah pengiriman email sukses.",
       },
     ],
   },
@@ -888,6 +1133,125 @@ export const helpArticles: HelpArticle[] = [
         tone: "warning",
         text:
           "Penghapusan permanen, tidak bisa di-restore. Export data CSV (pelanggan, pesanan) dulu sebelum minta hapus.",
+      },
+    ],
+  },
+  {
+    slug: "mengaktifkan-custom-domain",
+    category: "akun-pengaturan",
+    title: "Mengaktifkan custom domain",
+    excerpt:
+      "Pakai domain sendiri (mis. toko.namabrand.com) sebagai alamat toko kamu.",
+    readingTime: "4 menit",
+    body: [
+      {
+        type: "p",
+        text:
+          "Custom domain memungkinkan toko Anda tampil di domain sendiri — bukan lagi sellon.id/nama-toko. Pembeli tetap mengakses halaman yang sama, tapi URL-nya milik Anda.",
+      },
+      { type: "h2", text: "Persyaratan" },
+      {
+        type: "ul",
+        items: [
+          "Anda harus memiliki atau mengontrol domain tersebut.",
+          "Paket Pro atau Bisnis (custom domain tidak tersedia di Gratis).",
+          "Akses ke panel DNS domain Anda (Niagahoster, Cloudflare, GoDaddy, dll.).",
+        ],
+      },
+      { type: "h2", text: "Cara setup" },
+      {
+        type: "ol",
+        items: [
+          "Pengaturan → Profil Toko → scroll ke bagian 'Custom Domain'.",
+          "Masukkan subdomain yang ingin Anda pakai (mis. toko.namabrand.com).",
+          "Salin nilai CNAME yang ditampilkan.",
+          "Buka panel DNS domain Anda, tambah record CNAME dengan nilai tersebut.",
+          "Kembali ke SellOn dan klik 'Verifikasi' — proses propagasi DNS bisa butuh 5–60 menit.",
+        ],
+      },
+      {
+        type: "callout",
+        tone: "info",
+        text:
+          "SSL otomatis dibuatkan setelah verifikasi domain berhasil. Pembeli akan selalu diarahkan ke HTTPS.",
+      },
+    ],
+  },
+  {
+    slug: "kelola-staf-dan-akses",
+    category: "akun-pengaturan",
+    title: "Mengelola staf dan hak akses",
+    excerpt:
+      "Undang staf dengan role Admin atau Staff — batasi apa yang bisa mereka lakukan di dasbor.",
+    readingTime: "3 menit",
+    body: [
+      {
+        type: "p",
+        text:
+          "Mulai paket Pro, Anda bisa mengundang staf dengan dua role berbeda. Staf login dengan akun Google mereka sendiri — Anda tidak perlu berbagi password.",
+      },
+      { type: "h2", text: "Role yang tersedia" },
+      {
+        type: "ul",
+        items: [
+          "Admin — akses hampir sama dengan owner. Bisa kelola produk, pesanan, pelanggan, promo, dan pengaturan toko.",
+          "Staff — akses terbatas. Hanya bisa lihat + update status pesanan dan input resi.",
+        ],
+      },
+      { type: "h2", text: "Cara undang staf" },
+      {
+        type: "ol",
+        items: [
+          "Pengaturan → Tim → klik 'Undang Staf'.",
+          "Masukkan alamat email Google staf dan pilih role.",
+          "Staf mendapat email undangan. Setelah mereka login, mereka otomatis terhubung ke toko Anda.",
+        ],
+      },
+      { type: "h2", text: "Batas staf per paket" },
+      {
+        type: "ul",
+        items: [
+          "Gratis: 0 staf (hanya owner).",
+          "Pro: hingga 5 staf.",
+          "Bisnis: staf tidak terbatas.",
+        ],
+      },
+      {
+        type: "callout",
+        tone: "warning",
+        text:
+          "Hapus staf dari Pengaturan → Tim bila mereka sudah tidak bekerja di toko Anda. Akses langsung dicabut begitu dihapus.",
+      },
+    ],
+  },
+  {
+    slug: "mengatur-notifikasi-pesanan-baru",
+    category: "akun-pengaturan",
+    title: "Notifikasi pesanan baru ke WhatsApp seller",
+    excerpt:
+      "Aktifkan notifikasi WA ke nomor Anda supaya tidak ketinggalan pesanan masuk.",
+    readingTime: "2 menit",
+    body: [
+      {
+        type: "p",
+        text:
+          "SellOn bisa mengirim notifikasi WhatsApp ke nomor Anda setiap kali ada pesanan baru. Nomor notifikasi bisa berbeda dari nomor WhatsApp toko yang dipakai pembeli untuk chat.",
+      },
+      { type: "h2", text: "Cara aktifkan" },
+      {
+        type: "ol",
+        items: [
+          "Pengaturan → Profil Toko → scroll ke 'Notifikasi'.",
+          "Aktifkan toggle 'Notifikasi WA pesanan baru'.",
+          "Isi nomor WhatsApp tujuan notifikasi (format: 628xxxx).",
+          "Simpan. Test dengan membuat pesanan dummy dari halaman publik toko.",
+        ],
+      },
+      {
+        type: "callout",
+        tone: "info",
+        text:
+          "Notifikasi dikirim menggunakan integrasi Twilio. Pastikan nomor yang Anda daftarkan aktif menerima pesan dari nomor asing.",
       },
     ],
   },

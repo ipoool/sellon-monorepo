@@ -306,7 +306,7 @@ export function StorefrontForm({ initial }: { initial: Store }) {
       <ProductLayoutCard
         locked={themeLocked}
         value={productLayout}
-        onChange={setProductLayout}
+        onChange={applyLayout}
         onPreview={setPreviewLayout}
       />
 
@@ -564,13 +564,8 @@ function ProductLayoutCard({
                 locked && "opacity-60",
               )}
             >
-              <button
-                type="button"
-                onClick={() => !locked && onChange(opt.key)}
-                disabled={locked}
-                className="flex w-full flex-col items-start gap-2 text-left disabled:cursor-not-allowed"
-                aria-pressed={active}
-              >
+              {/* Thumbnail + label — display only, tidak ada aksi */}
+              <div className="flex flex-col items-start gap-2">
                 <LayoutThumbnail variant={opt.key} active={active} />
                 <div className="flex items-center gap-1.5">
                   <Icon
@@ -597,16 +592,28 @@ function ProductLayoutCard({
                 <p className="text-xs leading-relaxed text-neutral-600">
                   {opt.description}
                 </p>
-              </button>
-              <button
-                type="button"
-                onClick={() => !locked && onPreview(opt.key)}
-                disabled={locked}
-                className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-neutral-200 bg-white text-xs font-medium text-neutral-700 transition-colors hover:border-brand-300 hover:text-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <Eye className="size-3.5" aria-hidden />
-                Preview
-              </button>
+              </div>
+
+              {/* Actions */}
+              <div className="mt-auto flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => !locked && onPreview(opt.key)}
+                  disabled={locked}
+                  className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md border border-neutral-200 bg-white text-xs font-medium text-neutral-700 transition-colors hover:border-brand-300 hover:text-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Eye className="size-3.5" aria-hidden />
+                  Preview
+                </button>
+                <button
+                  type="button"
+                  onClick={() => !locked && onChange(opt.key)}
+                  disabled={locked || active}
+                  className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md border border-brand-500 bg-brand-500 text-xs font-semibold text-white transition-colors hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {active ? "Aktif" : "Terapkan"}
+                </button>
+              </div>
             </div>
           );
         })}

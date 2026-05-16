@@ -210,7 +210,7 @@ func (r *UserRepo) SearchAll(ctx context.Context, q string, limit int, before *t
 		limit = 50
 	}
 	args := []any{}
-	clauses := []string{}
+	clauses := []string{"role <> 'admin'"}
 	if s := strings.TrimSpace(q); s != "" {
 		args = append(args, "%"+strings.ToLower(s)+"%")
 		clauses = append(clauses, "(LOWER(email) LIKE $1 OR LOWER(name) LIKE $1)")
@@ -219,10 +219,7 @@ func (r *UserRepo) SearchAll(ctx context.Context, q string, limit int, before *t
 		args = append(args, *before)
 		clauses = append(clauses, "created_at < $"+itoaParam(len(args)))
 	}
-	where := ""
-	if len(clauses) > 0 {
-		where = " WHERE " + strings.Join(clauses, " AND ")
-	}
+	where := " WHERE " + strings.Join(clauses, " AND ")
 	args = append(args, limit)
 	query := `SELECT ` + userCols + ` FROM users` + where +
 		` ORDER BY created_at DESC LIMIT $` + itoaParam(len(args))

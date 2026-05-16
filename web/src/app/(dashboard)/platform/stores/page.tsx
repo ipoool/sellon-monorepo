@@ -1,20 +1,13 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import {
-  Search,
-  ExternalLink,
-  Crown,
-  UserCog,
-  Store as StoreIcon,
-} from "lucide-react";
+import { Search, Store as StoreIcon } from "lucide-react";
 
 import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { Avatar } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { AdminGrantSubscriptionDialog } from "@/components/admin/admin-grant-subscription-dialog";
+import { StoreRowActions } from "@/components/admin/store-row-actions";
 import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import { formatRupiah } from "@/lib/format";
@@ -31,6 +24,7 @@ function formatDate(iso: string) {
     year: "numeric",
   });
 }
+
 
 export default async function PlatformTokoPage({
   searchParams,
@@ -96,8 +90,6 @@ export default async function PlatformTokoPage({
               <thead className="bg-neutral-50 text-left text-xs uppercase tracking-wider text-neutral-500">
                 <tr>
                   <th className="px-4 py-3 sm:px-5">Toko</th>
-                  <th className="px-4 py-3">Pemilik</th>
-                  <th className="px-4 py-3">Plan</th>
                   <th className="px-4 py-3 text-right">Produk</th>
                   <th className="px-4 py-3 text-right">Pesanan</th>
                   <th className="px-4 py-3 text-right">Revenue</th>
@@ -110,8 +102,8 @@ export default async function PlatformTokoPage({
                   <tr key={s.id}>
                     <td className="px-4 py-3 sm:px-5">
                       <div className="flex items-center gap-3">
-                        <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-brand-50 text-brand-700">
-                          <StoreIcon className="size-4" aria-hidden />
+                        <span className="flex size-16 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-700">
+                          <StoreIcon className="size-8" aria-hidden />
                         </span>
                         <div className="min-w-0">
                           <p className="truncate font-medium text-neutral-900">
@@ -120,37 +112,25 @@ export default async function PlatformTokoPage({
                           <p className="truncate text-xs text-neutral-500">
                             /{s.slug}
                           </p>
+                          <Link
+                            href={`/platform/users/${s.owner_user_id}`}
+                            className="mt-1 flex items-center gap-1.5 text-xs text-neutral-500 hover:text-neutral-800"
+                          >
+                            <Avatar
+                              name={s.owner_name || s.owner_email}
+                              size="xs"
+                            />
+                            <span className="truncate">
+                              {s.owner_name || s.owner_email}
+                            </span>
+                          </Link>
                         </div>
                       </div>
                     </td>
-                    <td className="px-4 py-3">
-                      <Link
-                        href={`/platform/users/${s.owner_user_id}`}
-                        className="flex items-center gap-2 text-neutral-700 hover:text-neutral-900"
-                      >
-                        <Avatar
-                          name={s.owner_name || s.owner_email}
-                          size="xs"
-                        />
-                        <span className="truncate">
-                          {s.owner_name || s.owner_email}
-                        </span>
-                      </Link>
-                    </td>
-                    <td className="px-4 py-3">
-                      {s.plan === "free" ? (
-                        <Badge variant="outline">Gratis</Badge>
-                      ) : (
-                        <Badge variant="warning" className="gap-1">
-                          <Crown className="size-3" aria-hidden />
-                          {s.plan === "pro" ? "Pro" : "Bisnis"}
-                        </Badge>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right tabular-nums text-neutral-700">
+                    <td className="px-4 py-3 text-right tabular-nums font-medium text-neutral-900">
                       {s.products_count}
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums text-neutral-700">
+                    <td className="px-4 py-3 text-right tabular-nums font-medium text-neutral-900">
                       {s.orders_count}
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums font-medium text-neutral-900">
@@ -160,31 +140,11 @@ export default async function PlatformTokoPage({
                       {formatDate(s.created_at)}
                     </td>
                     <td className="px-4 py-3 sm:px-5">
-                      <div className="flex flex-wrap items-center justify-end gap-1.5">
-                        <AdminGrantSubscriptionDialog
-                          storeId={s.id}
-                          storeName={s.name}
-                          currentPlan={s.plan}
-                          triggerVariant="ghost"
+                      <div className="flex items-center justify-end">
+                        <StoreRowActions
+                          slug={s.slug}
+                          ownerUserId={s.owner_user_id}
                         />
-                        <a
-                          href={`/${s.slug}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          <Button variant="ghost" size="sm">
-                            <ExternalLink className="size-3.5" aria-hidden />
-                            Toko
-                          </Button>
-                        </a>
-                        <Link
-                          href={`/platform/users/${s.owner_user_id}`}
-                        >
-                          <Button variant="ghost" size="sm">
-                            <UserCog className="size-3.5" aria-hidden />
-                            Pemilik
-                          </Button>
-                        </Link>
                       </div>
                     </td>
                   </tr>

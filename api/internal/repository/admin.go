@@ -70,6 +70,76 @@ func (r *AdminRepo) Stats(ctx context.Context) (*AdminStats, error) {
 	return out, nil
 }
 
+// AdminUserRow is a denormalized user projection for the admin users list.
+// It includes the store's current subscription so admin can see plan/expiry
+// without a second round-trip per user.
+type AdminUserRow struct {
+	ID         uuid.UUID
+	Email      string
+	Name       string
+	PictureURL string
+	Role       string
+	BannedAt   *time.Time
+	CreatedAt  time.Time
+	// Store subscription — zero-values when user has no store.
+	StoreID   *uuid.UUID
+	Plan      string // "free" if no store
+	SubStatus string // "active" if no store
+	PeriodEnd *time.Time
+}
+
+// ListUsers powers the admin /users list. Filters out admin-role users so
+// they don't show up in the list. q is free-text matched against email/name.
+// before is a created_at cursor for pagination.
+func (r *AdminRepo) ListUsers(ctx context.Context, q string, limit int, before *time.Time) ([]AdminUserRow, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	args := []any{}
+	clauses := []string{"u.role <> 'admin'"}
+	if s := strings.TrimSpace(q); s != "" {
+		args = append(args, "%"+strings.ToLower(s)+"%")
+		p := itoa(len(args))
+		clauses = append(clauses, "(LOWER(u.email) LIKE $"+p+" OR LOWER(u.name) LIKE $"+p+")")
+	}
+	if before != nil {
+		args = append(args, *before)
+		clauses = append(clauses, "u.created_at < $"+itoa(len(args)))
+	}
+	args = append(args, limit)
+
+	rows, err := r.pool.Query(ctx, `
+		SELECT
+		  u.id, u.email, u.name, u.picture_url, u.role, u.banned_at, u.created_at,
+		  s.id,
+		  COALESCE(sub.plan, 'free'),
+		  COALESCE(sub.status, 'active'),
+		  sub.current_period_end
+		FROM users u
+		LEFT JOIN stores s ON s.owner_id = u.id
+		LEFT JOIN subscriptions sub ON sub.store_id = s.id
+		WHERE `+strings.Join(clauses, " AND ")+`
+		ORDER BY u.created_at DESC
+		LIMIT $`+itoa(len(args)), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AdminUserRow
+	for rows.Next() {
+		var row AdminUserRow
+		if err := rows.Scan(
+			&row.ID, &row.Email, &row.Name, &row.PictureURL,
+			&row.Role, &row.BannedAt, &row.CreatedAt,
+			&row.StoreID, &row.Plan, &row.SubStatus, &row.PeriodEnd,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
 type StoreSummary struct {
 	ID              uuid.UUID
 	Slug            string
@@ -80,6 +150,7 @@ type StoreSummary struct {
 	IsOpen          bool
 	Plan            string
 	SubStatus       string
+	PeriodEnd       *time.Time
 	ProductsCount   int
 	OrdersCount     int
 	RevenueCents    int64
@@ -108,6 +179,7 @@ func (r *AdminRepo) ListStoresWithStats(ctx context.Context, q string, limit int
 		  s.is_open,
 		  COALESCE(sub.plan, 'free'),
 		  COALESCE(sub.status, 'active'),
+		  sub.current_period_end,
 		  (SELECT COUNT(*) FROM products p WHERE p.store_id = s.id),
 		  (SELECT COUNT(*) FROM orders o WHERE o.store_id = s.id),
 		  (SELECT COALESCE(SUM(o.total_cents), 0) FROM orders o
@@ -131,7 +203,7 @@ func (r *AdminRepo) ListStoresWithStats(ctx context.Context, q string, limit int
 		if err := rows.Scan(
 			&s.ID, &s.Slug, &s.Name, &s.OwnerUserID,
 			&s.OwnerEmail, &s.OwnerName,
-			&s.IsOpen, &s.Plan, &s.SubStatus,
+			&s.IsOpen, &s.Plan, &s.SubStatus, &s.PeriodEnd,
 			&s.ProductsCount, &s.OrdersCount, &s.RevenueCents,
 			&s.CreatedAt,
 		); err != nil {
@@ -152,6 +224,7 @@ func (r *AdminRepo) StoresOwnedBy(ctx context.Context, userID uuid.UUID) ([]Stor
 		  s.is_open,
 		  COALESCE(sub.plan, 'free'),
 		  COALESCE(sub.status, 'active'),
+		  sub.current_period_end,
 		  (SELECT COUNT(*) FROM products p WHERE p.store_id = s.id),
 		  (SELECT COUNT(*) FROM orders o WHERE o.store_id = s.id),
 		  (SELECT COALESCE(SUM(o.total_cents), 0) FROM orders o
@@ -174,7 +247,7 @@ func (r *AdminRepo) StoresOwnedBy(ctx context.Context, userID uuid.UUID) ([]Stor
 		if err := rows.Scan(
 			&s.ID, &s.Slug, &s.Name, &s.OwnerUserID,
 			&s.OwnerEmail, &s.OwnerName,
-			&s.IsOpen, &s.Plan, &s.SubStatus,
+			&s.IsOpen, &s.Plan, &s.SubStatus, &s.PeriodEnd,
 			&s.ProductsCount, &s.OrdersCount, &s.RevenueCents,
 			&s.CreatedAt,
 		); err != nil {

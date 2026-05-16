@@ -179,6 +179,11 @@ export function useCart(): CartContextValue {
   return ctx;
 }
 
+// Safe variant for components that may render outside CartProvider (e.g. dashboard preview).
+export function useOptionalCart(): CartContextValue | null {
+  return use(CartContext);
+}
+
 export function cartItemKey(it: Pick<CartItem, "product_id" | "variant_id">): string {
   return itemKey(it);
 }

@@ -62,6 +62,12 @@ func main() {
 	dashURL := cfg.PrimaryWebOrigin() + "/dashboard"
 	scheduler.NewWeeklyTipsJob(users, schedulerState, mailer, tipGen, dashURL, logger).Start(ctx)
 
+	subs := repository.NewSubscriptionRepo(pool)
+	reports := repository.NewReportsRepo(pool)
+	expiryGen := email.NewExpiryGenerator(cfg.AnthropicAPIKey, logger)
+	renewURL := cfg.PrimaryWebOrigin() + "/settings/subscription"
+	scheduler.NewSubscriptionExpiryJob(subs, reports, mailer, expiryGen, renewURL, logger).Start(ctx)
+
 	slog.Info("server started", "port", cfg.Port, "env", cfg.Env)
 
 	stop := make(chan os.Signal, 1)

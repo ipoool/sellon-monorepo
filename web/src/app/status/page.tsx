@@ -28,10 +28,9 @@ export const metadata = pageMetadata({
 
 // Status checks are intentionally simple. We probe two endpoints
 // server-side at request time:
-//   - GET /health  → liveness; if it answers OK, the API process is up.
-//   - GET /api/v1/info → catches DB-down/migrations-stuck where /health
-//     would still return OK. The handler reads cfg, which loads even
-//     without a DB, so this is mostly a serialization/router probe.
+//   - GET /api/v1/info → liveness; reads config only, always fast.
+//   - GET /api/v1/plans → DB health; queries the plans table so it fails
+//     if Postgres is down or migrations haven't run.
 // We don't store history - there's no monitoring backend yet. Honesty
 // over fake 99.99% bars.
 
@@ -68,21 +67,21 @@ async function probe(path: string, timeoutMs = 4000): Promise<{ ok: boolean; sta
 
 export default async function StatusPage() {
   // Run me + probes in parallel.
-  const [me, health, info] = await Promise.all([
+  const [me, info, plans] = await Promise.all([
     getMe(),
-    probe("/health"),
     probe("/api/v1/info"),
+    probe("/api/v1/plans"),
   ]);
 
-  const apiStatus: ServiceStatus = health.ok ? "operational" : "down";
-  const apiDetail = health.ok
-    ? `OK · ${health.ms}ms`
-    : `Tidak merespon (HTTP ${health.status || "-"})`;
-
-  const dbStatus: ServiceStatus = info.ok ? "operational" : "down";
-  const dbDetail = info.ok
+  const apiStatus: ServiceStatus = info.ok ? "operational" : "down";
+  const apiDetail = info.ok
     ? `OK · ${info.ms}ms`
     : `Tidak merespon (HTTP ${info.status || "-"})`;
+
+  const dbStatus: ServiceStatus = plans.ok ? "operational" : "down";
+  const dbDetail = plans.ok
+    ? `OK · ${plans.ms}ms`
+    : `Tidak merespon (HTTP ${plans.status || "-"})`;
 
   const services: ServiceCheck[] = [
     {
@@ -101,7 +100,7 @@ export default async function StatusPage() {
     },
     {
       name: "Database & layanan internal",
-      description: "Probe via /api/v1/info - gagal kalau DB / config bermasalah.",
+      description: "Probe via /api/v1/plans - gagal kalau DB / migrasi bermasalah.",
       icon: Database,
       status: dbStatus,
       detail: dbDetail,

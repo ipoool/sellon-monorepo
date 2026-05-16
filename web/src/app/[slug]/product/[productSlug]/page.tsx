@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import NextImage from "next/image";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Package } from "lucide-react";
+import { ArrowLeft, Package, ChevronRight } from "lucide-react";
 
 import { Container } from "@/components/layout/container";
 import { Badge } from "@/components/ui/badge";
@@ -53,6 +53,15 @@ type StorefrontPayment = {
   bank_count: number;
 };
 
+type RelatedProduct = {
+  id: string;
+  slug: string;
+  name: string;
+  price_cents: number;
+  photo_urls: string[];
+  is_featured: boolean;
+};
+
 async function fetchProduct(
   slug: string,
   productSlug: string,
@@ -71,6 +80,22 @@ async function fetchProduct(
     return await res.json();
   } catch {
     return null;
+  }
+}
+
+async function fetchRelated(slug: string, excludeSlug: string): Promise<RelatedProduct[]> {
+  try {
+    const res = await fetch(`${apiBase}/api/v1/storefront/${slug}`, { cache: "no-store" });
+    if (!res.ok) return [];
+    const data = await res.json() as { products?: RelatedProduct[] };
+    const all = data.products ?? [];
+    // Featured first, then the rest — exclude the current product.
+    const others = all.filter((p) => p.slug !== excludeSlug);
+    const featured = others.filter((p) => p.is_featured);
+    const rest = others.filter((p) => !p.is_featured);
+    return [...featured, ...rest].slice(0, 6);
+  } catch {
+    return [];
   }
 }
 
@@ -94,7 +119,10 @@ export default async function ProductDetailPage({
   params: Promise<{ slug: string; productSlug: string }>;
 }) {
   const { slug, productSlug } = await params;
-  const data = await fetchProduct(slug, productSlug);
+  const [data, related] = await Promise.all([
+    fetchProduct(slug, productSlug),
+    fetchRelated(slug, productSlug),
+  ]);
   if (!data) notFound();
   const { store, product, variants = [], payment } = data;
   const totalStock = product.has_variants
@@ -130,7 +158,7 @@ export default async function ProductDetailPage({
 
       <main className="py-6 pb-24 lg:py-10 lg:pb-10">
         <Container>
-          <div className="grid gap-8 lg:grid-cols-12">
+          <div className="grid gap-8 pb-10 lg:grid-cols-12 lg:pb-16">
             {/* Photos */}
             <div className="lg:col-span-7">
               <ProductPhotoGallery
@@ -209,6 +237,60 @@ export default async function ProductDetailPage({
             </div>
           </div>
         </Container>
+
+        {related.length > 0 && (
+          <div className="border-t border-neutral-200 bg-white">
+            <Container>
+              <div className="py-8">
+                <div className="mb-5 flex items-center justify-between gap-4">
+                  <h2 className="font-display text-lg font-semibold text-neutral-900">
+                    Produk Lainnya
+                  </h2>
+                  <Link
+                    href={`/${slug}`}
+                    className="inline-flex items-center gap-1 text-sm font-medium text-brand-600 hover:text-brand-700"
+                  >
+                    Lihat semua
+                    <ChevronRight className="size-4" aria-hidden />
+                  </Link>
+                </div>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+                  {related.map((p) => (
+                    <Link
+                      key={p.id}
+                      href={`/${slug}/product/${p.slug}`}
+                      className="group flex flex-col overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-card transition-all hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-elevated"
+                    >
+                      <div className="relative aspect-square overflow-hidden bg-neutral-100">
+                        {p.photo_urls[0] ? (
+                          <NextImage
+                            src={p.photo_urls[0]}
+                            alt={p.name}
+                            fill
+                            sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 16vw"
+                            className="object-cover transition-transform duration-200 group-hover:scale-105"
+                          />
+                        ) : (
+                          <div className="flex size-full items-center justify-center text-neutral-400">
+                            <Package className="size-8" aria-hidden />
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex flex-col gap-0.5 p-3">
+                        <p className="line-clamp-2 text-xs font-medium leading-snug text-neutral-800">
+                          {p.name}
+                        </p>
+                        <p className="font-display text-sm font-semibold text-neutral-900">
+                          {formatRupiah(p.price_cents)}
+                        </p>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            </Container>
+          </div>
+        )}
       </main>
     </div>
   );

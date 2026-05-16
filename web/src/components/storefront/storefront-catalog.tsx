@@ -3,10 +3,11 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { Search, Package, Star, Sparkles, RotateCcw, ShoppingBag } from "lucide-react";
+import { Search, Package, Star, Sparkles, RotateCcw, ShoppingBag, ShoppingCart, Plus, Minus } from "lucide-react";
 
 import { formatRupiah } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { useOptionalCart } from "@/components/storefront/cart-context";
 
 type StorefrontProduct = {
   id: string;
@@ -946,13 +947,48 @@ function ProductFeedCard({
 // ─────────────────────────────────────────────────────────────────────
 
 // Kiosk: touch-friendly 2-column, harga besar, cocok untuk kasir/menu kafe.
+// Berbeda dari layout lain — punya inline add-to-cart stepper tanpa pindah halaman.
 function ProductKioskCard({ p, storeSlug }: { p: StorefrontProduct; storeSlug: string }) {
+  const cart = useOptionalCart();
+
+  const cartKey = `${p.id}:`;
+  const cartItem = cart?.items.find((x) => `${x.product_id}:${x.variant_id ?? ""}` === cartKey);
+  const qty = cartItem?.qty ?? 0;
+  const outOfStock = !shouldHideStock(p) && p.stock === 0;
+  const atStockLimit = !shouldHideStock(p) && qty >= p.stock;
+
+  function handleAdd() {
+    if (outOfStock || !cart) return;
+    cart.addItem({
+      product_id: p.id,
+      product_slug: p.slug,
+      product_name: p.name,
+      unit_price_cents: p.price_cents,
+      qty: 1,
+      photo_url: p.photo_urls[0],
+      product_type: p.product_type ?? "physical",
+      available_stock: p.stock,
+    });
+  }
+
+  function handleDecrement() {
+    if (!cart) return;
+    if (qty <= 1) cart.removeItem(cartKey);
+    else cart.setQty(cartKey, qty - 1);
+  }
+
+  function handleIncrement() {
+    if (!cart || atStockLimit) return;
+    cart.setQty(cartKey, qty + 1);
+  }
+
   return (
-    <Link
-      href={`/${storeSlug}/product/${p.slug}`}
-      className="group flex flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-card transition-all hover:border-brand-300 hover:shadow-elevated active:scale-[0.98]"
-    >
-      <div className="relative aspect-square overflow-hidden bg-neutral-100">
+    <div className="flex flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-card transition-colors hover:border-brand-300">
+      {/* Foto — tap buka detail produk */}
+      <Link
+        href={`/${storeSlug}/product/${p.slug}`}
+        className="group relative block aspect-square overflow-hidden bg-neutral-100"
+      >
         {p.photo_urls[0] ? (
           <Image
             src={p.photo_urls[0]}
@@ -966,17 +1002,67 @@ function ProductKioskCard({ p, storeSlug }: { p: StorefrontProduct; storeSlug: s
             <Package className="size-12 text-neutral-300" aria-hidden />
           </div>
         )}
-        {!shouldHideStock(p) && p.stock === 0 && (
+        {outOfStock && (
           <div className="absolute inset-0 flex items-center justify-center bg-neutral-900/50">
-            <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-neutral-700">Habis</span>
+            <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-neutral-700">
+              Habis
+            </span>
+          </div>
+        )}
+        {qty > 0 && (
+          <span className="absolute right-2 top-2 flex size-5 items-center justify-center rounded-full bg-brand-600 text-[10px] font-bold text-white">
+            {qty}
+          </span>
+        )}
+      </Link>
+
+      {/* Info + cart control */}
+      <div className="flex flex-1 flex-col gap-2 p-3">
+        <div>
+          <p className="line-clamp-2 text-sm font-semibold leading-tight text-neutral-900">
+            {p.name}
+          </p>
+          <p className="mt-1 font-display text-base font-bold text-brand-600">
+            {formatRupiah(p.price_cents)}
+          </p>
+        </div>
+
+        {qty === 0 ? (
+          <button
+            type="button"
+            onClick={handleAdd}
+            disabled={outOfStock}
+            className="mt-auto flex h-9 w-full items-center justify-center gap-1.5 rounded-xl bg-brand-600 text-sm font-semibold text-white transition-colors hover:bg-brand-700 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <ShoppingCart className="size-4" aria-hidden />
+            Tambah
+          </button>
+        ) : (
+          <div className="mt-auto flex h-9 w-full items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={handleDecrement}
+              aria-label="Kurangi"
+              className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-brand-200 bg-brand-50 text-brand-700 transition-colors hover:bg-brand-100 active:scale-90"
+            >
+              <Minus className="size-4" aria-hidden />
+            </button>
+            <span className="min-w-[1.5rem] text-center text-sm font-bold text-brand-800 tabular-nums">
+              {qty}
+            </span>
+            <button
+              type="button"
+              onClick={handleIncrement}
+              disabled={atStockLimit}
+              aria-label="Tambah"
+              className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-brand-200 bg-brand-50 text-brand-700 transition-colors hover:bg-brand-100 active:scale-90 disabled:opacity-40"
+            >
+              <Plus className="size-4" aria-hidden />
+            </button>
           </div>
         )}
       </div>
-      <div className="flex flex-1 flex-col gap-1 p-3">
-        <p className="line-clamp-2 text-sm font-semibold leading-tight text-neutral-900">{p.name}</p>
-        <p className="mt-auto font-display text-base font-bold text-brand-600">{formatRupiah(p.price_cents)}</p>
-      </div>
-    </Link>
+    </div>
   );
 }
 

@@ -30,7 +30,10 @@ export type Store = {
     | "showcase"
     | "compact"
     | "magazine"
-    | "feed";
+    | "feed"
+    | "kiosk"
+    | "katalog"
+    | "poster";
   show_hours_public?: boolean;
   show_social_public?: boolean;
   footer_text?: string;
@@ -346,6 +349,10 @@ export type AdminUser = {
   role: "user" | "admin";
   banned_at?: string;
   created_at: string;
+  store_id?: string | null;
+  plan: string;
+  sub_status: string;
+  period_end?: string | null;
 };
 
 export type AdminStoreSummary = {
@@ -358,6 +365,7 @@ export type AdminStoreSummary = {
   is_open: boolean;
   plan: string;
   sub_status: string;
+  period_end: string | null;
   products_count: number;
   orders_count: number;
   revenue_cents: number;

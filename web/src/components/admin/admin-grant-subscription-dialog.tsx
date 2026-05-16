@@ -33,8 +33,9 @@ type Props = {
   storeId: string;
   storeName: string;
   currentPlan?: string;
-  triggerVariant?: "default" | "outline" | "ghost";
+  triggerVariant?: "default" | "outline" | "ghost" | "menu";
   triggerLabel?: string;
+  onOpen?: () => void;
 };
 
 export function AdminGrantSubscriptionDialog({
@@ -43,6 +44,7 @@ export function AdminGrantSubscriptionDialog({
   currentPlan,
   triggerVariant = "outline",
   triggerLabel = "Atur Langganan",
+  onOpen,
 }: Props) {
   const { refresh } = useRouter();
   const [open, setOpen] = useState(false);
@@ -114,10 +116,21 @@ export function AdminGrantSubscriptionDialog({
 
   return (
     <>
+      {triggerVariant === "menu" ? (
+        <button
+          type="button"
+          onClick={() => { onOpen?.(); setFlash(null); setOpen(true); }}
+          className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50"
+        >
+          <Crown className="size-4 shrink-0 text-neutral-400" aria-hidden />
+          {triggerLabel}
+        </button>
+      ) : (
       <Button
         size="sm"
-        variant={triggerVariant}
+        variant={triggerVariant as "default" | "outline" | "ghost"}
         onClick={() => {
+          onOpen?.();
           setFlash(null);
           setOpen(true);
         }}
@@ -125,6 +138,7 @@ export function AdminGrantSubscriptionDialog({
         <Crown className="size-3.5" aria-hidden />
         {triggerLabel}
       </Button>
+      )}
 
       <dialog
         ref={dialogRef}

@@ -1,3 +1,6 @@
+"use client";
+
+import { useRef, useState } from "react";
 import {
   Store,
   CreditCard,
@@ -9,6 +12,10 @@ import {
   Download,
   Truck,
   Sparkles,
+  Palette,
+  UserCog,
+  ChevronLeft,
+  ChevronRight,
   Check,
   type LucideIcon,
 } from "lucide-react";
@@ -21,184 +28,222 @@ type Feature = {
   title: string;
   tagline: string;
   bullets: string[];
-  // Tailwind tint for the icon container - kept inside the brand family but
-  // varied so the grid doesn't feel monotonous.
-  iconBg: string;
-  iconFg: string;
 };
 
 const features: Feature[] = [
   {
     icon: Store,
-    title: "Toko sendiri, cukup kirim link-nya",
+    title: "Toko & katalog publik",
     tagline:
-      "Halaman toko siap dipakai dalam menit - tinggal kirim link-nya ke grup WA atau bio Instagram, pembeli langsung lihat seluruh katalog.",
+      "Link toko siap dibagikan dalam menit. Tinggal kirim ke grup WA atau bio Instagram, pembeli langsung lihat seluruh katalog.",
     bullets: [
-      "Pembeli scroll & cari produk dengan mudah dari HP",
+      "6 pilihan tampilan: Grid, List, Showcase, Compact, Magazine, Feed",
       "Produk paling laku tampil paling atas",
       "Tombol order WhatsApp cukup sekali ketuk",
     ],
-    iconBg: "bg-brand-50",
-    iconFg: "text-brand-600",
   },
   {
     icon: CreditCard,
-    title: "Terima bayaran dengan cara apa pun",
+    title: "Terima pembayaran apa pun",
     tagline:
-      "QRIS, transfer bank, GoPay, ShopeePay - pembeli tinggal scan atau klik, uangnya langsung masuk ke rekening kamu.",
+      "QRIS, transfer bank, GoPay, ShopeePay — uang langsung masuk ke rekening kamu, bukan ke kami.",
     bullets: [
       "Pembayaran QRIS, transfer, GoPay, ShopeePay",
-      "Coba dulu di mode test sebelum diaktifkan",
-      "Notifikasi otomatis pas pembeli selesai bayar",
+      "Coba dulu di mode sandbox sebelum live",
+      "Notifikasi otomatis saat pembeli selesai bayar",
     ],
-    iconBg: "bg-brand-50",
-    iconFg: "text-brand-600",
   },
   {
     icon: ClipboardList,
-    title: "Kelola pesanan dari satu layar",
+    title: "Manajemen pesanan",
     tagline:
-      "Dari order masuk sampai paket diterima pembeli - semua status pesanan tercatat rapi. Tidak perlu lagi catat manual di buku.",
+      "Dari order masuk sampai paket diterima pembeli — semua status pesanan tercatat rapi.",
     bullets: [
       "Status jelas: baru, diproses, dikirim, atau selesai",
       "Masukkan nomor resi langsung dari HP",
       "Unduh semua pesanan jadi file Excel kapan saja",
     ],
-    iconBg: "bg-brand-50",
-    iconFg: "text-brand-600",
   },
   {
     icon: Upload,
-    title: "Tambah produk banyak sekaligus",
+    title: "Produk & bulk upload",
     tagline:
-      "Punya ratusan produk? Upload sekali jalan dari file Excel - selesai dalam 5 menit, bukan seharian.",
+      "Tambah satu produk atau ratusan sekaligus via Excel — selesai dalam 5 menit, bukan seharian.",
     bullets: [
       "Foto produk langsung dari HP",
       "Satu produk bisa banyak ukuran atau warna",
       "Notifikasi otomatis kalau stok mau habis",
     ],
-    iconBg: "bg-brand-50",
-    iconFg: "text-brand-600",
   },
   {
     icon: Truck,
-    title: "Cocok untuk barang fisik",
+    title: "Integrasi kurir & ongkir",
     tagline:
-      "Kaos, makanan, kerajinan - apa pun yang dikirim ke alamat pembeli, pengiriman & ongkir-nya tinggal pilih.",
+      "Kaos, makanan, kerajinan — apa pun yang dikirim ke alamat pembeli, ongkirnya tinggal pilih.",
     bullets: [
       "Pilih kurir (JNE, J&T, SiCepat, dll.) langsung di checkout",
       "Ongkir hitung otomatis berdasarkan kota tujuan",
-      "Cetak label & input nomor resi tanpa pindah aplikasi",
+      "Input nomor resi tanpa pindah aplikasi",
     ],
-    iconBg: "bg-brand-50",
-    iconFg: "text-brand-600",
   },
   {
     icon: Download,
-    title: "Cocok juga untuk produk digital",
+    title: "Produk digital",
     tagline:
-      "Ebook, kursus, voucher, atau template - file langsung sampai ke pembeli setelah pembayaran lunas, tanpa kamu repot kirim manual.",
+      "Ebook, kursus, atau template — link download otomatis dikirim ke email pembeli setelah bayar.",
     bullets: [
-      "Pembeli digital tidak perlu isi alamat",
+      "Pembeli digital tidak perlu isi alamat pengiriman",
       "Link akses otomatis dikirim ke email pembeli",
-      "Aman - link punya token unik, tidak bisa dibagi-bagi",
+      "Link punya token unik, tidak bisa dibagi-bagi",
     ],
-    iconBg: "bg-brand-50",
-    iconFg: "text-brand-600",
   },
   {
     icon: Users,
-    title: "Daftar pelanggan tercatat otomatis",
+    title: "Database pelanggan",
     tagline:
-      "Setiap pembeli langsung masuk daftar tanpa kamu input manual. Lama-lama kamu tahu mana langganan setia, mana yang baru kenal.",
+      "Setiap pembeli langsung masuk daftar tanpa input manual. Tahu mana langganan setia, mana yang baru.",
     bullets: [
-      "Pelanggan baru, loyal, atau VIP otomatis ditandai",
+      "Segmentasi otomatis: Baru, Reguler, Loyal, VIP",
       "Tulis catatan kecil di tiap pelanggan",
       "Chat ulang pelanggan langsung dari dasbor",
     ],
-    iconBg: "bg-brand-50",
-    iconFg: "text-brand-600",
   },
   {
     icon: Megaphone,
-    title: "Bikin promo gampang",
+    title: "Promo & kode diskon",
     tagline:
-      "Kode diskon, gratis ongkir, atau potongan harga - pakai cara apa pun untuk bikin pelanggan balik lagi.",
+      "Kode diskon, gratis ongkir, atau potongan harga — pakai cara apa pun untuk bikin pelanggan balik lagi.",
     bullets: [
       "Atur minimum belanja & batas pemakaian kode",
       "Tentukan tanggal mulai dan kapan promo habis",
       "Pembeli tinggal masukkan kode pas checkout",
     ],
-    iconBg: "bg-brand-50",
-    iconFg: "text-brand-600",
   },
   {
     icon: BarChart3,
-    title: "Pantau performa toko sekejap",
+    title: "Laporan penjualan",
     tagline:
-      "Penjualan harian, produk paling laku, pelanggan paling loyal - semua di satu halaman, tanpa perlu hitung manual.",
+      "Penjualan harian, produk paling laku, pelanggan paling loyal — semua di satu halaman laporan.",
     bullets: [
       "Grafik pendapatan harian yang mudah dibaca",
       "Tahu produk mana yang paling laku",
       "Bandingkan performa 7, 30, atau 90 hari terakhir",
     ],
-    iconBg: "bg-brand-50",
-    iconFg: "text-brand-600",
+  },
+  {
+    icon: Palette,
+    title: "Tampilan & custom domain",
+    tagline:
+      "Pilih warna brand, layout produk, dan pasang domain sendiri — toko terlihat profesional.",
+    bullets: [
+      "Warna brand sesuaikan dari satu pengaturan",
+      "Pasang domain sendiri (mis. toko.namabrand.com)",
+      "Logo dan banner upload langsung dari dasbor",
+    ],
+  },
+  {
+    icon: UserCog,
+    title: "Multi-staf dengan role",
+    tagline:
+      "Tidak harus kerja sendirian. Undang staf lewat email, atur siapa yang bisa apa.",
+    bullets: [
+      "Role Admin: akses penuh kelola toko",
+      "Role Staff: hanya bisa update status pesanan",
+      "Tiap aksi anggota tim tercatat di audit log",
+    ],
   },
   {
     icon: Sparkles,
-    title: "Bayar tetap per bulan, bukan per pesanan",
+    title: "Biaya tetap, bukan per transaksi",
     tagline:
-      "Marketplace potong 5-12% dari setiap order. Di SellOn, biayanya tetap per bulan - makin laris, makin untung kamu.",
+      "Marketplace potong 5–12% dari setiap order. Di SellOn, biaya flat per bulan — makin laris, makin untung.",
     bullets: [
       "Uang masuk langsung ke rekening atau akun Midtrans-mu",
-      "Pencairan ikut jadwal Midtrans (umumnya T+1), atau langsung kalau pakai transfer manual",
-      "Tidak ada biaya tersembunyi belakangan",
+      "Pencairan T+1 via Midtrans, atau instan kalau transfer manual",
+      "Tidak ada biaya tersembunyi",
     ],
-    iconBg: "bg-brand-50",
-    iconFg: "text-brand-600",
   },
 ];
 
 export function Features() {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [atStart, setAtStart] = useState(true);
+  const [atEnd, setAtEnd] = useState(false);
+
+  function onScroll() {
+    const el = trackRef.current;
+    if (!el) return;
+    setAtStart(el.scrollLeft <= 8);
+    setAtEnd(el.scrollLeft >= el.scrollWidth - el.clientWidth - 8);
+  }
+
+  function scroll(dir: 1 | -1) {
+    const el = trackRef.current;
+    if (!el) return;
+    el.scrollBy({ left: dir * el.clientWidth, behavior: "smooth" });
+  }
+
   return (
     <Section id="fitur">
       <Container>
-        <div className="mx-auto max-w-2xl text-center">
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-brand-200 bg-brand-50 px-3 py-1 text-xs font-medium text-brand-700">
-            <Sparkles className="size-3.5" aria-hidden />
-            Fitur
-          </span>
-          <h2 className="mt-3 font-display text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
-            Semua yang kamu perlukan untuk <br /> {" "}
-            <span className="text-gradient-brand">jualan online</span>
-          </h2>
-          <p className="mt-4 text-lg text-neutral-600">
-            Dibuat untuk toko kecil yang ingin tumbuh - tanpa ribetnya
-            marketplace, <br /> tanpa potongan setiap transaksi.
-          </p>
+        {/* Header row: title left, arrows right */}
+        <div className="flex items-end justify-between gap-6">
+          <div className="max-w-xl">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-brand-200 bg-brand-50 px-3 py-1 text-xs font-medium text-brand-700">
+              <Sparkles className="size-3.5" aria-hidden />
+              Fitur
+            </span>
+            <h2 className="mt-3 font-display text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
+              Semua yang kamu perlukan untuk{" "}
+              <span className="text-gradient-brand">jualan online</span>
+            </h2>
+            <p className="mt-3 text-base text-neutral-600">
+              Dibuat untuk toko kecil yang ingin tumbuh — tanpa ribetnya
+              marketplace, tanpa potongan setiap transaksi.
+            </p>
+          </div>
+
+          <div className="hidden shrink-0 items-center gap-2 sm:flex">
+            <button
+              type="button"
+              onClick={() => scroll(-1)}
+              disabled={atStart}
+              aria-label="Sebelumnya"
+              className="flex size-9 items-center justify-center rounded-full border border-neutral-200 bg-white text-neutral-600 shadow-card transition-all hover:border-brand-300 hover:text-brand-600 disabled:opacity-30 disabled:shadow-none"
+            >
+              <ChevronLeft className="size-4" aria-hidden />
+            </button>
+            <button
+              type="button"
+              onClick={() => scroll(1)}
+              disabled={atEnd}
+              aria-label="Berikutnya"
+              className="flex size-9 items-center justify-center rounded-full border border-neutral-200 bg-white text-neutral-600 shadow-card transition-all hover:border-brand-300 hover:text-brand-600 disabled:opacity-30 disabled:shadow-none"
+            >
+              <ChevronRight className="size-4" aria-hidden />
+            </button>
+          </div>
         </div>
 
-        <div className="mt-14 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-          {features.map(
-            ({ icon: Icon, title, tagline, bullets, iconBg, iconFg }, i) => (
-              <div
-                key={title}
-                className={
-                  "group flex flex-col gap-4 rounded-2xl border border-neutral-200 bg-white p-6 shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-elevated " +
-                  // Make the first card span 2 columns on desktop for a
-                  // bento-style anchor on the row.
-                  (i === 0 ? "lg:col-span-2 lg:row-span-1" : "")
-                }
-              >
-                <div
-                  className={`flex size-11 items-center justify-center rounded-xl ${iconBg} ${iconFg} transition-colors group-hover:bg-brand-100`}
-                >
-                  <Icon className="size-5" strokeWidth={2} aria-hidden />
-                </div>
+        {/* Scrollable track — 1 card on mobile, 2 on sm, 3 on lg */}
+        <div
+          ref={trackRef}
+          onScroll={onScroll}
+          className="mt-8 flex gap-4 overflow-x-auto pb-2 [scrollbar-width:none] [scroll-snap-type:x_mandatory] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden"
+        >
+          {features.map(({ icon: Icon, title, tagline, bullets }) => (
+            <div
+              key={title}
+              className="group flex w-full flex-none flex-col gap-4 rounded-2xl border border-neutral-200 bg-white p-6 shadow-card transition-all duration-200 [scroll-snap-align:start] hover:border-brand-300 hover:shadow-elevated lg:w-1/3"
+            >
+              {/* Icon — small+left on mobile, large+top on sm+ */}
+              <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-600 transition-colors group-hover:bg-brand-100">
+                <Icon className="size-5" strokeWidth={2} aria-hidden />
+              </div>
 
+              <div className="flex flex-col gap-3">
                 <div>
-                  <h3 className="font-display text-lg font-semibold text-neutral-900">
+                  <h3 className="font-display text-base font-semibold text-neutral-900">
                     {title}
                   </h3>
                   <p className="mt-1.5 text-sm leading-relaxed text-neutral-600">
@@ -206,11 +251,11 @@ export function Features() {
                   </p>
                 </div>
 
-                <ul className="mt-auto flex flex-col gap-1.5 border-t border-neutral-100 pt-4 text-xs text-neutral-700">
+                <ul className="flex flex-col gap-1.5 border-t border-neutral-100 pt-3 text-xs text-neutral-700">
                   {bullets.map((b) => (
-                    <li key={b} className="flex items-center gap-2">
+                    <li key={b} className="flex items-start gap-2">
                       <Check
-                        className="size-3.5 shrink-0 text-brand-600"
+                        className="mt-0.5 size-3.5 shrink-0 text-brand-600"
                         strokeWidth={2.5}
                         aria-hidden
                       />
@@ -219,9 +264,13 @@ export function Features() {
                   ))}
                 </ul>
               </div>
-            ),
-          )}
+            </div>
+          ))}
         </div>
+
+        <p className="mt-3 text-center text-xs text-neutral-400 lg:hidden">
+          Geser untuk lihat semua fitur →
+        </p>
       </Container>
     </Section>
   );
