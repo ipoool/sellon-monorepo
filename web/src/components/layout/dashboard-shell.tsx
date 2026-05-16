@@ -92,6 +92,7 @@ export function DashboardShell({
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Cari produk… (Enter)"
                   className="h-10 w-full rounded-lg border border-neutral-200 bg-neutral-50 pl-9 pr-3 text-sm placeholder:text-neutral-400 focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+                  suppressHydrationWarning
                 />
               </div>
             </form>
