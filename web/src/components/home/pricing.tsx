@@ -151,7 +151,7 @@ export function Pricing({ plans }: Props) {
                   ))}
                 </ul>
 
-                <Link href="/masuk" className="mt-auto">
+                <Link href="/login" className="mt-auto">
                   <Button
                     variant={plan.highlighted ? "default" : "outline"}
                     className="w-full"
