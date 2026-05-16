@@ -1288,3 +1288,35 @@ func (h *StorefrontHandler) MarkPaymentPending(w http.ResponseWriter, r *http.Re
 	}
 	response.JSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
+
+// GET /api/v1/storefront/domain-lookup?host=toko.brand.com
+// Public — called by Next.js middleware to resolve a custom domain to a store slug.
+// Returns 404 for unknown or unverified domains to avoid leaking store info.
+func (h *StorefrontHandler) DomainLookup(w http.ResponseWriter, r *http.Request) {
+	host := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("host")))
+	if host == "" {
+		response.Error(w, http.StatusBadRequest, "host required")
+		return
+	}
+	// Strip port if present (e.g., "toko.brand.com:443" → "toko.brand.com").
+	if i := strings.LastIndex(host, ":"); i > 0 {
+		host = host[:i]
+	}
+
+	store, err := h.stores.FindByDomain(r.Context(), host)
+	if errors.Is(err, repository.ErrStoreNotFound) {
+		response.Error(w, http.StatusNotFound, "domain tidak ditemukan")
+		return
+	}
+	if err != nil {
+		h.logger.Error("domain lookup", "err", err, "host", host)
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	// Only active domains serve traffic; pending/failed return 404.
+	if store.DomainStatus != "active" {
+		response.Error(w, http.StatusNotFound, "domain belum aktif")
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]string{"slug": store.Slug})
+}

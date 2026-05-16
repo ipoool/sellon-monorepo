@@ -209,7 +209,7 @@ export function BankAccountsManager({
     );
 
     return (
-      <section className="mt-6 border-t border-neutral-200 pt-6">
+      <section>
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
             <h3 className="font-semibold text-neutral-900">

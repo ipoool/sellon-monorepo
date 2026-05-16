@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { ImpersonationBanner } from "@/components/admin/impersonation-banner";
+import { BannersWrapper } from "@/components/dashboard/banners-wrapper";
 import { OrderNotifier } from "@/components/dashboard/order-notifier";
 import { PlanProvider } from "@/components/dashboard/plan-context";
 import { SandboxBanner } from "@/components/dashboard/sandbox-banner";
@@ -51,7 +52,7 @@ export default async function DashboardLayout({
   // (--imp-h) sits on top, expiry warning (--exp-h) sits below it. Both
   // default to 0px when the corresponding banner isn't shown.
   const impClass = me.is_impersonated
-    ? "[--imp-h:5rem] sm:[--imp-h:3.5rem]"
+    ? "[--imp-h:3.5rem]"
     : "[--imp-h:0px]";
   const sub = subData?.subscription;
   const showExpiry =
@@ -70,9 +71,12 @@ export default async function DashboardLayout({
 
   return (
     <div className={`${impClass} ${expClass} ${sbxClass}`}>
-      <ImpersonationBanner me={me} />
-      <SubscriptionExpiryBanner subscription={sub ?? null} />
-      <SandboxBanner visible={showSandbox} />
+      {/* BannersWrapper: single sticky block + measures real height → --banners-h */}
+      <BannersWrapper>
+        <ImpersonationBanner me={me} />
+        <SubscriptionExpiryBanner subscription={sub ?? null} />
+        <SandboxBanner visible={showSandbox} />
+      </BannersWrapper>
       {/* OrderNotifier subscribes to a per-store SSE stream — no point
           mounting it for an admin who has no store of their own. */}
       {data?.store && <OrderNotifier />}

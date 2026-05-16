@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Search, MessageCircle } from "lucide-react";
+import { Search, MessageCircle, ArrowRight } from "lucide-react";
 
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -160,7 +160,7 @@ export function CustomersTable({ customers }: { customers: Customer[] }) {
               {paged.map((c) => (
                 <tr
                   key={c.id}
-                  className="group cursor-pointer hover:bg-neutral-50"
+                  className="group/row cursor-pointer hover:bg-neutral-50"
                 >
                   <td className="px-5 py-3">
                     <Link
@@ -169,7 +169,7 @@ export function CustomersTable({ customers }: { customers: Customer[] }) {
                     >
                       <Avatar name={c.name} size="sm" />
                       <div>
-                        <p className="font-medium text-neutral-900 group-hover:text-brand-700">
+                        <p className="font-medium text-neutral-900 group-hover/row:text-brand-700">
                           {c.name}
                         </p>
                         <p className="font-mono text-xs text-neutral-500">
@@ -191,24 +191,36 @@ export function CustomersTable({ customers }: { customers: Customer[] }) {
                   <td className="px-5 py-3 text-neutral-600">
                     {c.last_order_at ? formatDateID(c.last_order_at) : "—"}
                   </td>
-                  <td className="px-5 py-3 text-right">
-                    {c.whatsapp_number && (
-                      <Tooltip label="Hubungi via WhatsApp" align="end">
-                        <a
-                          href={waLink(
-                            c.whatsapp_number,
-                            `Halo ${c.name}, ada update dari tokomu :)`,
-                          )}
-                          target="_blank"
-                          rel="noopener noreferrer"
+                  <td className="px-5 py-3">
+                    <div className="flex items-center justify-end gap-1">
+                      {c.whatsapp_number && (
+                        <Tooltip label="Hubungi via WhatsApp" align="end">
+                          <a
+                            href={waLink(
+                              c.whatsapp_number,
+                              `Halo ${c.name}, ada update dari tokomu :)`,
+                            )}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex size-8 items-center justify-center rounded-md border border-neutral-200 text-neutral-600 transition-colors hover:border-brand-500 hover:bg-brand-50 hover:text-brand-700"
+                            aria-label={`Hubungi ${c.name} via WhatsApp`}
+                          >
+                            <MessageCircle className="size-4" aria-hidden />
+                          </a>
+                        </Tooltip>
+                      )}
+                      <Tooltip label="Lihat detail" align="end">
+                        <Link
+                          href={`/customers/${c.id}`}
                           onClick={(e) => e.stopPropagation()}
                           className="inline-flex size-8 items-center justify-center rounded-md border border-neutral-200 text-neutral-600 transition-colors hover:border-brand-500 hover:bg-brand-50 hover:text-brand-700"
-                          aria-label={`Hubungi ${c.name} via WhatsApp`}
+                          aria-label={`Lihat detail ${c.name}`}
                         >
-                          <MessageCircle className="size-4" aria-hidden />
-                        </a>
+                          <ArrowRight className="size-4" aria-hidden />
+                        </Link>
                       </Tooltip>
-                    )}
+                    </div>
                   </td>
                 </tr>
               ))}

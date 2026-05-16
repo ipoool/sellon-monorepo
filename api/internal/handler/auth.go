@@ -57,6 +57,8 @@ type meResponse struct {
 	Name               string `json:"name"`
 	PictureURL         string `json:"picture_url"`
 	Role               string `json:"role"`
+	// Store-level role (owner/admin/staff) — empty for platform admins with no store.
+	StoreRole          string `json:"store_role,omitempty"`
 	IsImpersonated     bool   `json:"is_impersonated,omitempty"`
 	ImpersonatorID     string `json:"impersonator_id,omitempty"`
 	ImpersonatorEmail  string `json:"impersonator_email,omitempty"`
@@ -154,12 +156,19 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusForbidden, "akun diblokir")
 		return
 	}
+	// Resolve store-level role (owner/admin/staff).
+	var storeRole string
+	if _, role, err := h.memberships.GetUserStoreRole(r.Context(), user.ID); err == nil {
+		storeRole = string(role)
+	}
+
 	out := meResponse{
 		ID:         user.ID.String(),
 		Email:      user.Email,
 		Name:       user.Name,
 		PictureURL: user.PictureURL,
 		Role:       user.Role,
+		StoreRole:  storeRole,
 	}
 	if impID, ok := auth.ImpersonatorIDFromContext(r.Context()); ok {
 		out.IsImpersonated = true

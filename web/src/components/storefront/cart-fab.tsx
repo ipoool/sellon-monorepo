@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { ShoppingCart } from "lucide-react";
 
 import { useCart } from "./cart-context";
@@ -9,13 +10,20 @@ type Props = {
   storeSlug: string;
 };
 
-// Floating action button — fixed bottom-right of the viewport on every
-// storefront page. Hidden when the cart is empty so it doesn't crowd
-// the catalog before the buyer has put anything in. The badge count
-// updates live via the CartProvider context.
+// Floating action button — fixed bottom-right of the viewport on storefront
+// catalog and product pages. Hidden on cart, checkout, and order pages where
+// it would be redundant or confusing.
 export function CartFab({ storeSlug }: Props) {
   const { count } = useCart();
-  if (count === 0) return null;
+  const pathname = usePathname();
+
+  // Hide after the buyer moves past the catalog/product stage.
+  const hidden =
+    pathname.startsWith(`/${storeSlug}/cart`) ||
+    pathname.startsWith(`/${storeSlug}/checkout`) ||
+    pathname.startsWith(`/${storeSlug}/order`);
+
+  if (count === 0 || hidden) return null;
 
   return (
     <Link

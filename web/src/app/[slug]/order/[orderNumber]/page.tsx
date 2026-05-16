@@ -108,8 +108,10 @@ export default async function BuyerOrderPage({
   const { store, order, bank_accounts } = data;
   const isPaid = order.payment_status === "paid";
   const isPending = order.payment_status === "pending";
-  const showPayment =
-    !isPaid && order.status !== "cancelled" && (bank_accounts.length > 0 || order.payment_url);
+  // Show payment panel for any unpaid, non-cancelled order — even when the
+  // seller has no bank account or Midtrans yet. The buyer still needs a way
+  // to notify the seller (via WA) or see "sudah dikonfirmasi" once paid.
+  const showPayment = !isPaid && order.status !== "cancelled";
 
   return (
     <div className="min-h-svh bg-neutral-50">
@@ -267,6 +269,7 @@ export default async function BuyerOrderPage({
                   totalCents={order.total_cents}
                   paymentURL={order.payment_url}
                   bankAccounts={bank_accounts}
+                  paymentMethod={order.payment_method}
                   proofAlreadySubmitted={
                     Boolean(order.payment_proof_url) ||
                     order.payment_status !== "unpaid"

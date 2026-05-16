@@ -18,6 +18,9 @@ import {
   LayoutDashboard,
   LayoutPanelTop,
   Rows3,
+  MonitorSmartphone,
+  BookOpen,
+  RectangleVertical,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -164,10 +167,10 @@ export function StorefrontForm({ initial }: { initial: Store }) {
             href={`/${initial.slug}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 text-sm font-medium text-neutral-700 transition-colors hover:border-brand-300 hover:text-brand-700"
+            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 text-sm font-medium text-neutral-700 transition-colors hover:border-brand-300 hover:text-brand-700"
           >
             <Eye className="size-4" aria-hidden />
-            Lihat halaman toko
+            <span className="hidden sm:inline">Lihat halaman toko</span>
             <ExternalLink className="size-3.5" aria-hidden />
           </a>
         </div>
@@ -402,7 +405,10 @@ type LayoutKey =
   | "showcase"
   | "compact"
   | "magazine"
-  | "feed";
+  | "feed"
+  | "kiosk"
+  | "katalog"
+  | "poster";
 
 // Label bahasa Indonesia untuk tiap layout — dipakai di toast dan
 // tempat lain yang menampilkan nama layout ke seller. Harus tetap
@@ -414,6 +420,9 @@ const layoutLabels: Record<LayoutKey, string> = {
   compact: "Padat",
   magazine: "Majalah",
   feed: "Feed",
+  kiosk: "Kiosk",
+  katalog: "Katalog",
+  poster: "Poster",
 };
 
 const LAYOUTS: Array<{
@@ -462,6 +471,27 @@ const LAYOUTS: Array<{
     description:
       "Satu kolom Instagram-style, foto square besar per produk. Cocok untuk fashion, makanan, atau produk fotogenik.",
     icon: Rows3,
+  },
+  {
+    key: "kiosk",
+    label: "Kiosk",
+    description:
+      "2 kolom besar touch-friendly, harga dominan. Cocok untuk kasir, menu kafe, atau display POS.",
+    icon: MonitorSmartphone,
+  },
+  {
+    key: "katalog",
+    label: "Katalog",
+    description:
+      "Card horizontal dengan foto + deskripsi singkat. Cocok untuk produk yang butuh konteks lebih.",
+    icon: BookOpen,
+  },
+  {
+    key: "poster",
+    label: "Poster",
+    description:
+      "Foto portrait besar full-width dengan teks overlay. Cocok untuk fashion, lifestyle, atau produk premium.",
+    icon: RectangleVertical,
   },
 ];
 
@@ -664,6 +694,56 @@ function LayoutThumbnail({
               key={i}
               className={cn("aspect-square w-full rounded", tileBg)}
             />
+          ))}
+        </div>
+      </div>
+    );
+  }
+  // kiosk: 2 kolom tile besar + bar harga di bawah tiap tile
+  if (variant === "kiosk") {
+    return (
+      <div className={wrap}>
+        <div className="grid h-full grid-cols-2 gap-1.5">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="flex flex-col gap-1">
+              <div className={cn("flex-1 rounded", tileBg)} />
+              <div className={cn("h-2 rounded-sm", active ? "bg-brand-400/50" : "bg-neutral-300/50")} />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  // katalog: 2 baris horizontal (thumbnail kiri + bar kanan)
+  if (variant === "katalog") {
+    return (
+      <div className={wrap}>
+        <div className="flex h-full flex-col gap-1.5">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="flex flex-1 gap-1.5">
+              <div className={cn("aspect-square h-full rounded", tileBg)} />
+              <div className="flex flex-1 flex-col justify-center gap-1">
+                <div className={cn("h-1.5 rounded-full", active ? "bg-brand-400/60" : "bg-neutral-300/60")} />
+                <div className={cn("h-1 w-2/3 rounded-full", active ? "bg-brand-300/40" : "bg-neutral-200/60")} />
+                <div className={cn("h-1.5 w-1/2 rounded-full mt-1", active ? "bg-brand-500/60" : "bg-neutral-400/60")} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  // poster: 2 kolom portrait tall
+  if (variant === "poster") {
+    return (
+      <div className={wrap}>
+        <div className="grid h-full grid-cols-2 gap-1.5">
+          {[0, 1].map((i) => (
+            <div key={i} className={cn("relative rounded overflow-hidden", tileBg)}>
+              <div className="absolute bottom-0 left-0 right-0 h-1/4 rounded-b" style={{
+                background: active ? "rgba(5,150,105,0.4)" : "rgba(0,0,0,0.2)"
+              }} />
+            </div>
           ))}
         </div>
       </div>

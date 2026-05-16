@@ -11,26 +11,27 @@ import (
 	"github.com/sellon/sellon/api/internal/repository"
 )
 
-// wib is UTC+7 (Waktu Indonesia Barat). Using a fixed offset instead of
-// loading Asia/Jakarta from tzdata so the binary stays portable across
-// container images that might not ship the tz database.
+const jobName = "weekly_tips"
+
+// wib is UTC+7 (Waktu Indonesia Barat). Fixed offset so the binary works on
+// container images without a tz database.
 var wib = time.FixedZone("WIB", 7*60*60)
 
 // WeeklyTipsJob sends a rotating tips email every Monday at 07:00 WIB.
-// Content is generated fresh via the Claude API each week; falls back to
-// the static pool if the API is unavailable or not configured.
+// State is persisted in the scheduler_state table so restarts never
+// re-send an email that was already delivered this week.
 type WeeklyTipsJob struct {
-	users     *repository.UserRepo
-	mailer    *email.Mailer
-	gen       *email.TipGenerator
-	dashURL   string // e.g. https://sellon.id/dashboard
-	logger    *slog.Logger
+	users   *repository.UserRepo
+	state   *repository.SchedulerStateRepo
+	mailer  *email.Mailer
+	gen     *email.TipGenerator
+	dashURL string
+	logger  *slog.Logger
 }
 
-// NewWeeklyTipsJob constructs the job.
-// dashURL should be cfg.PrimaryWebOrigin() + "/dashboard".
 func NewWeeklyTipsJob(
 	users *repository.UserRepo,
+	state *repository.SchedulerStateRepo,
 	mailer *email.Mailer,
 	gen *email.TipGenerator,
 	dashURL string,
@@ -38,6 +39,7 @@ func NewWeeklyTipsJob(
 ) *WeeklyTipsJob {
 	return &WeeklyTipsJob{
 		users:   users,
+		state:   state,
 		mailer:  mailer,
 		gen:     gen,
 		dashURL: dashURL,
@@ -52,7 +54,8 @@ func (j *WeeklyTipsJob) Start(ctx context.Context) {
 
 func (j *WeeklyTipsJob) loop(ctx context.Context) {
 	for {
-		until := j.untilNextMondaySevenAM()
+		until := j.untilNextRun(ctx)
+
 		j.logger.Info("scheduler: weekly tips sleeping",
 			"next_run_in", until.Round(time.Minute).String())
 
@@ -63,8 +66,49 @@ func (j *WeeklyTipsJob) loop(ctx context.Context) {
 		case <-time.After(until):
 		}
 
-		j.run(ctx)
+		runCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+		j.run(runCtx)
+		cancel()
 	}
+}
+
+// untilNextRun checks whether this week's email was already sent.
+// If yes → return time until NEXT Monday 07:00 WIB.
+// If no  → return time until the coming Monday 07:00 WIB (could be very soon
+//
+//	if we just restarted after a crash on Monday before 07:00).
+func (j *WeeklyTipsJob) untilNextRun(ctx context.Context) time.Duration {
+	now := time.Now().In(wib)
+	_, week := now.ISOWeek()
+	year := now.Year()
+
+	already, err := j.state.AlreadyRanThisWeek(ctx, jobName, week, year)
+	if err != nil {
+		j.logger.Warn("scheduler: state check failed, assuming not sent", "err", err)
+		already = false
+	}
+
+	if already {
+		// This week's email was already delivered — skip to next Monday.
+		j.logger.Info("scheduler: weekly tips already sent this week, skipping to next Monday",
+			"week", week, "year", year)
+		return j.durationToMonday(now.Add(7 * 24 * time.Hour)) // force advance past this week
+	}
+
+	return j.durationToMonday(now)
+}
+
+// durationToMonday returns how long until the next Monday 07:00 WIB that is
+// strictly after `from`. Passing a time already past Monday 07:00 skips to
+// the following Monday.
+func (j *WeeklyTipsJob) durationToMonday(from time.Time) time.Duration {
+	from = from.In(wib)
+	candidate := time.Date(from.Year(), from.Month(), from.Day(), 7, 0, 0, 0, wib)
+	for candidate.Weekday() != time.Monday || !candidate.After(from) {
+		candidate = candidate.Add(24 * time.Hour)
+		candidate = time.Date(candidate.Year(), candidate.Month(), candidate.Day(), 7, 0, 0, 0, wib)
+	}
+	return candidate.Sub(time.Now().In(wib))
 }
 
 func (j *WeeklyTipsJob) run(ctx context.Context) {
@@ -72,29 +116,43 @@ func (j *WeeklyTipsJob) run(ctx context.Context) {
 	_, weekNum := now.ISOWeek()
 	year := now.Year()
 
+	// Double-check inside run in case two instances race (container restart overlap).
+	already, err := j.state.AlreadyRanThisWeek(ctx, jobName, weekNum, year)
+	if err != nil {
+		j.logger.Error("scheduler: state check failed", "err", err)
+		return
+	}
+	if already {
+		j.logger.Info("scheduler: weekly tips already sent this week (race guard), skipping",
+			"week", weekNum, "year", year)
+		return
+	}
+
 	// Generate content — prefer Claude API, fall back to static pool.
 	var tip email.WeeklyTip
 	if j.gen.Configured() {
 		generated, err := j.gen.Generate(ctx, weekNum, year)
 		if err != nil {
-			j.logger.Warn("scheduler: weekly tips — AI generation failed, using static pool",
-				"week", weekNum, "year", year, "err", err)
+			j.logger.Warn("scheduler: AI generation failed, using static pool",
+				"week", weekNum, "err", err)
 			tip = email.StaticTipForWeek(weekNum)
 		} else {
 			tip = generated
 		}
 	} else {
-		j.logger.Info("scheduler: weekly tips — Anthropic not configured, using static pool")
+		j.logger.Info("scheduler: Anthropic not configured, using static pool")
 		tip = email.StaticTipForWeek(weekNum)
 	}
 
 	users, err := j.users.ListForMarketing(ctx)
 	if err != nil {
-		j.logger.Error("scheduler: weekly tips — db query failed", "err", err)
+		j.logger.Error("scheduler: db query failed", "err", err)
 		return
 	}
 	if len(users) == 0 {
-		j.logger.Info("scheduler: weekly tips — no eligible users, skipping")
+		j.logger.Info("scheduler: no eligible users, skipping")
+		// Still mark ran so we don't retry endlessly this week.
+		_ = j.state.MarkRan(ctx, jobName, weekNum, year)
 		return
 	}
 
@@ -108,10 +166,11 @@ func (j *WeeklyTipsJob) run(ctx context.Context) {
 	for _, u := range users {
 		select {
 		case <-ctx.Done():
+			j.logger.Warn("scheduler: context cancelled mid-send, will retry next week",
+				"sent_so_far", sent)
 			return
 		default:
 		}
-
 		firstName := firstWord(u.Name)
 		subject, text, htmlBody := email.RenderWeeklyTips(tip, firstName, j.dashURL)
 		j.mailer.Send(email.Message{
@@ -124,26 +183,16 @@ func (j *WeeklyTipsJob) run(ctx context.Context) {
 		})
 		sent++
 	}
-	j.logger.Info("scheduler: weekly tips queued", "week", weekNum, "queued", sent)
-}
 
-// untilNextMondaySevenAM returns the duration from now until the next
-// Monday 07:00:00 WIB. If today is already Monday and the time is before
-// 07:00, it fires today. Otherwise it advances to the next Monday.
-func (j *WeeklyTipsJob) untilNextMondaySevenAM() time.Duration {
-	now := time.Now().In(wib)
-	candidate := time.Date(now.Year(), now.Month(), now.Day(), 7, 0, 0, 0, wib)
-	for candidate.Weekday() != time.Monday || !candidate.After(now) {
-		candidate = candidate.Add(24 * time.Hour)
-		candidate = time.Date(candidate.Year(), candidate.Month(), candidate.Day(), 7, 0, 0, 0, wib)
+	// Persist only after the full batch completes successfully.
+	if err := j.state.MarkRan(ctx, jobName, weekNum, year); err != nil {
+		j.logger.Error("scheduler: failed to persist state", "err", err)
+	} else {
+		j.logger.Info("scheduler: weekly tips done", "week", weekNum, "sent", sent)
 	}
-	return candidate.Sub(now)
 }
 
 func firstWord(s string) string {
-	if idx := len(s); idx == 0 {
-		return ""
-	}
 	for i, r := range s {
 		if r == ' ' {
 			return s[:i]

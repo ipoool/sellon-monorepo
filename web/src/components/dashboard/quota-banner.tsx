@@ -12,9 +12,6 @@ type Props = {
   fullMessage?: string;
 };
 
-// QuotaBanner — varian minimalis: 1 baris label + count + progress bar
-// tipis + tombol upgrade. State warna hanya berubah saat full (danger);
-// warning state dihilangkan untuk menjaga UI tetap kalem.
 export function QuotaBanner({ label, tierName, used, limit, fullMessage }: Props) {
   const pct = Math.min(100, Math.round((used / Math.max(1, limit)) * 100));
   const full = used >= limit;
@@ -26,23 +23,28 @@ export function QuotaBanner({ label, tierName, used, limit, fullMessage }: Props
         full ? "border-danger/40" : "border-neutral-200",
       )}
     >
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-3">
         <div className="min-w-0 flex-1">
-          <div className="flex items-baseline justify-between gap-3">
-            <p className="truncate text-sm text-neutral-700">
-              {label}{" "}
-              <span className="text-neutral-500">(tier {tierName})</span>
+          {/* Label baris 1 */}
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+            <p className="text-sm font-medium text-neutral-800">
+              {label}
+              <span className="ml-1 text-xs font-normal text-neutral-500">
+                (tier {tierName})
+              </span>
             </p>
             <p
               className={cn(
-                "shrink-0 text-xs font-medium tabular-nums",
-                full ? "text-danger" : "text-neutral-500",
+                "shrink-0 text-xs font-semibold tabular-nums",
+                full ? "text-danger" : "text-neutral-600",
               )}
             >
               {used.toLocaleString("id-ID")} / {limit.toLocaleString("id-ID")}
             </p>
           </div>
-          <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-neutral-100">
+
+          {/* Progress bar */}
+          <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-neutral-100">
             <div
               className={cn(
                 "h-full rounded-full transition-[width]",
@@ -56,7 +58,8 @@ export function QuotaBanner({ label, tierName, used, limit, fullMessage }: Props
         <Link href="/settings/subscription" className="shrink-0">
           <Button size="sm" variant={full ? "default" : "outline"}>
             <Crown className="size-3.5" aria-hidden />
-            Upgrade
+            <span className="hidden sm:inline">Upgrade</span>
+            <span className="sm:hidden">↑</span>
           </Button>
         </Link>
       </div>

@@ -1,4 +1,6 @@
 import { notFound, redirect } from "next/navigation";
+import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
 import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { ProdukForm } from "@/components/dashboard/produk-form";
 import { getMe } from "@/lib/server-auth";
@@ -25,6 +27,15 @@ export default async function ProdukEditPage({
       pageTitle={data.product.name}
       pageSubtitle="Edit produk"
     >
+      <div className="mb-4">
+        <Link
+          href="/products"
+          className="inline-flex items-center gap-1.5 text-sm font-medium text-neutral-600 hover:text-neutral-900"
+        >
+          <ArrowLeft className="size-4" aria-hidden />
+          Kembali ke daftar produk
+        </Link>
+      </div>
       <ProdukForm initial={data.product} />
     </DashboardShell>
   );

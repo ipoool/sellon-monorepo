@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/sellon/sellon/api/internal/audit"
 	"github.com/sellon/sellon/api/internal/auth"
@@ -51,6 +52,15 @@ type storeDTO struct {
 	ShowHoursPublic            bool            `json:"show_hours_public"`
 	ShowSocialPublic           bool            `json:"show_social_public"`
 	FooterText                 string          `json:"footer_text"`
+	SegmentVipThreshold        int             `json:"segment_vip_threshold"`
+	SegmentLoyalThreshold      int             `json:"segment_loyal_threshold"`
+	SegmentBaruName            string          `json:"segment_baru_name"`
+	SegmentRegulerName         string          `json:"segment_reguler_name"`
+	SegmentLoyalName           string          `json:"segment_loyal_name"`
+	SegmentVipName             string          `json:"segment_vip_name"`
+	CustomDomain               *string         `json:"custom_domain"`
+	DomainStatus               string          `json:"domain_status"`
+	DomainVerifiedAt           *string         `json:"domain_verified_at"`
 }
 
 func toStoreDTO(s *repository.Store) storeDTO {
@@ -80,7 +90,24 @@ func toStoreDTO(s *repository.Store) storeDTO {
 		ShowHoursPublic:            s.ShowHoursPublic,
 		ShowSocialPublic:           s.ShowSocialPublic,
 		FooterText:                 s.FooterText,
+		SegmentVipThreshold:        s.SegmentVipThreshold,
+		SegmentLoyalThreshold:      s.SegmentLoyalThreshold,
+		SegmentBaruName:            s.SegmentBaruName,
+		SegmentRegulerName:         s.SegmentRegulerName,
+		SegmentLoyalName:           s.SegmentLoyalName,
+		SegmentVipName:    s.SegmentVipName,
+		CustomDomain:     s.CustomDomain,
+		DomainStatus:     s.DomainStatus,
+		DomainVerifiedAt: formatTimePtr(s.DomainVerifiedAt),
 	}
+}
+
+func formatTimePtr(t *time.Time) *string {
+	if t == nil {
+		return nil
+	}
+	v := t.Format(time.RFC3339)
+	return &v
 }
 
 // GET /api/v1/store
@@ -375,4 +402,64 @@ func sanitizeSlug(s string) string {
 		s = s[:60]
 	}
 	return s
+}
+
+// PUT /api/v1/store/segments — update customer segment thresholds.
+func (h *StoreHandler) UpdateSegments(w http.ResponseWriter, r *http.Request) {
+	uid, _ := auth.UserIDFromContext(r.Context())
+	store, err := h.stores.FindByOwnerID(r.Context(), uid)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "toko belum dibuat")
+		return
+	}
+	var req struct {
+		VipThreshold   int    `json:"vip_threshold"`
+		LoyalThreshold int    `json:"loyal_threshold"`
+		BaruName       string `json:"baru_name"`
+		RegulerName    string `json:"reguler_name"`
+		LoyalName      string `json:"loyal_name"`
+		VipName        string `json:"vip_name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	if req.VipThreshold < 1 || req.LoyalThreshold < 1 {
+		response.Error(w, http.StatusBadRequest, "threshold minimal 1")
+		return
+	}
+	if strings.TrimSpace(req.BaruName) == "" {
+		req.BaruName = "Baru"
+	}
+	if strings.TrimSpace(req.RegulerName) == "" {
+		req.RegulerName = "Reguler"
+	}
+	if strings.TrimSpace(req.LoyalName) == "" {
+		req.LoyalName = "Loyal"
+	}
+	if strings.TrimSpace(req.VipName) == "" {
+		req.VipName = "VIP"
+	}
+	settings := repository.SegmentSettings{
+		VipThreshold: req.VipThreshold, LoyalThreshold: req.LoyalThreshold,
+		BaruName: req.BaruName, RegulerName: req.RegulerName,
+		LoyalName: req.LoyalName, VipName: req.VipName,
+	}
+	if err := h.stores.UpdateSegmentSettings(r.Context(), store.ID, settings); err != nil {
+		h.logger.Error("update segment thresholds", "err", err)
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	h.audit.Log(r.Context(), store.ID, audit.Event{
+		Action:     "store.segment_thresholds_updated",
+		EntityType: "store",
+		EntityID:   store.ID.String(),
+		Summary:    "Update threshold segmen pelanggan",
+		Metadata: map[string]any{
+			"vip_threshold":   req.VipThreshold,
+			"loyal_threshold": req.LoyalThreshold,
+		},
+	})
+	updated, _ := h.stores.FindByOwnerID(r.Context(), uid)
+	response.JSON(w, http.StatusOK, map[string]any{"store": toStoreDTO(updated)})
 }

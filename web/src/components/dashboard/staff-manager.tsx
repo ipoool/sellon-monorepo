@@ -120,12 +120,16 @@ export function StaffManager({ initial }: Props) {
         body: JSON.stringify({ email, role }),
       });
       const out = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(out.error || `HTTP ${res.status}`);
+      if (!res.ok) {
+        // 409 = already invited
+        if (res.status === 409) throw new Error(out.message || "Email ini sudah diundang.");
+        throw new Error(out.error || `HTTP ${res.status}`);
+      }
       setShowInvite(false);
       setFlash(
         out.direct
-          ? `${email} sudah punya akun SellOn - langsung ditambahkan sebagai ${role}.`
-          : `Undangan terkirim ke ${email}. Akan aktif saat dia login dengan Google.`,
+          ? `${email} sudah punya akun SellOn — langsung ditambahkan sebagai ${role}.`
+          : `Undangan terkirim ke ${email}. Email berisi panduan cara bergabung.`,
       );
       setTimeout(() => setFlash(null), 5000);
       await reloadData();

@@ -94,6 +94,94 @@ func (r *ReportsRepo) SalesByDay(ctx context.Context, storeID uuid.UUID, since, 
 	return out, rows.Err()
 }
 
+type SalesWeekBucket struct {
+	WeekStart    time.Time
+	WeekEnd      time.Time
+	Orders       int
+	RevenueCents int64
+}
+
+// SalesByWeek aggregates revenue and orders per calendar week (Mon–Sun, UTC).
+// Returns ~12 weeks for a 90-day window.
+func (r *ReportsRepo) SalesByWeek(ctx context.Context, storeID uuid.UUID, since, until time.Time) ([]SalesWeekBucket, error) {
+	rows, err := r.pool.Query(ctx, `
+		WITH weeks AS (
+		    SELECT generate_series(
+		        date_trunc('week', $2::timestamptz),
+		        date_trunc('week', $3::timestamptz - interval '1 second'),
+		        interval '1 week'
+		    ) AS w
+		)
+		SELECT w.w AS week_start,
+		       w.w + interval '6 days' AS week_end,
+		       COUNT(o.id) AS orders,
+		       COALESCE(SUM(o.total_cents) FILTER (WHERE o.payment_status = 'paid' AND o.status <> 'cancelled'), 0) AS revenue
+		FROM weeks w
+		LEFT JOIN orders o
+		    ON o.store_id = $1
+		   AND date_trunc('week', o.created_at) = w.w
+		   AND o.created_at >= $2 AND o.created_at < $3
+		GROUP BY w.w
+		ORDER BY w.w ASC
+	`, storeID, since, until)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SalesWeekBucket
+	for rows.Next() {
+		var b SalesWeekBucket
+		if err := rows.Scan(&b.WeekStart, &b.WeekEnd, &b.Orders, &b.RevenueCents); err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
+type SalesMonthBucket struct {
+	Month        time.Time
+	Orders       int
+	RevenueCents int64
+}
+
+// SalesByMonth aggregates revenue and orders per calendar month (UTC).
+// Returns ~12 months.
+func (r *ReportsRepo) SalesByMonth(ctx context.Context, storeID uuid.UUID, since, until time.Time) ([]SalesMonthBucket, error) {
+	rows, err := r.pool.Query(ctx, `
+		WITH months AS (
+		    SELECT generate_series(
+		        date_trunc('month', $2::timestamptz),
+		        date_trunc('month', $3::timestamptz - interval '1 second'),
+		        interval '1 month'
+		    ) AS m
+		)
+		SELECT m.m AS month_start,
+		       COUNT(o.id) AS orders,
+		       COALESCE(SUM(o.total_cents) FILTER (WHERE o.payment_status = 'paid' AND o.status <> 'cancelled'), 0) AS revenue
+		FROM months m
+		LEFT JOIN orders o
+		    ON o.store_id = $1
+		   AND date_trunc('month', o.created_at) = m.m
+		   AND o.created_at >= $2 AND o.created_at < $3
+		GROUP BY m.m
+		ORDER BY m.m ASC
+	`, storeID, since, until)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SalesMonthBucket
+	for rows.Next() {
+		var b SalesMonthBucket
+		if err := rows.Scan(&b.Month, &b.Orders, &b.RevenueCents); err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
 type TopProduct struct {
 	ProductID    *uuid.UUID
 	ProductName  string
@@ -148,12 +236,12 @@ func (r *ReportsRepo) TopCustomers(ctx context.Context, storeID uuid.UUID, since
 	rows, err := r.pool.Query(ctx, `
 		SELECT c.id, c.name, c.whatsapp_number,
 		       COUNT(o.id)::int AS order_count,
-		       COALESCE(SUM(o.total_cents) FILTER (WHERE o.payment_status = 'paid' AND o.status <> 'cancelled'), 0)::bigint AS spent
+		       COALESCE(SUM(o.total_cents) FILTER (WHERE o.payment_status = 'paid'), 0)::bigint AS spent
 		FROM orders o
 		JOIN customers c ON c.id = o.customer_id
 		WHERE o.store_id = $1
 		  AND o.created_at >= $2 AND o.created_at < $3
-		  AND o.status <> 'cancelled'
+		  AND o.status = 'completed'
 		GROUP BY c.id, c.name, c.whatsapp_number
 		ORDER BY spent DESC, order_count DESC
 		LIMIT $4
@@ -213,4 +301,44 @@ func (r *ReportsRepo) countByCol(ctx context.Context, col string, storeID uuid.U
 		out[label] = n
 	}
 	return out, rows.Err()
+}
+
+// OldestOrderAt returns the creation timestamp of the earliest order for
+// the store. Returns nil if the store has no orders yet.
+func (r *ReportsRepo) OldestOrderAt(ctx context.Context, storeID uuid.UUID) (*time.Time, error) {
+	var t *time.Time
+	err := r.pool.QueryRow(ctx,
+		`SELECT MIN(created_at) FROM orders WHERE store_id = $1`,
+		storeID,
+	).Scan(&t)
+	return t, err
+}
+
+// GetCachedInsight returns the cached insight JSON for the store if it
+// has not yet expired. Returns ("", nil) on a cache miss.
+func (r *ReportsRepo) GetCachedInsight(ctx context.Context, storeID uuid.UUID) (string, time.Time, error) {
+	var json string
+	var generatedAt time.Time
+	err := r.pool.QueryRow(ctx,
+		`SELECT insight_json, generated_at FROM ai_insights
+		 WHERE store_id = $1 AND expires_at > now()`,
+		storeID,
+	).Scan(&json, &generatedAt)
+	if err != nil {
+		return "", time.Time{}, nil // cache miss — treat as nil
+	}
+	return json, generatedAt, nil
+}
+
+// SetCachedInsight upserts the insight JSON for the store with a 24-hour TTL.
+func (r *ReportsRepo) SetCachedInsight(ctx context.Context, storeID uuid.UUID, insightJSON string) error {
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO ai_insights (store_id, insight_json, expires_at)
+		VALUES ($1, $2, now() + interval '24 hours')
+		ON CONFLICT (store_id) DO UPDATE
+		  SET insight_json  = EXCLUDED.insight_json,
+		      generated_at  = now(),
+		      expires_at    = now() + interval '24 hours'
+	`, storeID, insightJSON)
+	return err
 }

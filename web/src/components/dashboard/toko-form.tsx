@@ -316,25 +316,24 @@ export function TokoForm({ initial }: { initial: Store | null }) {
         </>
       )}
 
-      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
-        <div className="flex items-center gap-2">
-          {!isCreating && initial && (
-            <a
-              href={`https://sellon.id/${initial.slug}`}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <Button type="button" variant="outline" size="md">
-                <ExternalLink className="size-4" aria-hidden />
-                Lihat Halaman Toko
-              </Button>
-            </a>
-          )}
-          <Button type="submit" size="md" disabled={pending}>
-            <Save className="size-4" aria-hidden />
-            {pending ? "Menyimpan…" : isCreating ? "Buat Toko" : "Simpan Perubahan"}
-          </Button>
-        </div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+        <Button type="submit" size="md" disabled={pending} className="w-full sm:w-auto">
+          <Save className="size-4" aria-hidden />
+          {pending ? "Menyimpan…" : isCreating ? "Buat Toko" : "Simpan Perubahan"}
+        </Button>
+        {!isCreating && initial && (
+          <a
+            href={`https://sellon.id/${initial.slug}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full sm:w-auto"
+          >
+            <Button type="button" variant="outline" size="md" className="w-full">
+              <ExternalLink className="size-4" aria-hidden />
+              Lihat Halaman Toko
+            </Button>
+          </a>
+        )}
       </div>
     </form>
   );

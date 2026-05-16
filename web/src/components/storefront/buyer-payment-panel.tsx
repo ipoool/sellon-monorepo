@@ -15,6 +15,7 @@ import {
   X,
   Loader2,
   ArrowLeft,
+  ZoomIn,
 } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
@@ -43,9 +44,9 @@ type Props = {
   totalCents: number;
   paymentURL: string;
   bankAccounts: Bank[];
-  // True kalau bukti sudah pernah di-upload sebelumnya (atau
-  // payment_status sudah lewat "unpaid"). Backend juga reject 409 untuk
-  // double-defense, tapi FE menyembunyikan tombol agar UX-nya jelas.
+  // Metode pembayaran yang dipilih buyer saat checkout — dipakai untuk
+  // memfilter tampilan agar hanya metode yang relevan yang muncul.
+  paymentMethod?: string;
   proofAlreadySubmitted?: boolean;
 };
 
@@ -57,10 +58,12 @@ export function BuyerPaymentPanel({
   totalCents,
   paymentURL,
   bankAccounts,
+  paymentMethod = "",
   proofAlreadySubmitted = false,
 }: Props) {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [marked, setMarked] = useState(false);
+  const [zoomQris, setZoomQris] = useState<string | null>(null);
   // Tahap konfirmasi: null = belum (tombol "Aku sudah bayar"),
   // "choose" = pilih channel (WA atau sistem), "upload" = form upload.
   type ConfirmStage = null | "choose" | "upload";
@@ -92,8 +95,8 @@ export function BuyerPaymentPanel({
       showError("File harus berupa gambar (JPG/PNG/WebP).");
       return;
     }
-    if (f.size > 10 * 1024 * 1024) {
-      showError("Ukuran maks 10 MB.");
+    if (f.size > 5 * 1024 * 1024) {
+      showError("Ukuran maks 5 MB.");
       return;
     }
     setProofFile(f);
@@ -144,6 +147,12 @@ export function BuyerPaymentPanel({
     setStage(null);
   }
 
+  // Determine which sections to show based on the chosen payment method.
+  const pm = paymentMethod.toLowerCase();
+  const isQrisStatis = pm.includes("qris statis") || pm.includes("qris_statis");
+  const isTransferManual = pm.includes("transfer") || pm.includes("manual");
+  const isMidtrans = !!paymentURL && !isQrisStatis && !isTransferManual;
+
   // Sort: primary bank/QRIS first, then split into transfer + QRIS lists in
   // a single pass so the JSX doesn't iterate twice.
   const sortedBanks = bankAccounts.toSorted((a, b) =>
@@ -152,8 +161,11 @@ export function BuyerPaymentPanel({
   const transferBanks = [];
   const qrisBanks = [];
   for (const b of sortedBanks) {
-    if (b.bank_name && b.account_no) transferBanks.push(b);
-    if (b.qris_url) qrisBanks.push(b);
+    // Only include if it matches the chosen payment method (or if no method recorded)
+    const showTransfer = !paymentMethod || isTransferManual || (!isQrisStatis && !isMidtrans);
+    const showQris = !paymentMethod || isQrisStatis || (!isTransferManual && !isMidtrans);
+    if (b.bank_name && b.account_no && showTransfer) transferBanks.push(b);
+    if (b.qris_url && showQris) qrisBanks.push(b);
   }
 
   const sellerWA = storeWhatsApp
@@ -164,6 +176,7 @@ export function BuyerPaymentPanel({
     : "";
 
   return (
+    <>
     <Card>
       <h2 className="font-semibold text-neutral-900">Pilih Cara Pembayaran</h2>
       <p className="mt-1 text-sm text-neutral-600">
@@ -171,8 +184,8 @@ export function BuyerPaymentPanel({
       </p>
 
       <div className="mt-5 flex flex-col gap-3">
-        {/* Midtrans Snap link */}
-        {paymentURL && (
+        {/* Midtrans Snap link — only shown if buyer chose a Midtrans method */}
+        {paymentURL && (!paymentMethod || isMidtrans) && (
           <div className="rounded-xl border border-brand-200 bg-brand-50/40 p-4">
             <div className="flex items-start gap-3">
               <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-brand-500 text-white">
@@ -266,7 +279,7 @@ export function BuyerPaymentPanel({
                     Scan QR di bawah pakai aplikasi mobile banking, GoPay,
                     OVO, DANA, ShopeePay, dll.
                   </p>
-                  <div className="mt-3 inline-block rounded-lg border border-neutral-200 bg-white p-2">
+                  <div className="relative mt-3 inline-block rounded-lg border border-neutral-200 bg-white p-2">
                     <Image
                       src={b.qris_url}
                       alt="QRIS"
@@ -274,6 +287,14 @@ export function BuyerPaymentPanel({
                       height={192}
                       className="size-48 object-contain"
                     />
+                    <button
+                      type="button"
+                      onClick={() => setZoomQris(b.qris_url)}
+                      aria-label="Perbesar QRIS"
+                      className="absolute right-2 top-2 inline-flex size-7 items-center justify-center rounded-md bg-white/90 text-neutral-700 shadow-sm backdrop-blur-sm transition-colors hover:bg-white hover:text-brand-700"
+                    >
+                      <ZoomIn className="size-4" aria-hidden />
+                    </button>
                   </div>
                 </div>
               </div>
@@ -281,9 +302,16 @@ export function BuyerPaymentPanel({
           ))}
       </div>
 
-      {/* Confirm-paid button + 2-channel options */}
-      {(sortedBanks.length > 0 || paymentURL) && (
-        <div className="mt-6 border-t border-neutral-200 pt-5">
+      {/* Empty state: no payment methods configured */}
+      {sortedBanks.length === 0 && !paymentURL && (
+        <div className="mt-4 rounded-xl border border-warning/30 bg-warning/5 px-4 py-3 text-sm text-neutral-700">
+          Penjual belum mengatur metode pembayaran. Hubungi penjual langsung
+          untuk informasi rekening transfer.
+        </div>
+      )}
+
+      {/* Confirm-paid button + 2-channel options — always shown for unpaid orders */}
+      <div className="mt-6 border-t border-neutral-200 pt-5">
           {marked || proofAlreadySubmitted ? (
             <div className="flex items-center gap-3 rounded-lg bg-success/10 p-4 text-sm">
               <CheckCircle2 className="size-5 text-success" aria-hidden />
@@ -354,6 +382,7 @@ export function BuyerPaymentPanel({
                   type="button"
                   onClick={sendViaWA}
                   disabled={!sellerWA}
+                  title={!sellerWA ? "Penjual belum mengatur nomor WhatsApp" : undefined}
                   className={cn(
                     "flex flex-col items-start gap-2 rounded-xl border bg-white p-4 text-left transition-colors",
                     sellerWA
@@ -440,7 +469,7 @@ export function BuyerPaymentPanel({
                     <Upload className="size-5 text-neutral-500" aria-hidden />
                     <span className="font-medium">Pilih screenshot bukti</span>
                     <span className="text-xs text-neutral-500">
-                      JPG/PNG/WebP — maks 10 MB
+                      JPG/PNG/WebP — maks 5 MB
                     </span>
                   </button>
                 )}
@@ -485,7 +514,42 @@ export function BuyerPaymentPanel({
             </>
           )}
         </div>
-      )}
     </Card>
+
+    {/* QRIS zoom modal */}
+    {zoomQris && (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-900/80 backdrop-blur-sm"
+        onClick={() => setZoomQris(null)}
+      >
+        <div
+          className="relative mx-4 max-w-sm rounded-2xl bg-white p-4 shadow-popout"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            onClick={() => setZoomQris(null)}
+            aria-label="Tutup"
+            className="absolute right-3 top-3 inline-flex size-8 items-center justify-center rounded-full bg-neutral-100 text-neutral-700 hover:bg-neutral-200"
+          >
+            <X className="size-4" aria-hidden />
+          </button>
+          <p className="mb-3 text-center text-sm font-semibold text-neutral-900">
+            Scan QRIS untuk Bayar
+          </p>
+          <Image
+            src={zoomQris}
+            alt="QRIS fullsize"
+            width={320}
+            height={320}
+            className="w-full rounded-lg object-contain"
+          />
+          <p className="mt-3 text-center text-xs text-neutral-500">
+            Tap di luar untuk tutup
+          </p>
+        </div>
+      </div>
+    )}
+    </>
   );
 }

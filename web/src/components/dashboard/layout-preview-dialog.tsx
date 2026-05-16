@@ -13,6 +13,9 @@ import {
   LayoutDashboard,
   LayoutPanelTop,
   Rows3,
+  MonitorSmartphone,
+  BookOpen,
+  RectangleVertical,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -37,6 +40,9 @@ const LAYOUTS: Array<{
   { key: "compact", label: "Padat", icon: LayoutDashboard },
   { key: "magazine", label: "Majalah", icon: LayoutPanelTop },
   { key: "feed", label: "Feed", icon: Rows3 },
+  { key: "kiosk", label: "Kiosk", icon: MonitorSmartphone },
+  { key: "katalog", label: "Katalog", icon: BookOpen },
+  { key: "poster", label: "Poster", icon: RectangleVertical },
 ];
 
 type DeviceFrame = "desktop" | "mobile";

@@ -286,13 +286,13 @@ export function BerlanggananActions({
             tokomu.
           </p>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <button
               type="button"
               onClick={() => setTier("pro")}
               disabled={!!pendingManual}
               className={
-                "rounded-lg border-2 p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 " +
+                "rounded-lg border-2 p-4 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 " +
                 (tier === "pro"
                   ? "border-brand-500 bg-brand-50/50"
                   : "border-neutral-200 bg-white hover:border-neutral-300 disabled:hover:border-neutral-200")
@@ -320,7 +320,7 @@ export function BerlanggananActions({
               onClick={() => setTier("bisnis")}
               disabled={!!pendingManual}
               className={
-                "rounded-lg border-2 p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 " +
+                "rounded-lg border-2 p-4 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 " +
                 (tier === "bisnis"
                   ? "border-brand-500 bg-brand-50/50"
                   : "border-neutral-200 bg-white hover:border-neutral-300 disabled:hover:border-neutral-200")
@@ -428,7 +428,7 @@ export function BerlanggananActions({
             Chat support
           </a>
           <Button
-            variant="outline"
+            variant={pendingManual ? "outline" : "default"}
             onClick={requestUpgrade}
             disabled={busy || !!pendingManual}
             title={

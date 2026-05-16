@@ -12,6 +12,7 @@ import (
 
 	"github.com/sellon/sellon/api/internal/audit"
 	"github.com/sellon/sellon/api/internal/auth"
+	email_pkg "github.com/sellon/sellon/api/internal/email"
 	"github.com/sellon/sellon/api/internal/pkg/response"
 	"github.com/sellon/sellon/api/internal/repository"
 )
@@ -22,6 +23,8 @@ type StaffHandler struct {
 	users       *repository.UserRepo
 	subs        *repository.SubscriptionRepo
 	plans       *repository.PlanRepo
+	mailer      *email_pkg.Mailer
+	webOrigin   string
 	audit       *audit.Logger
 	logger      *slog.Logger
 }
@@ -32,12 +35,16 @@ func NewStaffHandler(
 	users *repository.UserRepo,
 	subs *repository.SubscriptionRepo,
 	plans *repository.PlanRepo,
+	mailer *email_pkg.Mailer,
+	webOrigin string,
 	audit *audit.Logger,
 	logger *slog.Logger,
 ) *StaffHandler {
 	return &StaffHandler{
 		stores: stores, memberships: memberships, users: users,
-		subs: subs, plans: plans, audit: audit, logger: logger,
+		subs: subs, plans: plans,
+		mailer: mailer, webOrigin: webOrigin,
+		audit: audit, logger: logger,
 	}
 }
 
@@ -179,6 +186,15 @@ func (h *StaffHandler) Invite(w http.ResponseWriter, r *http.Request) {
 
 	uid, _ := auth.UserIDFromContext(r.Context())
 
+	// Duplicate invite guard — reject if there's already a pending, non-expired invite.
+	if alreadyInvited, err := h.memberships.HasPendingInvite(r.Context(), store.ID, email); err == nil && alreadyInvited {
+		response.JSON(w, http.StatusConflict, map[string]any{
+			"error":   "already_invited",
+			"message": "Email ini sudah diundang dan menunggu konfirmasi. Hapus undangan sebelumnya jika ingin mengundang ulang.",
+		})
+		return
+	}
+
 	// If the email already maps to a registered user, add membership directly.
 	if existing, err := h.users.FindByEmail(r.Context(), email); err == nil {
 		if existing.ID == uid {
@@ -225,6 +241,33 @@ func (h *StaffHandler) Invite(w http.ResponseWriter, r *http.Request) {
 			"target_email": email,
 			"role":         role,
 		},
+	})
+
+	// Send invitation email.
+	inviter, _ := h.users.FindByID(r.Context(), uid)
+	inviterName := store.Name // fallback to store name
+	if inviter != nil && inviter.Name != "" {
+		inviterName = inviter.Name
+	}
+	roleLabel := "Admin"
+	if role == "staff" {
+		roleLabel = "Staf"
+	}
+	loginURL := h.webOrigin + "/login"
+	subject, text, htmlBody := email_pkg.RenderStaffInvite(email_pkg.StaffInviteData{
+		StoreName:    store.Name,
+		InviterName:  inviterName,
+		InviteeEmail: email,
+		Role:         roleLabel,
+		LoginURL:     loginURL,
+		ExpiryDays:   7,
+	})
+	h.mailer.Send(email_pkg.Message{
+		To:       email,
+		Subject:  subject,
+		Text:     text,
+		HTML:     htmlBody,
+		Category: "staff_invite",
 	})
 	response.JSON(w, http.StatusCreated, map[string]any{
 		"ok": true,

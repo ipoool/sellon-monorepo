@@ -1,7 +1,11 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import { formatRupiah } from "@/lib/format";
 
 type Bucket = {
   date: string;
+  label: string;
   orders: number;
   revenue_cents: number;
 };
@@ -9,7 +13,16 @@ type Bucket = {
 // SalesChart renders an inline SVG bar chart of daily revenue. No chart
 // library - just a few path/rect calculations. Designed for ≤90 buckets
 // (3 months max in MVP).
+// "use client" + mounted guard prevents hydration mismatch caused by
+// Intl.NumberFormat("id-ID") producing different output in Node.js vs browser.
 export function SalesChart({ data }: { data: Bucket[] }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  if (!mounted) {
+    return <div className="h-[220px] animate-pulse rounded-lg bg-neutral-100" />;
+  }
+
   if (data.length === 0) {
     return (
       <p className="rounded-lg border border-dashed border-neutral-200 bg-neutral-50 px-4 py-10 text-center text-sm text-neutral-500">
@@ -60,7 +73,7 @@ export function SalesChart({ data }: { data: Bucket[] }) {
           </p>
         </div>
         <p className="text-sm text-neutral-600">
-          {totalOrders} order · {data.length} hari
+          {totalOrders} order · {data.length} periode
         </p>
       </div>
       <div className="overflow-x-auto rounded-lg border border-neutral-200 bg-white p-2">
@@ -116,8 +129,8 @@ export function SalesChart({ data }: { data: Bucket[] }) {
                   rx={2}
                   className="fill-brand-500"
                 />
-                <title>
-                  {d.date} - {formatRupiah(d.revenue_cents)} ({d.orders} order)
+                <title suppressHydrationWarning>
+                  {d.label || d.date} - {formatRupiah(d.revenue_cents)} ({d.orders} order)
                 </title>
               </g>
             );
@@ -141,7 +154,7 @@ export function SalesChart({ data }: { data: Bucket[] }) {
                 }
                 className="fill-neutral-500 text-[10px]"
               >
-                {formatShortDate(d.date)}
+                {d.label || formatShortDate(d.date)}
               </text>
             );
           })}

@@ -3,7 +3,7 @@ import { Megaphone } from "lucide-react";
 
 import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { Card } from "@/components/ui/card";
-import { PromoCreateDialog } from "@/components/dashboard/promo-create-dialog";
+import { PromoDialog } from "@/components/dashboard/promo-dialog";
 import { PromosTable } from "@/components/dashboard/promos-table";
 import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
@@ -38,7 +38,7 @@ export default async function PromoPage({
       me={me}
       pageTitle="Promo"
       pageSubtitle={`${total} kupon`}
-      actions={<PromoCreateDialog />}
+      actions={<PromoDialog mode="create" />}
     >
       {promos.length === 0 ? (
         <Card className="py-16 text-center">
@@ -53,7 +53,7 @@ export default async function PromoPage({
             menarik pelanggan dan boost konversi.
           </p>
           <div className="mt-5 inline-block">
-            <PromoCreateDialog />
+            <PromoDialog mode="create" />
           </div>
         </Card>
       ) : (

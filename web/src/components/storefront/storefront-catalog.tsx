@@ -41,7 +41,10 @@ export type ProductLayout =
   | "showcase"
   | "compact"
   | "magazine"
-  | "feed";
+  | "feed"
+  | "kiosk"
+  | "katalog"
+  | "poster";
 
 type Props = {
   storeSlug: string;
@@ -511,6 +514,36 @@ function ProductLayoutBody({
       </div>
     );
   }
+  // Kiosk: 2 kolom, kartu besar touch-friendly, harga dominan
+  if (layout === "kiosk") {
+    return (
+      <div className={cn("grid gap-3", forceMobile ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-2 lg:grid-cols-3")}>
+        {products.map((p) => (
+          <ProductKioskCard key={p.id} p={p} storeSlug={storeSlug} />
+        ))}
+      </div>
+    );
+  }
+  // Katalog: 2 kolom dengan deskripsi singkat
+  if (layout === "katalog") {
+    return (
+      <div className={cn("grid gap-4", forceMobile ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2")}>
+        {products.map((p) => (
+          <ProductKatalogCard key={p.id} p={p} storeSlug={storeSlug} />
+        ))}
+      </div>
+    );
+  }
+  // Poster: 1 kolom penuh, gambar portrait besar
+  if (layout === "poster") {
+    return (
+      <div className={cn("flex flex-col gap-5", !forceMobile && "max-w-sm sm:max-w-none sm:grid sm:grid-cols-2 sm:gap-5")}>
+        {products.map((p) => (
+          <ProductPosterCard key={p.id} p={p} storeSlug={storeSlug} />
+        ))}
+      </div>
+    );
+  }
   // Default: grid
   return (
     <div
@@ -903,6 +936,122 @@ function ProductFeedCard({
             <p className="text-xs text-neutral-500">Stok: {p.stock}</p>
           )}
         </div>
+      </div>
+    </Link>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// NEW LAYOUTS
+// ─────────────────────────────────────────────────────────────────────
+
+// Kiosk: touch-friendly 2-column, harga besar, cocok untuk kasir/menu kafe.
+function ProductKioskCard({ p, storeSlug }: { p: StorefrontProduct; storeSlug: string }) {
+  return (
+    <Link
+      href={`/${storeSlug}/product/${p.slug}`}
+      className="group flex flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-card transition-all hover:border-brand-300 hover:shadow-elevated active:scale-[0.98]"
+    >
+      <div className="relative aspect-square overflow-hidden bg-neutral-100">
+        {p.photo_urls[0] ? (
+          <Image
+            src={p.photo_urls[0]}
+            alt={p.name}
+            fill
+            sizes="(max-width: 640px) 50vw, 33vw"
+            className="object-cover transition-transform group-hover:scale-105"
+          />
+        ) : (
+          <div className="flex size-full items-center justify-center">
+            <Package className="size-12 text-neutral-300" aria-hidden />
+          </div>
+        )}
+        {!shouldHideStock(p) && p.stock === 0 && (
+          <div className="absolute inset-0 flex items-center justify-center bg-neutral-900/50">
+            <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-neutral-700">Habis</span>
+          </div>
+        )}
+      </div>
+      <div className="flex flex-1 flex-col gap-1 p-3">
+        <p className="line-clamp-2 text-sm font-semibold leading-tight text-neutral-900">{p.name}</p>
+        <p className="mt-auto font-display text-base font-bold text-brand-600">{formatRupiah(p.price_cents)}</p>
+      </div>
+    </Link>
+  );
+}
+
+// Katalog: 2-column horizontal card dengan deskripsi singkat. Cocok untuk
+// toko yang butuh context lebih per produk.
+function ProductKatalogCard({ p, storeSlug }: { p: StorefrontProduct; storeSlug: string }) {
+  return (
+    <Link
+      href={`/${storeSlug}/product/${p.slug}`}
+      className="group flex gap-4 overflow-hidden rounded-xl border border-neutral-200 bg-white p-4 shadow-card transition-all hover:border-brand-300 hover:shadow-elevated"
+    >
+      <div className="relative size-28 shrink-0 overflow-hidden rounded-xl bg-neutral-100">
+        {p.photo_urls[0] ? (
+          <Image
+            src={p.photo_urls[0]}
+            alt={p.name}
+            fill
+            sizes="112px"
+            className="object-cover transition-transform group-hover:scale-105"
+          />
+        ) : (
+          <div className="flex size-full items-center justify-center">
+            <Package className="size-8 text-neutral-300" aria-hidden />
+          </div>
+        )}
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <p className="font-semibold text-neutral-900 line-clamp-2 leading-snug">{p.name}</p>
+        {p.description && (
+          <p className="line-clamp-2 text-xs text-neutral-500 leading-relaxed">{p.description}</p>
+        )}
+        <div className="mt-auto flex items-center justify-between gap-2">
+          <p className="font-display text-base font-bold text-neutral-900">{formatRupiah(p.price_cents)}</p>
+          {!shouldHideStock(p) && p.stock > 0 && (
+            <span className="text-xs text-neutral-400">Stok {p.stock}</span>
+          )}
+        </div>
+      </div>
+    </Link>
+  );
+}
+
+// Poster: portrait besar full-width, gambar 4:5, teks overlay di bawah.
+// Cocok untuk fashion/premium/lifestyle dengan visual kuat.
+function ProductPosterCard({ p, storeSlug }: { p: StorefrontProduct; storeSlug: string }) {
+  return (
+    <Link
+      href={`/${storeSlug}/product/${p.slug}`}
+      className="group relative overflow-hidden rounded-2xl bg-neutral-100 shadow-card transition-all hover:shadow-elevated active:scale-[0.99]"
+      style={{ aspectRatio: "4/5" }}
+    >
+      {p.photo_urls[0] ? (
+        <Image
+          src={p.photo_urls[0]}
+          alt={p.name}
+          fill
+          sizes="(max-width: 640px) 100vw, 50vw"
+          className="object-cover transition-transform duration-500 group-hover:scale-105"
+        />
+      ) : (
+        <div className="flex size-full items-center justify-center">
+          <Package className="size-16 text-neutral-300" aria-hidden />
+        </div>
+      )}
+      {/* Gradient overlay */}
+      <div className="absolute inset-0 bg-gradient-to-t from-neutral-900/80 via-neutral-900/20 to-transparent" />
+      {/* Info di bawah */}
+      <div className="absolute bottom-0 left-0 right-0 p-4">
+        <p className="line-clamp-2 font-display text-base font-semibold text-white leading-tight">{p.name}</p>
+        <p className="mt-1.5 font-display text-lg font-bold text-white/95">{formatRupiah(p.price_cents)}</p>
+        {!shouldHideStock(p) && p.stock === 0 && (
+          <span className="mt-1 inline-block rounded-full bg-white/20 px-2.5 py-0.5 text-xs font-medium text-white backdrop-blur-sm">
+            Stok habis
+          </span>
+        )}
       </div>
     </Link>
   );

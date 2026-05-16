@@ -263,17 +263,45 @@ export function OrderStatusActions({ order, paymentGateway, className }: Props) 
           title: `Konfirmasi pembayaran #${order.order_number}?`,
           description: (
             <>
-              Status pembayaran akan diubah ke <strong>lunas</strong>{" "}
-              manual.
-              <br />
-              <span className="mt-2 block">
-                <strong>Pakai opsi ini cuma kalau:</strong> kamu sudah lihat
-                uangnya masuk di mutasi rekening / e-wallet sendiri. Salah
-                konfirmasi = produk dikirim padahal belum dibayar.
+              <span className="block text-sm text-neutral-700">
+                Pastikan kamu sudah <strong>cek mutasi rekening / e-wallet</strong> dan
+                uang benar-benar sudah masuk sebelum klik konfirmasi.
+                Salah konfirmasi = produk dikirim padahal belum dibayar.
               </span>
+              {order.payment_proof_url && (
+                <span className="mt-3 block">
+                  <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-neutral-500">
+                    Bukti transfer dari pembeli
+                  </span>
+                  <a
+                    href={order.payment_proof_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block overflow-hidden rounded-lg border border-neutral-200 bg-neutral-50"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={order.payment_proof_url}
+                      alt="Bukti transfer"
+                      className="max-h-64 w-full object-contain"
+                    />
+                  </a>
+                  {order.payment_proof_note && (
+                    <span className="mt-1.5 block rounded-md border border-neutral-200 bg-white px-3 py-2 text-xs text-neutral-700">
+                      {order.payment_proof_note}
+                    </span>
+                  )}
+                </span>
+              )}
+              {!order.payment_proof_url && (
+                <span className="mt-2 block rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-xs text-neutral-700">
+                  Pembeli belum upload bukti transfer. Konfirmasi hanya jika
+                  kamu sudah cek pembayaran secara manual.
+                </span>
+              )}
             </>
           ),
-          confirmLabel: "Ya, sudah saya cek",
+          confirmLabel: "Ya, pembayaran sudah masuk",
           kind: "warning",
         };
       case "ship":
@@ -524,7 +552,12 @@ export function OrderStatusActions({ order, paymentGateway, className }: Props) 
           payment-side actions, not fulfillment. Visible whenever the seller
           can still mark-paid or trigger a refund. */}
       {(() => {
-        const canMarkPaid = order.payment_status !== "paid" && !isFinal;
+        // Allow mark_paid even on completed orders — seller may complete
+        // delivery before verifying proof. Only cancelled orders excluded.
+        const canMarkPaid =
+          order.payment_status !== "paid" &&
+          order.payment_status !== "refunded" &&
+          order.status !== "cancelled";
         const canRefund =
           order.payment_status === "paid" && order.refunded_at == null;
         if (!canMarkPaid && !canRefund) return null;
@@ -545,7 +578,7 @@ export function OrderStatusActions({ order, paymentGateway, className }: Props) 
                     <CreditCard className="size-4" aria-hidden />
                     Konfirmasi Pembayaran Manual
                   </Button>
-                  <p className="mt-1 max-w-[18rem] text-xs text-neutral-500">
+                  <p className="mt-1 text-xs text-neutral-500">
                     Pakai kalau kamu sudah cek mutasi rekening / e-wallet sendiri.
                   </p>
                 </div>

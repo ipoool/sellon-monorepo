@@ -46,7 +46,7 @@ export function SubscriptionExpiryBanner({ subscription }: Props) {
       role="alert"
       // z-[55] so this stacks UNDER the impersonation banner (z-[60])
       // when both happen to be visible at the same time.
-      className="sticky top-[var(--imp-h,0px)] z-[55] flex flex-col gap-1 border-b border-warning/40 bg-warning/95 px-4 py-2 text-neutral-900 shadow-card sm:flex-row sm:items-center sm:gap-3"
+      className="flex flex-col gap-1 border-b border-warning/40 bg-warning/95 px-4 py-2 text-neutral-900 sm:flex-row sm:items-center sm:gap-3"
     >
       <div className="flex items-center gap-2">
         <CalendarClock className="size-4 shrink-0" aria-hidden />

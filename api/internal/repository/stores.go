@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -37,6 +38,15 @@ type Store struct {
 	ShowHoursPublic            bool
 	ShowSocialPublic           bool
 	FooterText                 string
+	SegmentVipThreshold        int // min orders to be VIP (default 10)
+	SegmentLoyalThreshold      int // min orders to be Loyal (default 3)
+	SegmentBaruName            string
+	SegmentRegulerName         string
+	SegmentLoyalName           string
+	SegmentVipName             string
+	CustomDomain               *string    // nullable; set by Bisnis sellers
+	DomainStatus               string     // none|pending|active|failed
+	DomainVerifiedAt           *time.Time // nullable
 	CreatedAt                  time.Time
 	UpdatedAt                  time.Time
 }
@@ -49,13 +59,19 @@ func NewStoreRepo(pool *pgxpool.Pool) *StoreRepo {
 	return &StoreRepo{pool: pool}
 }
 
-var ErrStoreNotFound = errors.New("store not found")
+var (
+	ErrStoreNotFound = errors.New("store not found")
+	ErrDomainTaken   = errors.New("custom domain already used by another store")
+)
 
 const storeColumns = `id, owner_id, slug, name, description, logo_url, banner_url, tagline,
 	category, city, whatsapp_number, notification_whatsapp_number, instagram, tiktok, open_hours, is_open,
 	shipping_origin_city, shipping_origin_city_id, shipping_origin_city_name,
 	enabled_couriers, free_shipping_threshold_cents,
 	theme_hue, product_layout, show_hours_public, show_social_public, footer_text,
+	segment_vip_threshold, segment_loyal_threshold,
+	segment_baru_name, segment_reguler_name, segment_loyal_name, segment_vip_name,
+	custom_domain, domain_status, domain_verified_at,
 	created_at, updated_at`
 
 // Same column list but qualified with the `s.` alias, used in joins.
@@ -65,6 +81,9 @@ const qualifiedStoreColumns = `s.id, s.owner_id, s.slug, s.name, s.description,
 	s.shipping_origin_city, s.shipping_origin_city_id, s.shipping_origin_city_name,
 	s.enabled_couriers, s.free_shipping_threshold_cents,
 	s.theme_hue, s.product_layout, s.show_hours_public, s.show_social_public, s.footer_text,
+	s.segment_vip_threshold, s.segment_loyal_threshold,
+	s.segment_baru_name, s.segment_reguler_name, s.segment_loyal_name, s.segment_vip_name,
+	s.custom_domain, s.domain_status, s.domain_verified_at,
 	s.created_at, s.updated_at`
 
 func scanStore(row pgx.Row, s *Store) error {
@@ -77,8 +96,51 @@ func scanStore(row pgx.Row, s *Store) error {
 		&s.ShippingOriginCity, &s.ShippingOriginCityID, &s.ShippingOriginCityName,
 		&s.EnabledCouriers, &s.FreeShippingThresholdCents,
 		&s.ThemeHue, &s.ProductLayout, &s.ShowHoursPublic, &s.ShowSocialPublic, &s.FooterText,
+		&s.SegmentVipThreshold, &s.SegmentLoyalThreshold,
+		&s.SegmentBaruName, &s.SegmentRegulerName, &s.SegmentLoyalName, &s.SegmentVipName,
+		&s.CustomDomain, &s.DomainStatus, &s.DomainVerifiedAt,
 		&s.CreatedAt, &s.UpdatedAt,
 	)
+}
+
+type SegmentSettings struct {
+	VipThreshold   int
+	LoyalThreshold int
+	BaruName       string
+	RegulerName    string
+	LoyalName      string
+	VipName        string
+}
+
+// UpdateSegmentSettings saves segment thresholds and display names.
+func (r *StoreRepo) UpdateSegmentSettings(ctx context.Context, storeID uuid.UUID, s SegmentSettings) error {
+	if s.VipThreshold < 1 {
+		s.VipThreshold = 1
+	}
+	if s.LoyalThreshold < 1 {
+		s.LoyalThreshold = 1
+	}
+	if s.LoyalThreshold >= s.VipThreshold {
+		s.LoyalThreshold = s.VipThreshold - 1
+		if s.LoyalThreshold < 1 {
+			s.LoyalThreshold = 1
+		}
+	}
+	_, err := r.pool.Exec(ctx, `
+		UPDATE stores
+		SET segment_vip_threshold   = $2,
+		    segment_loyal_threshold = $3,
+		    segment_baru_name       = $4,
+		    segment_reguler_name    = $5,
+		    segment_loyal_name      = $6,
+		    segment_vip_name        = $7,
+		    updated_at = now()
+		WHERE id = $1`,
+		storeID,
+		s.VipThreshold, s.LoyalThreshold,
+		s.BaruName, s.RegulerName, s.LoyalName, s.VipName,
+	)
+	return err
 }
 
 func (r *StoreRepo) FindBySlug(ctx context.Context, slug string) (*Store, error) {
@@ -288,6 +350,79 @@ func (r *StoreRepo) SetIsOpen(ctx context.Context, id uuid.UUID, open bool) erro
 		return ErrStoreNotFound
 	}
 	return nil
+}
+
+// FindByDomain looks up a store by its verified custom domain.
+func (r *StoreRepo) FindByDomain(ctx context.Context, domain string) (*Store, error) {
+	q := `SELECT ` + storeColumns + ` FROM stores WHERE custom_domain = $1`
+	var s Store
+	if err := scanStore(r.pool.QueryRow(ctx, q, domain), &s); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrStoreNotFound
+		}
+		return nil, err
+	}
+	return &s, nil
+}
+
+// SetCustomDomain saves a new custom domain and resets verification to pending.
+// Returns ErrDomainTaken if another store already owns that domain.
+func (r *StoreRepo) SetCustomDomain(ctx context.Context, storeID uuid.UUID, domain string) (*Store, error) {
+	q := `
+		UPDATE stores
+		SET custom_domain     = $2,
+		    domain_status     = 'pending',
+		    domain_verified_at = NULL,
+		    updated_at        = now()
+		WHERE id = $1
+		RETURNING ` + storeColumns
+	var s Store
+	if err := scanStore(r.pool.QueryRow(ctx, q, storeID, domain), &s); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return nil, ErrDomainTaken
+		}
+		return nil, err
+	}
+	return &s, nil
+}
+
+// SetDomainStatus updates the verification status. When status is "active",
+// domain_verified_at is set to now(); otherwise it is cleared.
+func (r *StoreRepo) SetDomainStatus(ctx context.Context, storeID uuid.UUID, status string) (*Store, error) {
+	var verifiedAt interface{}
+	if status == "active" {
+		verifiedAt = time.Now()
+	}
+	q := `
+		UPDATE stores
+		SET domain_status     = $2,
+		    domain_verified_at = $3,
+		    updated_at        = now()
+		WHERE id = $1
+		RETURNING ` + storeColumns
+	var s Store
+	if err := scanStore(r.pool.QueryRow(ctx, q, storeID, status, verifiedAt), &s); err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+// ClearCustomDomain removes the custom domain and resets status to none.
+func (r *StoreRepo) ClearCustomDomain(ctx context.Context, storeID uuid.UUID) (*Store, error) {
+	q := `
+		UPDATE stores
+		SET custom_domain     = NULL,
+		    domain_status     = 'none',
+		    domain_verified_at = NULL,
+		    updated_at        = now()
+		WHERE id = $1
+		RETURNING ` + storeColumns
+	var s Store
+	if err := scanStore(r.pool.QueryRow(ctx, q, storeID), &s); err != nil {
+		return nil, err
+	}
+	return &s, nil
 }
 
 func (r *StoreRepo) Update(ctx context.Context, id uuid.UUID, in UpdateStoreInput) (*Store, error) {

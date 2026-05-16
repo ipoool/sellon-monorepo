@@ -10,6 +10,8 @@ type Props = {
   productSlug: string;
   productName: string;
   className?: string;
+  asMenu?: boolean;
+  onAction?: () => void;
 };
 
 export function ShareProductButton({
@@ -17,6 +19,8 @@ export function ShareProductButton({
   productSlug,
   productName,
   className,
+  asMenu = false,
+  onAction,
 }: Props) {
   const [copied, setCopied] = useState(false);
 
@@ -43,6 +47,31 @@ export function ShareProductButton({
   const waMessage = encodeURIComponent(
     `Halo, lihat produk ini di toko saya:\n\n${productName}\n${url}`,
   );
+
+  if (asMenu) {
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => { copy(); onAction?.(); }}
+          className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-neutral-700 hover:bg-neutral-50"
+        >
+          {copied ? <Check className="size-4 text-success" aria-hidden /> : <Link2 className="size-4" aria-hidden />}
+          {copied ? "Tersalin!" : "Salin link produk"}
+        </button>
+        <a
+          href={`https://wa.me/?text=${waMessage}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={() => onAction?.()}
+          className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-neutral-700 hover:bg-neutral-50"
+        >
+          <Send className="size-4" aria-hidden />
+          Bagikan via WhatsApp
+        </a>
+      </>
+    );
+  }
 
   return (
     <div className={cn("inline-flex items-center gap-1", className)}>

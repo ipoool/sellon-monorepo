@@ -16,6 +16,8 @@ import {
   Check,
   RefreshCw,
   Webhook,
+  Info,
+  X,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -33,13 +35,6 @@ import type { GatewayInfo } from "@/lib/types";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
-const methodOptions = [
-  { id: "qris", label: "QRIS" },
-  { id: "bank_transfer", label: "Virtual Account / Bank Transfer" },
-  { id: "gopay", label: "GoPay" },
-  { id: "shopeepay", label: "ShopeePay" },
-  { id: "credit_card", label: "Kartu Kredit/Debit" },
-];
 
 export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
   const { refresh } = useRouter();
@@ -47,12 +42,20 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
   const [pending, setPending] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [verifyMsg, setVerifyMsg] = useState<string | null>(null);
+  // "ok"      = new keys have been successfully tested this session
+  // "failed"  = test was run but failed
+  // "untested"= user typed new keys but hasn't tested yet (or test not run)
+  const [keyTestStatus, setKeyTestStatus] = useState<"ok" | "failed" | "untested">(
+    (initial?.is_configured && initial?.last_verify_status === "ok") ? "ok" : "untested",
+  );
 
   const [webhookURL, setWebhookURL] = useState(initial?.webhook_url ?? "");
   const [webhookCopied, setWebhookCopied] = useState(false);
   const [rotating, setRotating] = useState(false);
   // Buka ConfirmDialog typed-phrase "GENERATE" sebelum rotate.
   const [showRotateConfirm, setShowRotateConfirm] = useState(false);
+  const [showWebhookGuide, setShowWebhookGuide] = useState(false);
+  const webhookGuideRef = useRef<HTMLDialogElement>(null);
 
   // Confirm dialog state - opens at SAVE time when the mode in the form
   // differs from what's stored in the DB.
@@ -90,6 +93,26 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
     };
   }, []);
 
+  useEffect(() => {
+    const d = webhookGuideRef.current;
+    if (!d) return;
+    if (showWebhookGuide && !d.open) d.showModal();
+    if (!showWebhookGuide && d.open) d.close();
+  }, [showWebhookGuide]);
+
+  useEffect(() => {
+    const d = webhookGuideRef.current;
+    if (!d) return;
+    const onCancel = (e: Event) => { e.preventDefault(); setShowWebhookGuide(false); };
+    const onClick = (e: MouseEvent) => { if (e.target === d) setShowWebhookGuide(false); };
+    d.addEventListener("cancel", onCancel);
+    d.addEventListener("click", onClick);
+    return () => {
+      d.removeEventListener("cancel", onCancel);
+      d.removeEventListener("click", onClick);
+    };
+  }, []);
+
   const requiredPhrase = pendingMode === "production" ? "PRODUCTION" : "SANDBOX";
   const canConfirmSwitch = confirmInput === requiredPhrase;
 
@@ -114,27 +137,47 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
     e.preventDefault();
 
     const fd = new FormData(e.currentTarget);
-    const enabledMethods = methodOptions.reduce<string[]>((acc, m) => {
-      if (fd.get(`method_${m.id}`) === "on") acc.push(m.id);
-      return acc;
-    }, []);
-
     const submittedServerKey = String(fd.get("server_key") ?? "").trim();
     const submittedClientKey = String(fd.get("client_key") ?? "").trim();
 
-    // Build payload: only set the env's fields the user is currently editing.
-    // Server keys: empty = preserve existing. Client keys: always sent (we
-    // overwrite with what's in the field for the active env).
+    // Detect whether the user has entered NEW key values (vs. leaving fields
+    // blank to preserve the existing stored keys).
+    const originalClientKey = isSandbox
+      ? (initial?.client_key_sandbox ?? "")
+      : (initial?.client_key_prod ?? "");
+    const hasNewServerKey = submittedServerKey !== "";
+    const hasNewClientKey = submittedClientKey !== originalClientKey;
+    const hasDirtyKeys = hasNewServerKey || hasNewClientKey;
+
+    // Determine which server/client key values to actually send.
+    // If new keys were entered but not tested successfully → strip them and warn.
+    let effectiveServerKey = submittedServerKey;
+    let effectiveClientKey = submittedClientKey;
+
+    if (hasDirtyKeys && keyTestStatus !== "ok") {
+      if (keyTestStatus === "failed") {
+        showError(
+          "Koneksi gagal — server key & client key yang baru tidak disimpan. Konfigurasi lainnya tetap tersimpan.",
+        );
+      } else {
+        showError(
+          "Lakukan Tes Koneksi terlebih dahulu. Server key & client key tidak akan disimpan sampai koneksi berhasil diverifikasi.",
+        );
+      }
+      effectiveServerKey = "";
+      effectiveClientKey = originalClientKey;
+    }
+
+    // Build payload: server key empty = preserve existing (backend contract).
     const body: Record<string, unknown> = {
       is_sandbox: isSandbox,
-      enabled_methods: enabledMethods,
-      sandbox_server_key: isSandbox ? submittedServerKey : "",
-      prod_server_key: !isSandbox ? submittedServerKey : "",
+      sandbox_server_key: isSandbox ? effectiveServerKey : "",
+      prod_server_key: !isSandbox ? effectiveServerKey : "",
       sandbox_client_key: isSandbox
-        ? submittedClientKey
+        ? effectiveClientKey
         : initial?.client_key_sandbox ?? "",
       prod_client_key: !isSandbox
-        ? submittedClientKey
+        ? effectiveClientKey
         : initial?.client_key_prod ?? "",
     };
 
@@ -239,9 +282,11 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       setVerifyMsg(data.message || "Koneksi OK");
+      setKeyTestStatus("ok");
       refresh();
     } catch (err) {
       setVerifyMsg(err instanceof Error ? err.message : "Gagal verify");
+      setKeyTestStatus("failed");
     } finally {
       setVerifying(false);
     }
@@ -249,117 +294,94 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
 
   return (
     <div className="flex flex-col gap-5">
-      <Card>
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 className="font-semibold text-neutral-900">Midtrans</h2>
-          {isConfigured && lastStatus === "ok" && (
-            <Badge variant="success">
-              <CheckCircle2 className="size-3" aria-hidden />
-              Terkoneksi
-            </Badge>
-          )}
-          {isConfigured && lastStatus !== "ok" && (
-            <Badge variant="warning">
-              <AlertTriangle className="size-3" aria-hidden />
-              Belum diverifikasi
-            </Badge>
-          )}
-          {!isConfigured && (
-            <Badge variant="default">Belum dikonfigurasi</Badge>
-          )}
-        </div>
-        <p className="mt-2 text-sm text-neutral-600">
-          Pakai akun Midtrans-mu sendiri. Dana hasil penjualan langsung masuk
-          ke rekeningmu sesuai jadwal settlement Midtrans - kami tidak pernah
-          pegang uang pembeli.
-        </p>
-        <a
-          href={
-            isSandbox
-              ? "https://dashboard.sandbox.midtrans.com/settings/access_keys"
-              : "https://dashboard.midtrans.com/settings/access_keys"
-          }
-          target="_blank"
-          rel="noopener noreferrer"
-          className="mt-3 inline-flex w-fit items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-sm font-medium text-brand-600 transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-brand-700"
-        >
-          Dapatkan API Key
-          <ExternalLink className="size-3.5" aria-hidden />
-        </a>
-      </Card>
-
       <form onSubmit={onSubmit} className="flex flex-col gap-5">
-        {/* Mode switcher */}
+        {/* Midtrans — header, mode, keys merged into one card */}
         <Card>
-          <h3 className="font-semibold text-neutral-900">Mode</h3>
-          <p className="mt-0.5 text-sm text-neutral-500">
-            Tiap mode punya pasangan API key sendiri. Pindah mode tidak akan
-            menghapus key untuk mode lainnya.
+          {/* Header */}
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="font-semibold text-neutral-900">Midtrans</h2>
+              {isConfigured && lastStatus === "ok" && (
+                <Badge variant="success">
+                  <CheckCircle2 className="size-3" aria-hidden />
+                  Terkoneksi
+                </Badge>
+              )}
+              {isConfigured && lastStatus !== "ok" && (
+                <Badge variant="warning">
+                  <AlertTriangle className="size-3" aria-hidden />
+                  Belum diverifikasi
+                </Badge>
+              )}
+              {!isConfigured && (
+                <Badge variant="default">Belum dikonfigurasi</Badge>
+              )}
+            </div>
+            <a
+              href={
+                isSandbox
+                  ? "https://dashboard.sandbox.midtrans.com/settings/access_keys"
+                  : "https://dashboard.midtrans.com/settings/access_keys"
+              }
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-sm font-medium text-brand-600 hover:text-brand-700"
+            >
+              Dapatkan API Key
+              <ExternalLink className="size-3.5" aria-hidden />
+            </a>
+          </div>
+          <p className="mt-1.5 text-sm text-neutral-500">
+            Dana hasil penjualan langsung masuk ke rekeningmu — kami tidak pernah pegang uang pembeli.
           </p>
 
-          <div
-            role="tablist"
-            aria-label="Mode pembayaran"
-            className="mt-4 grid grid-cols-2 gap-2"
-          >
-            <ModeOption
-              icon={FlaskConical}
-              label="Sandbox"
-              description="Uji coba dengan akun sandbox Midtrans"
-              active={isSandbox}
-              hasKey={hasSandboxKey}
-              onClick={() => setIsSandbox(true)}
-            />
-            <ModeOption
-              icon={Rocket}
-              label="Production"
-              description="Pembayaran asli dari pembeli"
-              active={!isSandbox}
-              hasKey={hasProdKey}
-              onClick={() => setIsSandbox(false)}
-            />
-          </div>
-        </Card>
-
-        {/* API Keys for the currently selected mode */}
-        <Card>
-          <div className="mb-4 flex items-start justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="font-semibold text-neutral-900">
-                  API Keys -{" "}
-                  <span className="text-brand-700">
-                    {isSandbox ? "Sandbox" : "Production"}
-                  </span>
-                </h3>
-                <Badge variant={isSandbox ? "warning" : "brand"}>
-                  Sedang aktif
-                </Badge>
-              </div>
-              <p className="mt-0.5 text-sm text-neutral-500">
-                Server Key disimpan terenkripsi (AES-GCM). Tidak ditampilkan
-                ulang setelah disimpan - kamu bisa overwrite kapan saja.
-                {!activeHasStoredKey && (
-                  <>
-                    {" "}
-                    Wajib diisi sebelum mode {isSandbox ? "Sandbox" : "Production"} bisa dipakai.
-                  </>
-                )}
-              </p>
+          {/* Mode segmented control */}
+          <div className="mt-5 border-t border-neutral-100 pt-5">
+            <div
+              role="tablist"
+              aria-label="Mode pembayaran"
+              className="inline-flex rounded-lg border border-neutral-200 bg-neutral-50 p-1 gap-1"
+            >
+              {(
+                [
+                  { label: "Sandbox", sandbox: true, icon: FlaskConical, hasKey: hasSandboxKey },
+                  { label: "Production", sandbox: false, icon: Rocket, hasKey: hasProdKey },
+                ] as const
+              ).map(({ label, sandbox, icon: Icon, hasKey }) => (
+                <button
+                  key={label}
+                  type="button"
+                  role="tab"
+                  aria-selected={isSandbox === sandbox}
+                  onClick={() => { setIsSandbox(sandbox); setKeyTestStatus("untested"); }}
+                  className={cn(
+                    "flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-all",
+                    isSandbox === sandbox
+                      ? "bg-white text-neutral-900 shadow-sm"
+                      : "text-neutral-500 hover:text-neutral-800",
+                  )}
+                >
+                  <Icon className="size-3.5" aria-hidden />
+                  {label}
+                  {hasKey && (
+                    <span className="rounded-full bg-success/15 px-1.5 py-px text-[10px] font-semibold text-success">
+                      ✓
+                    </span>
+                  )}
+                </button>
+              ))}
             </div>
           </div>
 
-          <div className="flex flex-col gap-4">
+          {/* API Keys */}
+          <div className="mt-4 flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="server_key">
                 Server Key {isSandbox ? "Sandbox" : "Production"}
-                {!activeHasStoredKey && <span className="ml-1 text-danger">*</span>}
+                <span className="ml-1 text-danger">*</span>
               </Label>
               <div className="flex h-10 items-center gap-2 rounded-lg border border-neutral-200 bg-white px-3 transition-colors focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-500/30">
-                <Lock
-                  className="size-4 shrink-0 text-neutral-400"
-                  aria-hidden
-                />
+                <Lock className="size-4 shrink-0 text-neutral-400" aria-hidden />
                 <input
                   id="server_key"
                   name="server_key"
@@ -370,25 +392,27 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
                       ? activeMaskedKey || "•••••••• tersimpan"
                       : activePlaceholder
                   }
+                  onChange={() => setKeyTestStatus("untested")}
                   className="h-full flex-1 bg-transparent font-mono text-xs text-neutral-900 placeholder:text-neutral-400 focus:outline-none"
                 />
               </div>
-              {activeHasStoredKey && (
-                <p className="text-xs text-neutral-500">
-                  Sudah tersimpan - kosongkan field ini untuk pakai key yang
-                  ada, atau isi nilai baru untuk overwrite.
-                </p>
-              )}
+              <p className="text-xs text-neutral-400">
+                {activeHasStoredKey
+                  ? "Sudah tersimpan (AES-GCM) — kosongkan untuk tetap pakai, isi untuk overwrite."
+                  : "Disimpan terenkripsi. Wajib diisi sebelum mode ini bisa dipakai."}
+              </p>
             </div>
 
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="client_key">
-                Client Key {isSandbox ? "Sandbox" : "Production"} (opsional)
+                Client Key {isSandbox ? "Sandbox" : "Production"}
+                <span className="ml-1 text-danger">*</span>
               </Label>
               <Input
                 id="client_key"
                 name="client_key"
                 key={isSandbox ? "client-sandbox" : "client-prod"}
+                required
                 defaultValue={
                   isSandbox
                     ? initial?.client_key_sandbox ?? ""
@@ -396,191 +420,203 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
                 }
                 placeholder={activeClientPlaceholder}
                 className="font-mono text-xs"
+                onChange={() => setKeyTestStatus("untested")}
               />
             </div>
           </div>
 
-          <div className="mt-5 flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning/5 px-3 py-2.5 text-xs text-neutral-700">
-            <AlertTriangle
-              className="mt-0.5 size-4 shrink-0 text-warning"
-              aria-hidden
-            />
-            <p>
-              <strong>Catatan keamanan:</strong> Server Key disimpan terenkripsi
-              (AES-GCM, key derivasi dari secret aplikasi). Tim SellOn tidak
-              bisa membaca raw key Anda. Tetap rotate key secara berkala lewat
-              Midtrans dashboard.
-            </p>
-          </div>
-        </Card>
-
-        <Card>
-          <div className="mb-4">
-            <h3 className="font-semibold text-neutral-900">Metode Pembayaran</h3>
-            <p className="mt-0.5 text-sm text-neutral-500">
-              Pilih metode yang ingin diaktifkan untuk pembeli. Pastikan sudah
-              di-enable juga di dashboard Midtrans-mu.
-            </p>
-          </div>
-
-          <div className="grid gap-2 sm:grid-cols-2">
-            {methodOptions.map((m) => (
-              <label
-                key={m.id}
-                className="flex cursor-pointer items-center gap-3 rounded-lg border border-neutral-200 p-3 text-sm transition-colors hover:bg-neutral-50"
-              >
-                <input
-                  type="checkbox"
-                  name={`method_${m.id}`}
-                  defaultChecked={
-                    initial?.enabled_methods?.includes(m.id) ??
-                    (m.id === "qris" || m.id === "bank_transfer")
-                  }
-                  className="size-4 rounded border-neutral-300 accent-brand-500 focus:ring-brand-500/30"
-                />
-                <span className="font-medium text-neutral-900">{m.label}</span>
-              </label>
-            ))}
-          </div>
-
-          <BankAccountsManager ref={banksRef} />
-        </Card>
-
-        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-2 text-sm">
-            {verifyMsg && (
-              <span className="font-medium text-neutral-700">{verifyMsg}</span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
+          {/* Tes Koneksi row */}
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-neutral-100 pt-4">
+            <span className="text-sm text-neutral-600">{verifyMsg}</span>
             {isConfigured && activeHasStoredKey && (
-              <Button
-                type="button"
-                variant="outline"
-                size="md"
-                onClick={onVerify}
-                disabled={verifying}
-              >
+              <Button type="button" variant="outline" size="md" onClick={onVerify} disabled={verifying}>
                 <PlugZap className="size-4" aria-hidden />
                 {verifying ? "Menguji…" : "Tes Koneksi"}
               </Button>
             )}
-            <Button type="submit" size="md" disabled={pending}>
-              <Save className="size-4" aria-hidden />
-              {pending ? "Menyimpan…" : "Simpan"}
-            </Button>
           </div>
+
+          {/* URL Webhook — hanya muncul setelah berhasil terkoneksi */}
+          {webhookURL && keyTestStatus === "ok" && (
+            <div className="mt-5 border-t border-neutral-100 pt-5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Webhook className="size-4 text-brand-600" aria-hidden />
+                  <span className="font-semibold text-neutral-900">URL Webhook</span>
+                  <Badge variant="brand">Penting</Badge>
+                  {/* Info button → opens guide dialog */}
+                  <button
+                    type="button"
+                    onClick={() => setShowWebhookGuide(true)}
+                    aria-label="Cara pasang URL webhook"
+                    className="inline-flex size-7 items-center justify-center rounded-md text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-700"
+                  >
+                    <Info className="size-4" aria-hidden />
+                  </button>
+                </div>
+                <a
+                  href={
+                    isSandbox
+                      ? "https://dashboard.sandbox.midtrans.com/settings/vtweb_configuration"
+                      : "https://dashboard.midtrans.com/settings/vtweb_configuration"
+                  }
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm font-medium text-brand-600 hover:text-brand-700 inline-flex items-center gap-1"
+                >
+                  Buka Midtrans
+                  <ExternalLink className="size-3.5" aria-hidden />
+                </a>
+              </div>
+
+              <div className="mt-3 flex items-stretch gap-2">
+                <code className="flex flex-1 items-center overflow-hidden rounded-lg border border-neutral-200 bg-neutral-50 px-3 font-mono text-xs text-neutral-800">
+                  <span className="truncate">{webhookURL}</span>
+                </code>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="md"
+                  onClick={copyWebhookURL}
+                  aria-label="Salin URL webhook"
+                >
+                  {webhookCopied ? (
+                    <><Check className="size-4 text-success" aria-hidden />Tersalin</>
+                  ) : (
+                    <><Copy className="size-4" aria-hidden />Salin</>
+                  )}
+                </Button>
+              </div>
+
+              <div className="mt-3 flex items-center justify-between gap-3 border-t border-neutral-100 pt-3">
+                <p className="text-xs text-neutral-400">
+                  Token rahasia per toko — jangan dibagikan publik.
+                </p>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowRotateConfirm(true)}
+                  disabled={rotating}
+                  className="shrink-0 text-danger hover:bg-danger/10"
+                >
+                  <RefreshCw className="size-4" aria-hidden />
+                  {rotating ? "Memproses…" : "Generate URL baru"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </Card>
+
+        <Card>
+          <BankAccountsManager ref={banksRef} />
+        </Card>
+
+        <div className="flex justify-end">
+          <Button type="submit" size="md" disabled={pending}>
+            <Save className="size-4" aria-hidden />
+            {pending ? "Menyimpan…" : "Simpan"}
+          </Button>
         </div>
       </form>
 
-      {/* Webhook URL - only after first save (token exists) */}
-      {webhookURL && (
-        <Card>
-          <div className="mb-4 flex items-start justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-2">
-                <Webhook className="size-4 text-brand-600" aria-hidden />
-                <h3 className="font-semibold text-neutral-900">URL Webhook</h3>
-                <Badge variant="brand">Penting</Badge>
-              </div>
-              <p className="mt-1 text-sm text-neutral-600">
-                Masukkan URL ini di Midtrans dashboard supaya status pembayaran
-                ter-update otomatis di SellOn saat pembeli bayar.
-              </p>
+      {/* Webhook guide dialog */}
+      <dialog
+        ref={webhookGuideRef}
+        aria-labelledby="webhook-guide-title"
+        className="fixed left-1/2 top-1/2 m-0 w-[min(480px,95vw)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-xl border border-neutral-200 bg-white p-0 shadow-popout backdrop:bg-neutral-900/50 backdrop:backdrop-blur-sm"
+      >
+        <div className="flex items-center justify-between gap-3 border-b border-neutral-200 px-6 py-4">
+          <div className="flex items-center gap-2.5">
+            <div className="flex size-8 items-center justify-center rounded-lg bg-brand-50">
+              <Webhook className="size-4 text-brand-700" aria-hidden />
             </div>
-            <a
-              href={
-                isSandbox
-                  ? "https://dashboard.sandbox.midtrans.com/settings/vtweb_configuration"
-                  : "https://dashboard.midtrans.com/settings/vtweb_configuration"
-              }
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hidden text-sm font-medium text-brand-600 hover:text-brand-700 sm:inline-flex sm:items-center sm:gap-1"
-            >
-              Buka Midtrans
-              <ExternalLink className="size-3.5" aria-hidden />
-            </a>
+            <h2 id="webhook-guide-title" className="font-display text-base font-semibold text-neutral-900">
+              Cara Pasang URL Webhook
+            </h2>
           </div>
-
-          <div className="flex items-stretch gap-2">
-            <code className="flex flex-1 items-center overflow-hidden rounded-lg border border-neutral-200 bg-neutral-50 px-3 font-mono text-xs text-neutral-800">
-              <span className="truncate">{webhookURL}</span>
-            </code>
-            <Button
-              type="button"
-              variant="outline"
-              size="md"
-              onClick={copyWebhookURL}
-              aria-label="Salin URL webhook"
-            >
-              {webhookCopied ? (
-                <>
-                  <Check className="size-4 text-success" aria-hidden />
-                  Tersalin
-                </>
-              ) : (
-                <>
-                  <Copy className="size-4" aria-hidden />
-                  Salin
-                </>
-              )}
-            </Button>
-          </div>
-
-          <ol className="mt-5 flex flex-col gap-2 text-sm text-neutral-700">
-            <li className="flex gap-3">
-              <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-brand-50 text-xs font-semibold text-brand-700">
-                1
-              </span>
-              <span>
-                Salin URL di atas. Login ke{" "}
-                <strong>
-                  dashboard{isSandbox ? " sandbox" : ""} Midtrans
-                </strong>
-                .
-              </span>
-            </li>
-            <li className="flex gap-3">
-              <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-brand-50 text-xs font-semibold text-brand-700">
-                2
-              </span>
-              <span>
-                Buka <strong>Settings → Configuration → Notification URL</strong>{" "}
-                (atau <strong>Payment Notification URL</strong>).
-              </span>
-            </li>
-            <li className="flex gap-3">
-              <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-brand-50 text-xs font-semibold text-brand-700">
-                3
-              </span>
-              <span>
-                Paste URL ke field tersebut, klik <strong>Update</strong>. Test
-                dengan <strong>Send Test Notification</strong> di Midtrans.
-              </span>
-            </li>
+          <button
+            type="button"
+            onClick={() => setShowWebhookGuide(false)}
+            aria-label="Tutup"
+            className="inline-flex size-8 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
+          >
+            <X className="size-4" aria-hidden />
+          </button>
+        </div>
+        <div className="px-6 py-5">
+          <ol className="space-y-5">
+            {[
+              {
+                title: "Salin URL Webhook",
+                desc: "Klik tombol Salin di samping URL webhook yang tertera di pengaturan.",
+              },
+              {
+                title: "Login ke dashboard Midtrans",
+                desc: (
+                  <>
+                    Buka{" "}
+                    <a
+                      href={
+                        isSandbox
+                          ? "https://dashboard.sandbox.midtrans.com/settings/vtweb_configuration"
+                          : "https://dashboard.midtrans.com/settings/vtweb_configuration"
+                      }
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-medium text-brand-600 hover:underline"
+                    >
+                      dashboard {isSandbox ? "sandbox" : "production"} Midtrans
+                    </a>{" "}
+                    dan masuk ke akun kamu.
+                  </>
+                ),
+              },
+              {
+                title: "Buka halaman konfigurasi",
+                desc: (
+                  <>
+                    Navigasi ke{" "}
+                    <strong>Settings → Configuration</strong> dan cari field{" "}
+                    <strong>Notification URL</strong> atau{" "}
+                    <strong>Payment Notification URL</strong>.
+                  </>
+                ),
+              },
+              {
+                title: "Paste dan simpan",
+                desc: (
+                  <>
+                    Paste URL webhook ke field tersebut lalu klik{" "}
+                    <strong>Update</strong>. Gunakan{" "}
+                    <strong>Send Test Notification</strong> untuk memverifikasi
+                    koneksi.
+                  </>
+                ),
+              },
+            ].map(({ title, desc }, i) => (
+              <li key={i} className="flex items-start gap-4">
+                <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-brand-100 text-sm font-bold text-brand-700">
+                  {i + 1}
+                </span>
+                <div>
+                  <p className="font-semibold text-neutral-900">{title}</p>
+                  <p className="mt-0.5 text-sm leading-relaxed text-neutral-500">{desc}</p>
+                </div>
+              </li>
+            ))}
           </ol>
-
-          <div className="mt-5 flex items-center justify-between border-t border-neutral-200 pt-4">
-            <p className="text-xs text-neutral-500">
-              URL berisi token rahasia per toko. Jangan dibagikan publik. Kalau
-              kena leak, generate URL baru.
-            </p>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowRotateConfirm(true)}
-              disabled={rotating}
-              className="text-danger hover:bg-danger/10"
-            >
-              <RefreshCw className="size-4" aria-hidden />
-              {rotating ? "Memproses…" : "Generate URL baru"}
-            </Button>
+          <div className="mt-5 rounded-lg border border-neutral-200 bg-neutral-50 px-4 py-3 text-xs text-neutral-500">
+            <strong className="text-neutral-700">Catatan:</strong> URL mengandung token rahasia
+            per toko. Jangan dibagikan publik. Jika bocor, generate URL baru dari pengaturan.
           </div>
-        </Card>
-      )}
-
+        </div>
+        <div className="flex justify-end border-t border-neutral-100 px-6 py-3">
+          <Button size="sm" variant="ghost" type="button" onClick={() => setShowWebhookGuide(false)}>
+            Tutup
+          </Button>
+        </div>
+      </dialog>
 
       {/* Mode-switch confirmation dialog */}
       <dialog
@@ -732,56 +768,5 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
         }
       />
     </div>
-  );
-}
-
-function ModeOption({
-  icon: Icon,
-  label,
-  description,
-  active,
-  hasKey,
-  onClick,
-}: {
-  icon: typeof FlaskConical;
-  label: string;
-  description: string;
-  active: boolean;
-  hasKey: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      onClick={onClick}
-      className={cn(
-        "flex items-start gap-3 rounded-xl border p-4 text-left transition-all",
-        active
-          ? "border-brand-500 bg-brand-50/50 ring-2 ring-brand-500/20"
-          : "border-neutral-200 bg-white hover:bg-neutral-50",
-      )}
-    >
-      <div
-        className={cn(
-          "flex size-9 shrink-0 items-center justify-center rounded-lg",
-          active ? "bg-brand-500 text-white" : "bg-neutral-100 text-neutral-600",
-        )}
-      >
-        <Icon className="size-4" aria-hidden />
-      </div>
-      <div className="flex-1">
-        <div className="flex items-center gap-2">
-          <p className="font-semibold text-neutral-900">{label}</p>
-          {hasKey ? (
-            <Badge variant="success">Tersimpan</Badge>
-          ) : (
-            <Badge variant="default">Belum diisi</Badge>
-          )}
-        </div>
-        <p className="mt-1 text-xs text-neutral-600">{description}</p>
-      </div>
-    </button>
   );
 }

@@ -18,6 +18,8 @@ import {
   Receipt,
   UserCog,
   X,
+  Zap,
+  Building2,
   type LucideIcon,
 } from "lucide-react";
 
@@ -34,6 +36,7 @@ type NavItem = {
   icon: LucideIcon;
   badge?: string;
   disabled?: boolean;
+  external?: boolean;
 };
 
 const primaryNav: NavItem[] = [
@@ -47,7 +50,7 @@ const primaryNav: NavItem[] = [
 
 const secondaryNav: NavItem[] = [
   { label: "Pengaturan", href: "/settings", icon: Settings },
-  { label: "Bantuan", href: "/help", icon: HelpCircle },
+  { label: "Bantuan", href: "/help", icon: HelpCircle, external: true },
 ];
 
 type Props = {
@@ -91,7 +94,7 @@ export function DashboardSidebar({ me, open, onClose }: Props) {
   return (
     <>
       {/* Desktop sidebar */}
-      <aside className="hidden border-r border-neutral-200 bg-white lg:fixed lg:bottom-0 lg:left-0 lg:top-[calc(var(--imp-h,0px)+var(--exp-h,0px)+var(--sbx-h,0px))] lg:z-30 lg:flex lg:w-60 lg:flex-col">
+      <aside className="hidden border-r border-neutral-200 bg-white lg:fixed lg:bottom-0 lg:left-0 lg:top-[var(--banners-h,0px)] lg:z-30 lg:flex lg:w-60 lg:flex-col">
         <SidebarContent me={me} pathname={pathname} />
       </aside>
 
@@ -129,17 +132,7 @@ function SidebarContent({
     <>
       <div className="flex h-16 items-center justify-between gap-3 border-b border-neutral-200 px-5">
         <div className="flex min-w-0 items-center gap-2">
-          {onClose && (
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Tutup menu"
-              className="-ml-2 flex size-8 shrink-0 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900"
-            >
-              <X className="size-5" aria-hidden />
-            </button>
-          )}
-          <Link
+            <Link
             href="/"
             className="font-display text-lg font-semibold tracking-tight text-neutral-900"
           >
@@ -147,7 +140,11 @@ function SidebarContent({
           </Link>
         </div>
         <Link href="/settings/subscription" aria-label="Lihat langganan">
-          <Badge variant={tierVariant}>{tierLabel}</Badge>
+          <Badge variant={tierVariant} className="inline-flex items-center gap-1">
+            {plan === "pro" && <Zap className="size-3" aria-hidden />}
+            {plan === "bisnis" && <Building2 className="size-3" aria-hidden />}
+            {tierLabel}
+          </Badge>
         </Link>
       </div>
 
@@ -193,10 +190,20 @@ function SidebarContent({
             />
             <NavGroup
               label="Lainnya"
-              items={[{ label: "Bantuan", href: "/help", icon: HelpCircle }]}
+              items={[{ label: "Bantuan", href: "/help", icon: HelpCircle, external: true }]}
               pathname={pathname}
             />
           </>
+        ) : me.store_role === "staff" ? (
+          // Staff members: operasional only — orders + products
+          <NavGroup
+            label="Menu"
+            items={[
+              { label: "Pesanan", href: "/orders", icon: ShoppingBag },
+              { label: "Produk", href: "/products", icon: Package },
+            ]}
+            pathname={pathname}
+          />
         ) : (
           <>
             <NavGroup label="Menu" items={primaryNav} pathname={pathname} />
@@ -301,6 +308,7 @@ function NavGroup({
               <Link
                 href={item.href}
                 aria-current={active ? "page" : undefined}
+                {...(item.external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
                 className={cn(
                   "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
                   active

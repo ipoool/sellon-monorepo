@@ -10,6 +10,7 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/sellon/sellon/api/internal/ai"
 	"github.com/sellon/sellon/api/internal/audit"
 	"github.com/sellon/sellon/api/internal/auth"
 	"github.com/sellon/sellon/api/internal/config"
@@ -92,7 +93,8 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	bankAccountHandler := handler.NewBankAccountHandler(bankAccounts, stores, auditLogger, logger)
 	categoryHandler := handler.NewCategoryHandler(categories, stores, auditLogger, logger)
 	promoHandler := handler.NewPromoHandler(promos, stores, subscriptions, planRepo, auditLogger, logger)
-	reportsHandler := handler.NewReportsHandler(stores, reports, logger)
+	anthropicClient := ai.NewAnthropicClient(cfg.AnthropicAPIKey, logger)
+	reportsHandler := handler.NewReportsHandler(stores, reports, orders, subscriptions, anthropicClient, logger)
 	subscriptionHandler := handler.NewSubscriptionHandler(
 		subscriptions, stores, products, orders, users, planRepo,
 		midtransClient, cfg.PlatformMidtransServerKey, cfg.PlatformMidtransSandbox,
@@ -104,7 +106,8 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	platformWebhookHandler := handler.NewPlatformWebhookHandler(
 		subscriptions, cfg.PlatformMidtransServerKey, auditLogger, logger,
 	)
-	staffHandler := handler.NewStaffHandler(stores, memberships, users, subscriptions, planRepo, auditLogger, logger)
+	staffHandler := handler.NewStaffHandler(stores, memberships, users, subscriptions, planRepo, mailer, publicWebURL, auditLogger, logger)
+	domainHandler := handler.NewDomainHandler(stores, subscriptions, auditLogger, cfg.CnameTarget, logger)
 	auditHandler := handler.NewAuditHandler(auditRepo, stores, users, logger)
 	adminHandler := handler.NewAdminHandler(
 		users, stores, adminRepo, platformAuditRepo, auditRepo, subscriptions,
@@ -138,6 +141,11 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 		// City autocomplete — public so both buyer checkout and seller
 		// settings can reach it.
 		r.Get("/cities/search", citiesHandler.Search)
+
+		// Public domain → slug resolution for Next.js middleware.
+		// Must be registered BEFORE /storefront/{slug} so chi resolves
+		// the static segment "domain-lookup" before the wildcard {slug}.
+		r.Get("/storefront/domain-lookup", storefrontHandler.DomainLookup)
 
 		// Public storefront (no auth)
 		r.Route("/storefront/{slug}", func(r chi.Router) {
@@ -178,6 +186,10 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 					r.Put("/", storeHandler.Update)
 					r.Put("/shipping", storeHandler.UpdateShipping)
 					r.Put("/storefront", storeHandler.UpdateStorefront)
+					r.Put("/segments", storeHandler.UpdateSegments)
+					r.Put("/custom-domain", domainHandler.Set)
+					r.Post("/custom-domain/verify", domainHandler.Verify)
+					r.Delete("/custom-domain", domainHandler.Delete)
 				})
 
 				r.Route("/products", func(r chi.Router) {
@@ -252,6 +264,8 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 
 				r.Route("/reports", func(r chi.Router) {
 					r.Get("/overview", reportsHandler.Overview)
+					r.Get("/export", reportsHandler.Export)
+					r.Post("/ai-insight", reportsHandler.AiInsight)
 				})
 
 				r.Route("/subscription", func(r chi.Router) {

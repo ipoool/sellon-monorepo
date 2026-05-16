@@ -673,6 +673,16 @@ func (h *ProductHandler) Duplicate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Optional body: { "name": "..." } — if provided, use as the copy name.
+	var body struct {
+		Name string `json:"name"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	copyName := strings.TrimSpace(body.Name)
+	if copyName == "" {
+		copyName = src.Name + " (Salinan)"
+	}
+
 	// Find a free slug. Try "{slug}-salinan", then "-salinan-2", "-salinan-3", …
 	newSlug := src.Slug + "-salinan"
 	for n := 2; ; n++ {
@@ -698,7 +708,7 @@ func (h *ProductHandler) Duplicate(w http.ResponseWriter, r *http.Request) {
 	copyIn := repository.SaveProductInput{
 		StoreID:           store.ID,
 		CategoryID:        src.CategoryID,
-		Name:              src.Name + " (Salinan)",
+		Name:              copyName,
 		Slug:              newSlug,
 		Description:       src.Description,
 		PriceCents:        src.PriceCents,

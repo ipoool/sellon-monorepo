@@ -41,6 +41,7 @@ type StoreInvite struct {
 	InvitedBy  *uuid.UUID
 	AcceptedAt *time.Time
 	CreatedAt  time.Time
+	ExpiresAt  time.Time
 }
 
 type MembershipRepo struct {
@@ -153,25 +154,60 @@ func (r *MembershipRepo) CreateInvite(ctx context.Context, storeID uuid.UUID, em
 		return nil, errors.New("email kosong")
 	}
 	row := r.pool.QueryRow(ctx, `
-		INSERT INTO store_invites (store_id, email, role, invited_by)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id, store_id, email, role, invited_by, accepted_at, created_at
+		INSERT INTO store_invites (store_id, email, role, invited_by, expires_at)
+		VALUES ($1, $2, $3, $4, now() + interval '7 days')
+		RETURNING id, store_id, email, role, invited_by, accepted_at, created_at, expires_at
 	`, storeID, email, string(role), invitedBy)
 	var inv StoreInvite
 	var roleStr string
 	if err := row.Scan(&inv.ID, &inv.StoreID, &inv.Email, &roleStr,
-		&inv.InvitedBy, &inv.AcceptedAt, &inv.CreatedAt); err != nil {
+		&inv.InvitedBy, &inv.AcceptedAt, &inv.CreatedAt, &inv.ExpiresAt); err != nil {
 		return nil, err
 	}
 	inv.Role = Role(roleStr)
 	return &inv, nil
 }
 
+// GetUserStoreRole returns the store-level role of a user across any store.
+// Used by auth/me to expose store_role without requiring a store ID.
+// Returns ("", "", ErrMembershipNotFound) if the user has no store membership.
+func (r *MembershipRepo) GetUserStoreRole(ctx context.Context, userID uuid.UUID) (storeID uuid.UUID, role Role, err error) {
+	var roleStr string
+	err = r.pool.QueryRow(ctx,
+		`SELECT store_id, role FROM store_members WHERE user_id = $1 LIMIT 1`,
+		userID,
+	).Scan(&storeID, &roleStr)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.UUID{}, "", ErrMembershipNotFound
+	}
+	if err != nil {
+		return uuid.UUID{}, "", err
+	}
+	return storeID, Role(roleStr), nil
+}
+
+// HasPendingInvite returns true if there is already a non-expired, unaccepted
+// invite for this email in the given store.
+func (r *MembershipRepo) HasPendingInvite(ctx context.Context, storeID uuid.UUID, email string) (bool, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	var exists bool
+	err := r.pool.QueryRow(ctx, `
+		SELECT EXISTS(
+		    SELECT 1 FROM store_invites
+		    WHERE store_id = $1
+		      AND LOWER(email) = $2
+		      AND accepted_at IS NULL
+		      AND expires_at > now()
+		)
+	`, storeID, email).Scan(&exists)
+	return exists, err
+}
+
 func (r *MembershipRepo) ListInvitesByStore(ctx context.Context, storeID uuid.UUID) ([]StoreInvite, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, store_id, email, role, invited_by, accepted_at, created_at
+		SELECT id, store_id, email, role, invited_by, accepted_at, created_at, expires_at
 		FROM store_invites
-		WHERE store_id = $1 AND accepted_at IS NULL
+		WHERE store_id = $1 AND accepted_at IS NULL AND expires_at > now()
 		ORDER BY created_at DESC
 	`, storeID)
 	if err != nil {
@@ -183,7 +219,7 @@ func (r *MembershipRepo) ListInvitesByStore(ctx context.Context, storeID uuid.UU
 		var inv StoreInvite
 		var role string
 		if err := rows.Scan(&inv.ID, &inv.StoreID, &inv.Email, &role,
-			&inv.InvitedBy, &inv.AcceptedAt, &inv.CreatedAt); err != nil {
+			&inv.InvitedBy, &inv.AcceptedAt, &inv.CreatedAt, &inv.ExpiresAt); err != nil {
 			return nil, err
 		}
 		inv.Role = Role(role)
@@ -222,7 +258,7 @@ func (r *MembershipRepo) AcceptInvitesForEmail(ctx context.Context, userID uuid.
 
 	rows, err := tx.Query(ctx, `
 		SELECT id, store_id, role FROM store_invites
-		WHERE LOWER(email) = $1 AND accepted_at IS NULL
+		WHERE LOWER(email) = $1 AND accepted_at IS NULL AND expires_at > now()
 	`, email)
 	if err != nil {
 		return 0, err

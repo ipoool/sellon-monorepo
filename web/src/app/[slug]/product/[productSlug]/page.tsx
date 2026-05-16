@@ -8,6 +8,7 @@ import { Container } from "@/components/layout/container";
 import { Badge } from "@/components/ui/badge";
 import { AddToCartPanel } from "@/components/storefront/add-to-cart-panel";
 import { BuyerShareButton } from "@/components/storefront/buyer-share-button";
+import { ProductPhotoGallery } from "@/components/storefront/product-photo-gallery";
 import { formatRupiah } from "@/lib/format";
 import { themeStyleForHue } from "@/lib/storefront-theme";
 
@@ -132,34 +133,10 @@ export default async function ProductDetailPage({
           <div className="grid gap-8 lg:grid-cols-12">
             {/* Photos */}
             <div className="lg:col-span-7">
-              <div className="relative aspect-square overflow-hidden rounded-xl border border-neutral-200 bg-neutral-100">
-                {product.photo_urls[0] ? (
-                  <NextImage
-                    src={product.photo_urls[0]}
-                    alt={product.name}
-                    fill
-                    className="object-cover"
-                  />
-                ) : (
-                  <div className="flex size-full items-center justify-center text-neutral-400">
-                    <Package className="size-16" aria-hidden />
-                  </div>
-                )}
-              </div>
-              {product.photo_urls.length > 1 && (
-                <div className="mt-3 grid grid-cols-5 gap-2">
-                  {product.photo_urls.slice(1).map((url, i) => (
-                    <NextImage
-                      key={url}
-                      src={url}
-                      alt={`${product.name} foto ${i + 2}`}
-                      width={150}
-                      height={150}
-                      className="aspect-square w-full rounded-lg border border-neutral-200 object-cover"
-                    />
-                  ))}
-                </div>
-              )}
+              <ProductPhotoGallery
+                photoUrls={product.photo_urls}
+                productName={product.name}
+              />
             </div>
 
             {/* Detail + checkout */}

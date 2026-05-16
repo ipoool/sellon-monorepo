@@ -101,8 +101,15 @@ func (c *MidtransClient) CreateSnapTransaction(in SnapTransactionInput) (*SnapRe
 	respBody, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode >= 400 {
-		// Midtrans returns: { "error_messages": [...], "status_code": "..." }
-		return nil, fmt.Errorf("midtrans %d: %s", resp.StatusCode, string(respBody))
+		// Translate Midtrans HTTP errors to user-friendly messages.
+		switch resp.StatusCode {
+		case http.StatusUnauthorized, http.StatusForbidden:
+			return nil, fmt.Errorf("kunci API Midtrans tidak valid atau tidak sesuai mode aktif (sandbox/production) — periksa Pengaturan Pembayaran")
+		case http.StatusBadRequest:
+			return nil, fmt.Errorf("data pesanan ditolak Midtrans — pastikan informasi pesanan lengkap")
+		default:
+			return nil, fmt.Errorf("koneksi ke Midtrans gagal — coba lagi dalam beberapa saat")
+		}
 	}
 
 	var out SnapResponse
@@ -172,7 +179,7 @@ func (c *MidtransClient) Ping(serverKey string, isSandbox bool) error {
 	case http.StatusOK:
 		return nil
 	case http.StatusUnauthorized, http.StatusForbidden:
-		return fmt.Errorf("server key ditolak Midtrans (%d) — pastikan key benar dan cocok dengan mode (sandbox/production)", resp.StatusCode)
+		return fmt.Errorf("server key Midtrans ditolak — pastikan key benar dan cocok dengan mode aktif (sandbox/production)")
 	case http.StatusNotFound:
 		// /v2/ping doesn't exist on all envs; treat 404 as "auth header was
 		// processed" (otherwise would be 401). Best-effort success.

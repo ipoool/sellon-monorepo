@@ -34,6 +34,15 @@ export type Store = {
   show_hours_public?: boolean;
   show_social_public?: boolean;
   footer_text?: string;
+  segment_vip_threshold?: number;
+  segment_loyal_threshold?: number;
+  segment_baru_name?: string;
+  segment_reguler_name?: string;
+  segment_loyal_name?: string;
+  segment_vip_name?: string;
+  custom_domain?: string | null;
+  domain_status?: "none" | "pending" | "active" | "failed";
+  domain_verified_at?: string | null;
 };
 
 export type BankAccount = {

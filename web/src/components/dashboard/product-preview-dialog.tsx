@@ -121,16 +121,14 @@ export function ProductPreviewDialog({
     <dialog
       ref={dialogRef}
       aria-labelledby="product-preview-title"
-      className="fixed left-1/2 top-1/2 m-0 max-h-[92vh] w-[min(960px,95vw)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-xl border border-neutral-200 bg-neutral-50 p-0 shadow-popout backdrop:bg-neutral-900/50 backdrop:backdrop-blur-sm"
+      className="fixed left-1/2 top-1/2 m-0 max-h-[96svh] w-[min(960px,100vw)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-none border-0 bg-neutral-50 p-0 shadow-popout backdrop:bg-neutral-900/50 backdrop:backdrop-blur-sm sm:max-h-[92vh] sm:w-[min(960px,95vw)] sm:rounded-xl sm:border sm:border-neutral-200"
     >
-      <div className="flex items-center justify-between gap-3 border-b border-neutral-200 bg-white px-5 py-3">
-        <div className="flex items-center gap-2">
-          <Badge variant="brand">Preview POV Pembeli</Badge>
-          <p className="text-xs text-neutral-600">
-            Tampilan persis seperti yang dilihat customer di toko publik.
-          </p>
-        </div>
-        <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-2 border-b border-neutral-200 bg-white px-4 py-2.5 sm:px-5 sm:py-3">
+        <Badge variant="brand" className="shrink-0">Preview</Badge>
+        <p className="hidden flex-1 text-xs text-neutral-600 sm:block">
+          Tampilan persis seperti yang dilihat customer di toko publik.
+        </p>
+        <div className="ml-auto flex items-center gap-1.5">
           {storeSlug && product && (
             <a
               href={`/${storeSlug}/product/${product.slug}`}
@@ -139,7 +137,8 @@ export function ProductPreviewDialog({
               className="inline-flex items-center gap-1.5 rounded-md border border-neutral-200 bg-white px-2.5 py-1.5 text-xs font-medium text-neutral-700 transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-brand-700"
             >
               <ExternalLink className="size-3.5" aria-hidden />
-              Buka di toko
+              <span className="hidden sm:inline">Buka di toko</span>
+              <span className="sm:hidden">Toko</span>
             </a>
           )}
           <button

@@ -122,7 +122,7 @@ export default async function PesananPage({
             <Select name="payment_status" defaultValue={paymentStatus}>
               <option value="">Semua pembayaran</option>
               <option value="unpaid">Belum bayar</option>
-              <option value="pending">Menunggu</option>
+              <option value="pending">Bukti dikirim</option>
               <option value="paid">Lunas</option>
               <option value="failed">Gagal</option>
               <option value="refunded">Refund</option>

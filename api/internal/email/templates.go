@@ -244,3 +244,92 @@ func wrapHTML(body string) string {
   </table>
 </body></html>`
 }
+
+// === Staff invitation ===
+
+type StaffInviteData struct {
+	StoreName    string
+	InviterName  string
+	InviteeEmail string
+	Role         string // "Staf" or "Admin"
+	LoginURL     string
+	ExpiryDays   int
+}
+
+func RenderStaffInvite(d StaffInviteData) (subject, text, htmlBody string) {
+	subject = fmt.Sprintf("[%s] Kamu diundang bergabung sebagai %s Toko",
+		d.StoreName, d.Role)
+
+	accessDesc := "mengelola seluruh operasional toko"
+	if d.Role == "Staf" {
+		accessDesc = "mengelola pesanan dan produk toko"
+	}
+
+	text = fmt.Sprintf(`Halo!
+
+%s mengundangmu untuk bergabung sebagai %s di toko "%s".
+
+Sebagai %s, kamu bisa %s.
+
+Cara bergabung:
+1. Klik link di bawah (atau buka %s)
+2. Login dengan akun Google yang menggunakan email %s
+3. Kamu akan langsung masuk sebagai %s toko ini
+
+%s
+
+Undangan ini berlaku selama %d hari sejak dikirim.
+Jika sudah kadaluarsa, minta pemilik toko untuk mengundang ulang.
+
+— Tim SellOn
+`,
+		d.InviterName, d.Role, d.StoreName,
+		d.Role, accessDesc,
+		d.LoginURL, d.InviteeEmail, d.Role,
+		d.LoginURL,
+		d.ExpiryDays,
+	)
+
+	htmlBody = wrapHTML(fmt.Sprintf(`
+<h2 style="margin:0 0 8px;font-size:20px;color:#0f172a;">Kamu diundang! 🎉</h2>
+<p style="margin:0 0 20px;color:#475569;">
+  <strong>%s</strong> mengundangmu untuk bergabung sebagai <strong>%s</strong>
+  di toko <strong>%s</strong>.
+</p>
+
+<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%%;border-collapse:collapse;background:#f8fafc;border-radius:8px;padding:16px;margin:0 0 24px;">
+  <tr><td style="padding:6px 12px;color:#64748b;">Toko</td><td style="padding:6px 12px;font-weight:600;color:#0f172a;">%s</td></tr>
+  <tr><td style="padding:6px 12px;color:#64748b;">Role</td><td style="padding:6px 12px;color:#0f172a;">%s</td></tr>
+  <tr><td style="padding:6px 12px;color:#64748b;">Akses</td><td style="padding:6px 12px;color:#0f172a;">%s</td></tr>
+  <tr><td style="padding:6px 12px;color:#64748b;">Email login</td><td style="padding:6px 12px;font-family:monospace;color:#0f172a;">%s</td></tr>
+</table>
+
+<h3 style="margin:0 0 12px;font-size:15px;color:#0f172a;">Cara bergabung:</h3>
+<ol style="margin:0 0 24px;padding-left:20px;color:#334155;line-height:1.8;">
+  <li>Klik tombol <strong>"Gabung ke Toko"</strong> di bawah</li>
+  <li>Login dengan akun Google yang menggunakan email <strong>%s</strong></li>
+  <li>Kamu akan langsung masuk sebagai <strong>%s</strong> toko ini</li>
+</ol>
+
+<p style="margin:0 0 28px;text-align:center;">
+  <a href="%s" style="display:inline-block;background:#10b981;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;font-size:15px;">Gabung ke Toko →</a>
+</p>
+
+<p style="margin:0;font-size:12px;color:#94a3b8;text-align:center;">
+  Undangan ini berlaku <strong>%d hari</strong> sejak dikirim. Jika sudah kadaluarsa,
+  minta pemilik toko untuk mengundang ulang.
+</p>`,
+		html.EscapeString(d.InviterName),
+		html.EscapeString(d.Role),
+		html.EscapeString(d.StoreName),
+		html.EscapeString(d.StoreName),
+		html.EscapeString(d.Role),
+		html.EscapeString(accessDesc),
+		html.EscapeString(d.InviteeEmail),
+		html.EscapeString(d.InviteeEmail),
+		html.EscapeString(d.Role),
+		html.EscapeString(d.LoginURL),
+		d.ExpiryDays,
+	))
+	return
+}

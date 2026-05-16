@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { showError, showSuccess } from "@/lib/toast";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -77,12 +77,9 @@ function isValidEmail(input: string): boolean {
 
 function buildPaymentOptions(payment: StorefrontPayment): PaymentOption[] {
   const out: PaymentOption[] = [];
+  // Single unified Midtrans Snap option — method selection handled by Snap itself.
   if (payment?.has_midtrans) {
-    const m = payment.midtrans_methods ?? [];
-    if (m.includes("qris")) out.push({ value: "qris", label: "QRIS (semua e-wallet)" });
-    if (m.includes("bank_transfer")) out.push({ value: "va", label: "Virtual Account" });
-    if (m.includes("gopay")) out.push({ value: "gopay", label: "GoPay" });
-    if (m.includes("shopeepay")) out.push({ value: "shopeepay", label: "ShopeePay" });
+    out.push({ value: "midtrans_snap", label: "Pembayaran Otomatis" });
   }
   if (payment?.has_manual_bank) {
     out.push({ value: "transfer", label: "Transfer Manual" });
@@ -136,11 +133,16 @@ export function CheckoutWizard({
   const { items, subtotal, isAllDigital, hasDigital, isHydrated, clear } = useCart();
   const paymentMethods = buildPaymentOptions(payment);
 
+  // Prevent redirect-to-cart race: when submit() calls clear() then push(),
+  // the empty-cart useEffect would fire before the push completes. This ref
+  // marks "order placed — skip the empty-cart redirect".
+  const orderPlacedRef = useRef(false);
+
   // Cart-empty guard. Cart context exposes isHydrated so we know when
   // localStorage has been read; before that, items is the empty default
   // and a redirect would flash on every fresh visit.
   useEffect(() => {
-    if (isHydrated && items.length === 0) {
+    if (isHydrated && items.length === 0 && !orderPlacedRef.current) {
       replace(`/${storeSlug}/cart`);
     }
   }, [isHydrated, items.length, replace, storeSlug]);
@@ -411,6 +413,7 @@ export function CheckoutWizard({
       });
       const url = waLink(storeWhatsApp || "", message);
       if (url) window.open(url, "_blank", "noopener,noreferrer");
+      orderPlacedRef.current = true;
       clear();
       push(`/${storeSlug}/order/${data.order_number}`);
     } catch (err) {

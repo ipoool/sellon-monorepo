@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import {
   Store,
   CreditCard,
+  Globe,
   Truck,
   MessageCircle,
   Tag,
@@ -18,6 +19,7 @@ import { cn } from "@/lib/utils";
 const tabs = [
   { label: "Profil Toko", href: "/settings/store", icon: Store },
   { label: "Storefront", href: "/settings/storefront", icon: Palette },
+  { label: "Domain", href: "/settings/domain", icon: Globe },
   { label: "Pembayaran", href: "/settings/payment", icon: CreditCard },
   { label: "Kategori", href: "/settings/categories", icon: Tag },
   { label: "Pengiriman", href: "/settings/shipping", icon: Truck },

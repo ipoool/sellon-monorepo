@@ -48,7 +48,7 @@ export function DashboardShell({
       />
 
       <div className={cn("lg:pl-60")}>
-        <header className="sticky top-[calc(var(--imp-h,0px)+var(--exp-h,0px)+var(--sbx-h,0px))] z-20 border-b border-neutral-200 bg-white/85 backdrop-blur">
+        <header className="sticky top-[var(--banners-h,0px)] z-20 border-b border-neutral-200 bg-white/85 backdrop-blur">
           <div className="flex h-16 items-center gap-3 px-4 sm:px-6 lg:px-8">
             <button
               type="button"
@@ -60,7 +60,7 @@ export function DashboardShell({
             </button>
 
             <div className="min-w-0 flex-1">
-              <h1 className="font-display text-lg font-semibold tracking-tight text-neutral-900">
+              <h1 className="truncate font-display text-lg font-semibold tracking-tight text-neutral-900">
                 {pageTitle}
               </h1>
               {pageSubtitle && (

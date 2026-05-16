@@ -10,6 +10,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import type { Promo, PromoType } from "@/lib/types";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -249,16 +250,14 @@ export function PromoForm({ initial, onSuccess }: Props) {
               Promo nonaktif tidak bisa di-redeem oleh pelanggan.
             </p>
           </div>
-          <label className="flex cursor-pointer items-center gap-2">
-            <input
-              type="checkbox"
-              checked={isActive}
-              onChange={(e) => setIsActive(e.target.checked)}
-              className="size-4 rounded border-neutral-300 accent-brand-500"
-            />
-            <span className="text-sm font-medium">
+          <label className="flex cursor-pointer items-center gap-2.5">
+            <span className="text-sm font-medium text-neutral-600">
               {isActive ? "Aktif" : "Nonaktif"}
             </span>
+            <Switch
+              checked={isActive}
+              onChange={(e) => setIsActive(e.target.checked)}
+            />
           </label>
         </div>
       </Card>

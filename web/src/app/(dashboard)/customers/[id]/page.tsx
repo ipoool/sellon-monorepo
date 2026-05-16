@@ -86,16 +86,16 @@ export default async function PelangganDetailPage({
       me={me}
       pageTitle={customer.name}
       pageSubtitle={customer.whatsapp_number || "—"}
-      actions={
+    >
+      <div className="mb-4">
         <Link
           href="/customers"
           className="inline-flex items-center gap-1.5 text-sm font-medium text-neutral-600 hover:text-neutral-900"
         >
           <ArrowLeft className="size-4" aria-hidden />
-          Semua Pelanggan
+          Kembali ke daftar pelanggan
         </Link>
-      }
-    >
+      </div>
       <div className="grid gap-6 lg:grid-cols-12">
         {/* Profile column */}
         <div className="flex flex-col gap-6 lg:col-span-5">

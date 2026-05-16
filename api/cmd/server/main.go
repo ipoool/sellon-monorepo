@@ -57,9 +57,10 @@ func main() {
 	// Start background schedulers.
 	mailer := email.NewMailer(cfg.MailtrapAPIKey, cfg.FromEmail, cfg.FromName, logger)
 	users := repository.NewUserRepo(pool)
+	schedulerState := repository.NewSchedulerStateRepo(pool)
 	tipGen := email.NewTipGenerator(cfg.AnthropicAPIKey, logger)
 	dashURL := cfg.PrimaryWebOrigin() + "/dashboard"
-	scheduler.NewWeeklyTipsJob(users, mailer, tipGen, dashURL, logger).Start(ctx)
+	scheduler.NewWeeklyTipsJob(users, schedulerState, mailer, tipGen, dashURL, logger).Start(ctx)
 
 	slog.Info("server started", "port", cfg.Port, "env", cfg.Env)
 

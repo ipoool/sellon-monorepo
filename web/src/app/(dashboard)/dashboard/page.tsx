@@ -16,6 +16,7 @@ import {
 
 import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { Button } from "@/components/ui/button";
+import { CopyUrlButton } from "@/components/dashboard/copy-url-button";
 import { Stat } from "@/components/ui/stat";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -311,9 +312,7 @@ export default async function DasborPage() {
               <div className="flex flex-1 items-center rounded-lg border border-neutral-200 bg-white px-3 text-sm text-neutral-700">
                 <span className="truncate">{storeUrl}</span>
               </div>
-              <Button size="sm" aria-label="Salin link">
-                <Copy className="size-4" aria-hidden />
-              </Button>
+              <CopyUrlButton url={storeUrl} />
             </div>
 
             <div className="mt-4 flex items-center gap-1.5 text-xs text-neutral-600">

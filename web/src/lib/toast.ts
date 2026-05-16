@@ -22,7 +22,7 @@ const ERROR_PATTERNS: Array<[RegExp, string]> = [
   [/fetch failed|network/i, "Tidak bisa terhubung ke server. Coba lagi sebentar."],
   [/connection\s*reset|refused|reset by peer/i, "Koneksi terputus. Cek internet kamu, lalu coba lagi."],
   [/timeout|deadline exceeded/i, "Server lama merespon. Coba lagi sebentar."],
-  [/unauthorized|401/i, "Sesi kamu sudah habis. Silakan login lagi."],
+  [/\bunauthorized\b|HTTP 401\b/i, "Sesi kamu sudah habis. Silakan login lagi."],
   [/forbidden|403/i, "Kamu tidak punya akses untuk aksi ini."],
   [/not\s*found|404/i, "Data tidak ditemukan."],
   [/conflict|409|duplicate|already exists/i, "Data ini sudah ada sebelumnya."],

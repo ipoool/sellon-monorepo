@@ -43,7 +43,7 @@ const paymentBadge: Record<
   { variant: "success" | "default" | "warning"; label: string }
 > = {
   unpaid: { variant: "default", label: "Belum bayar" },
-  pending: { variant: "warning", label: "Menunggu" },
+  pending: { variant: "warning", label: "Bukti dikirim — verifikasi" },
   paid: { variant: "success", label: "Lunas" },
   failed: { variant: "default", label: "Gagal" },
   refunded: { variant: "default", label: "Refund" },

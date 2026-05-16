@@ -81,6 +81,10 @@ type Config struct {
 	// email content via Claude. Without this key the scheduler falls
 	// back to the built-in static tip pool.
 	AnthropicAPIKey string
+
+	// CnameTarget is the DNS CNAME value sellers must point their custom
+	// domain at. Shown on the settings/domain page. Defaults to cname.sellon.id.
+	CnameTarget string
 }
 
 func Load() (*Config, error) {
@@ -99,6 +103,7 @@ func Load() (*Config, error) {
 	v.SetDefault("platform_midtrans_sandbox", true)
 	v.SetDefault("from_name", "SellOn")
 	v.SetDefault("postgres_sslmode", "disable")
+	v.SetDefault("cname_target", "cname.sellon.id")
 
 	cfg := &Config{
 		Port:           v.GetString("api_port"),
@@ -138,6 +143,7 @@ func Load() (*Config, error) {
 		TwilioAuthToken:           v.GetString("twilio_auth_token"),
 		TwilioWhatsAppFrom:        v.GetString("twilio_whatsapp_from"),
 		AnthropicAPIKey:           v.GetString("anthropic_api_key"),
+		CnameTarget:               v.GetString("cname_target"),
 	}
 
 	if cfg.JWTSecret == "" {
