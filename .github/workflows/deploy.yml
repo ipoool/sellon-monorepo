@@ -1,0 +1,110 @@
+name: Build & Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "api/**"
+      - "web/**"
+      - "docker-compose.yml"
+  workflow_dispatch:
+
+# GITHUB_TOKEN perlu write ke packages supaya bisa push ke GHCR.
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # Deteksi mana yang berubah supaya tidak build dua-duanya kalau cuma
+  # satu app yang kena commit. workflow_dispatch selalu build keduanya.
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.filter.outputs.api }}
+      web: ${{ steps.filter.outputs.web }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            api: ["api/**"]
+            web: ["web/**"]
+
+  build-api:
+    needs: detect
+    if: needs.detect.outputs.api == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./api
+          target: prod
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/sellon-api:latest
+            ghcr.io/${{ github.repository_owner }}/sellon-api:${{ github.sha }}
+          # Registry cache — drastis kurangi waktu build ulang kalau
+          # layer deps tidak berubah (go mod download, dsb).
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/sellon-api:buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/sellon-api:buildcache,mode=max
+
+  build-web:
+    needs: detect
+    if: needs.detect.outputs.web == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # .env.production wajib ada di build context — Next.js bake nilai
+      # NEXT_PUBLIC_* ke dalam bundle saat pnpm build. Simpan seluruh isi
+      # file sebagai secret WEB_ENV_PRODUCTION di GitHub repo settings.
+      - name: Write web/.env.production
+        run: printf '%s' "$WEB_ENV" > web/.env.production
+        env:
+          WEB_ENV: ${{ secrets.WEB_ENV_PRODUCTION }}
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./web
+          target: prod
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/sellon-web:latest
+            ghcr.io/${{ github.repository_owner }}/sellon-web:${{ github.sha }}
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/sellon-web:buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/sellon-web:buildcache,mode=max
+
+  deploy:
+    needs: [build-api, build-web]
+    # Jalan kalau:
+    #   - tidak di-cancel
+    #   - masing-masing build sukses ATAU di-skip (tidak ada perubahan)
+    #   - minimal satu build benar-benar sukses (ada image baru)
+    if: |
+      !cancelled() &&
+      (needs.build-api.result == 'success' || needs.build-api.result == 'skipped') &&
+      (needs.build-web.result == 'success' || needs.build-web.result == 'skipped') &&
+      (needs.build-api.result == 'success' || needs.build-web.result == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: cd /var/www/app && ./deploy.sh

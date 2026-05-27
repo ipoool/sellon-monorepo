@@ -20,6 +20,7 @@ import {
   X,
   Zap,
   Crown,
+  Truck,
   type LucideIcon,
 } from "lucide-react";
 
@@ -132,11 +133,12 @@ function SidebarContent({
     <>
       <div className="flex h-16 items-center justify-between gap-3 border-b border-neutral-200 px-5">
         <div className="flex min-w-0 items-center gap-2">
-            <Link
-            href="/"
-            className="font-display text-lg font-semibold tracking-tight text-neutral-900"
-          >
-            SellOn
+            <Link href="/" aria-label="SellOn — Beranda">
+            <img
+              src="/sellon-logo.svg"
+              alt="SellOn"
+              className="h-7 w-auto"
+            />
           </Link>
         </div>
         <Link href="/settings/subscription" aria-label="Lihat langganan">
@@ -207,6 +209,17 @@ function SidebarContent({
         ) : (
           <>
             <NavGroup label="Menu" items={primaryNav} pathname={pathname} />
+            <NavGroup
+              label="Program Reseller"
+              labelHref="/reseller/program"
+              items={[
+                { label: "Program Supplier", href: "/reseller/program", icon: Store },
+                { label: "Order Dropship", href: "/reseller/orders", icon: Truck },
+                { label: "Supplier Saya", href: "/reseller/suppliers", icon: Users },
+                { label: "Katalog Reseller", href: "/reseller/catalog", icon: Package },
+              ]}
+              pathname={pathname}
+            />
             <NavGroup label="Lainnya" items={secondaryNav} pathname={pathname} />
           </>
         )}
@@ -258,18 +271,29 @@ function RoleDot({ me }: { me: Me }) {
 
 function NavGroup({
   label,
+  labelHref,
   items,
   pathname,
 }: {
   label: string;
+  labelHref?: string;
   items: NavItem[];
   pathname: string;
 }) {
   return (
     <div>
-      <p className="px-3 pb-2 text-xs font-semibold uppercase tracking-wider text-neutral-500">
-        {label}
-      </p>
+      {labelHref ? (
+        <Link
+          href={labelHref}
+          className="block px-3 pb-2 text-xs font-semibold uppercase tracking-wider text-neutral-500 hover:text-neutral-700"
+        >
+          {label}
+        </Link>
+      ) : (
+        <p className="px-3 pb-2 text-xs font-semibold uppercase tracking-wider text-neutral-500">
+          {label}
+        </p>
+      )}
       <ul className="flex flex-col gap-0.5">
         {items.map((item) => {
           // "Home" entries match exactly only — otherwise the seller

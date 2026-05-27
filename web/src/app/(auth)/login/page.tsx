@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ShieldCheck, Zap, Wallet, Sparkles } from "lucide-react";
+import { ShieldCheck, Zap, Wallet, Sparkles, Handshake } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -26,16 +26,21 @@ const benefits = [
   },
 ];
 
-export default async function MasukPage() {
+export default async function MasukPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ invite?: string }>;
+}) {
   const me = await getMe();
   if (me) {
-    // Platform admins go straight to /platform - they don't
-    // have (and don't need) a seller dasbor.
     if (me.role === "admin" && !me.is_impersonated) {
       redirect("/platform");
     }
     redirect("/dashboard");
   }
+
+  const { invite } = await searchParams;
+  const inviteCode = invite?.trim().toUpperCase() || undefined;
 
   return (
     <div className="grid min-h-svh lg:grid-cols-2">
@@ -43,46 +48,62 @@ export default async function MasukPage() {
       <div className="flex items-center justify-center px-4 py-12 sm:px-8 lg:px-12">
         <div className="w-full max-w-md">
           <div className="mb-8">
-            <Link
-              href="/"
-              className="font-display text-2xl font-semibold text-neutral-900"
-            >
-              SellOn
+            <Link href="/" aria-label="SellOn — Beranda">
+              <img
+                src="/sellon-logo.svg"
+                alt="SellOn"
+                className="h-8 w-auto"
+              />
             </Link>
-            <h1 className="mt-6 font-display text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
-              Masuk untuk mulai jualan
-            </h1>
-            <p className="mt-2 text-sm text-neutral-600">
-              Belum punya akun? Tenang - login pertama kali otomatis bikin akun
-              untukmu.
-            </p>
+
+            {inviteCode ? (
+              <>
+                <div className="mt-6 flex items-center gap-3 rounded-xl border border-brand-200 bg-brand-50 px-4 py-3">
+                  <Handshake className="size-5 shrink-0 text-brand-700" aria-hidden />
+                  <div>
+                    <p className="text-sm font-semibold text-brand-900">Kamu diundang jadi reseller!</p>
+                    <p className="text-xs text-brand-700">Login atau daftar untuk otomatis bergabung ke program.</p>
+                  </div>
+                </div>
+                <h1 className="mt-5 font-display text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
+                  Daftar & langsung mulai resell
+                </h1>
+                <p className="mt-2 text-sm text-neutral-600">
+                  Belum punya akun? Login pertama kali otomatis bikin akun — setelah itu langsung aktif sebagai reseller.
+                </p>
+              </>
+            ) : (
+              <>
+                <h1 className="mt-6 font-display text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
+                  Masuk untuk mulai jualan
+                </h1>
+                <p className="mt-2 text-sm text-neutral-600">
+                  Belum punya akun? Tenang - login pertama kali otomatis bikin akun untukmu.
+                </p>
+              </>
+            )}
           </div>
 
           <Card variant="default">
             <CardContent className="gap-6">
-              <ul className="flex flex-col gap-4">
-                {benefits.map(({ icon: Icon, title, description }) => (
-                  <li key={title} className="flex items-start gap-3">
-                    <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
-                      <Icon className="size-5" strokeWidth={2} aria-hidden />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-neutral-900">
-                        {title}
-                      </p>
-                      <p className="mt-0.5 text-sm leading-relaxed text-neutral-600">
-                        {description}
-                      </p>
-                    </div>
-                  </li>
-                ))}
-              </ul>
+              {!inviteCode && (
+                <ul className="flex flex-col gap-4">
+                  {benefits.map(({ icon: Icon, title, description }) => (
+                    <li key={title} className="flex items-start gap-3">
+                      <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
+                        <Icon className="size-5" strokeWidth={2} aria-hidden />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-neutral-900">{title}</p>
+                        <p className="mt-0.5 text-sm leading-relaxed text-neutral-600">{description}</p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
 
               <div className="relative my-2">
-                <div
-                  aria-hidden
-                  className="absolute inset-0 flex items-center"
-                >
+                <div aria-hidden className="absolute inset-0 flex items-center">
                   <span className="w-full border-t border-neutral-200" />
                 </div>
                 <div className="relative flex justify-center">
@@ -93,13 +114,10 @@ export default async function MasukPage() {
               </div>
 
               <div className="flex flex-col items-center gap-4">
-                <GoogleSignInButton />
+                <GoogleSignInButton inviteCode={inviteCode} />
                 <p className="text-center text-xs leading-relaxed text-neutral-500">
                   Dengan masuk, kamu menyetujui{" "}
-                  <Link
-                    href="/terms"
-                    className="font-medium text-brand-600 hover:text-brand-700"
-                  >
+                  <Link href="/terms" className="font-medium text-brand-600 hover:text-brand-700">
                     Syarat &amp; Ketentuan
                   </Link>{" "}
                   SellOn.

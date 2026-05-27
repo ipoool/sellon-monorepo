@@ -7,7 +7,7 @@ type Size = "sm" | "md" | "lg" | "icon";
 // Plain object pattern (no class-variance-authority — keeps deps minimal).
 const variantClasses: Record<Variant, string> = {
   default:
-    "bg-brand-500 text-white hover:bg-brand-600 active:bg-brand-700 shadow-soft",
+    "bg-brand-700 text-white hover:bg-brand-800 active:bg-brand-900 shadow-soft",
   secondary:
     "bg-neutral-100 text-neutral-900 hover:bg-neutral-200 active:bg-neutral-300",
   ghost:

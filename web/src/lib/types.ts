@@ -419,3 +419,85 @@ export type PlatformAuditEntry = {
   metadata: Record<string, unknown>;
   created_at: string;
 };
+
+// ─── Reseller / Dropship types ────────────────────────────────────────────────
+
+export type ResellerProgram = {
+  id: string;
+  supplier_store_id: string;
+  supplier_store_name: string;
+  name: string;
+  description: string;
+  invite_code: string;
+  is_active: boolean;
+  member_count: number;
+  product_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ResellerMembership = {
+  id: string;
+  program_id: string;
+  reseller_store_id: string;
+  is_active: boolean;
+  joined_at: string;
+  program_name: string;
+  supplier_store_id: string;
+  supplier_store_name: string;
+  product_count: number;
+};
+
+export type ProgramProduct = {
+  id: string;
+  program_id: string;
+  product_id: string;
+  reseller_price_cents: number;
+  is_active: boolean;
+  product_name: string;
+  product_slug: string;
+  photo_urls: string[];
+  stock: number;
+  product_status: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ResellerCatalogEntry = {
+  id: string;
+  membership_id: string;
+  program_product_id: string;
+  reseller_price_cents: number;
+  modal_cents: number;
+  is_active: boolean;
+  product_id: string;
+  product_name: string;
+  product_slug: string;
+  photo_urls: string[];
+  stock: number;
+  supplier_store_id: string;
+  supplier_store_name: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DropshipOrderItem = {
+  order_item_id: string;
+  order_id: string;
+  order_number: string;
+  order_created_at: string;
+  product_name: string;
+  variant_name: string;
+  quantity: number;
+  unit_price_cents: number;
+  reseller_cost_cents: number;
+  subtotal_cents: number;
+  customer_name: string;
+  customer_wa: string;
+  customer_address: string;
+  customer_city: string;
+  tracking_number: string;
+  shipped_at: string | null;
+  reseller_store_name: string;
+};
+

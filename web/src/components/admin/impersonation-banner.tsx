@@ -24,9 +24,6 @@ export function ImpersonationBanner({ me }: Props) {
   const [pending, setPending] = useState(false);
 
   if (!me.is_impersonated) return null;
-  // Hide on pages outside (dashboard) that might briefly receive this
-  // component during soft navigation (e.g. /setup).
-  if (pathname === "/setup") return null;
 
   async function exit() {
     setPending(true);

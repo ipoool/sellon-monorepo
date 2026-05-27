@@ -4,7 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { Trash2, Save, ArrowLeft, Plus, X, Layers, Star, Box, Download } from "lucide-react";
+import { Trash2, Save, ArrowLeft, Plus, X, Layers, Star, Box, Download, Info } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -330,7 +330,27 @@ export function ProdukForm({ initial }: Props) {
         </div>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="price">Harga (Rp) {hasVariants ? "" : "*"}</Label>
+            <div className="flex items-center gap-1.5">
+              <Label htmlFor="price">Harga (Rp) {hasVariants ? "" : "*"}</Label>
+              <span className="group relative inline-flex">
+                <Info
+                  className="size-3.5 cursor-help text-neutral-400 hover:text-neutral-600"
+                  aria-hidden
+                />
+                <span
+                  role="tooltip"
+                  className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-64 -translate-x-1/2 rounded-lg bg-neutral-900 px-3 py-2.5 text-xs leading-relaxed text-white opacity-0 shadow-popout transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
+                >
+                  <p className="font-semibold text-white">Pastikan harga sudah di atas HPP + margin</p>
+                  <p className="mt-1 text-neutral-200">
+                    Harga jual = HPP (bahan baku, kemasan, tenaga kerja) + margin keuntungan kamu.
+                  </p>
+                  <p className="mt-1 text-neutral-200">
+                    Kalau kamu aktifkan program reseller, harga ini juga jadi acuan diskon ke reseller — pastikan masih punya ruang margin.
+                  </p>
+                </span>
+              </span>
+            </div>
             <Input
               id="price"
               name="price"

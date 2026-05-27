@@ -8,6 +8,8 @@ import { HowItWorks } from "@/components/marketing/how-it-works";
 import { Testimonials } from "@/components/marketing/testimonials";
 import { Faq } from "@/components/marketing/faq";
 import { CtaBanner } from "@/components/marketing/cta-banner";
+import { BlogPreview } from "@/components/marketing/blog-preview";
+import { ResellerSection } from "@/components/marketing/reseller-section";
 import { getMe } from "@/lib/server-auth";
 import { publicServerApi } from "@/lib/server-api";
 import type { PublicPlan } from "@/lib/types";
@@ -125,7 +127,7 @@ export default async function Home() {
   const plans = plansRes?.plans?.length ? plansRes.plans : fallbackPlans;
 
   return (
-    <div className="landing-brand-cycle">
+    <div>
       <script
         type="application/ld+json"
         // eslint-disable-next-line react/no-danger
@@ -138,10 +140,12 @@ export default async function Home() {
         <Hero />
         <TrustBar />
         <Features />
+        <ResellerSection />
         <HowItWorks />
         <Pricing plans={plans} />
         <Testimonials />
         <Faq />
+        <BlogPreview />
         <CtaBanner />
       </main>
       <Footer />

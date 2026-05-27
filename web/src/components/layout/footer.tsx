@@ -29,7 +29,7 @@ const columns: FooterColumn[] = [
     links: [
       { label: "Tentang Kami", href: "/about" },
       { label: "Karir" },
-      { label: "Blog" },
+      { label: "Blog", href: "/blog" },
       { label: "Press Kit" },
     ],
   },
@@ -58,11 +58,12 @@ export function Footer() {
       <Container>
         <div className="grid gap-10 py-14 sm:grid-cols-2 lg:grid-cols-6">
           <div className="lg:col-span-2">
-            <Link
-              href="/"
-              className="font-display text-lg font-semibold tracking-tight text-neutral-900"
-            >
-              SellOn
+            <Link href="/" aria-label="SellOn — Beranda">
+              <img
+                src="/sellon-logo.svg"
+                alt="SellOn"
+                className="h-7 w-auto"
+              />
             </Link>
             <p className="mt-3 max-w-xs text-sm leading-relaxed text-neutral-600">
               Toko online untuk seller WhatsApp Indonesia. Pembeli pilih
@@ -73,7 +74,7 @@ export function Footer() {
               Pertanyaan?{" "}
               <a
                 href="mailto:halo@sellon.id"
-                className="font-medium text-brand-600 hover:text-brand-700"
+                className="font-medium text-brand-700 hover:text-brand-800"
               >
                 halo@sellon.id
               </a>
@@ -99,7 +100,7 @@ export function Footer() {
                   ) : (
                     <li
                       key={link.label}
-                      className="cursor-not-allowed text-neutral-400"
+                      className="cursor-not-allowed text-neutral-500"
                       title="Akan segera hadir"
                     >
                       {link.label}

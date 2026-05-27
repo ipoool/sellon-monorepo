@@ -131,64 +131,6 @@
 @property --color-brand-900 { syntax: "<color>"; inherits: true; initial-value: oklch(0.31 0.09 145); }
 @property --color-brand-950 { syntax: "<color>"; inherits: true; initial-value: oklch(0.21 0.06 145); }
 
-/* Landing brand cycle:
-   - Green stop  ≈ #3CC152 (oklch hue 145, our resting brand)
-   - Orange stop ≈ #FF6532 (oklch hue 35)
-   - Black stop  → grayscale, lightness ditarik turun untuk shade 400+
-*/
-@keyframes landing-brand-cycle {
-  0%, 100% {
-    --color-brand-50:  oklch(0.97 0.025 145);
-    --color-brand-100: oklch(0.94 0.06 145);
-    --color-brand-200: oklch(0.88 0.11 145);
-    --color-brand-300: oklch(0.81 0.15 145);
-    --color-brand-400: oklch(0.76 0.17 145);
-    --color-brand-500: oklch(0.71 0.18 145);
-    --color-brand-600: oklch(0.61 0.17 145);
-    --color-brand-700: oklch(0.51 0.15 145);
-    --color-brand-800: oklch(0.41 0.12 145);
-    --color-brand-900: oklch(0.31 0.09 145);
-    --color-brand-950: oklch(0.21 0.06 145);
-  }
-  33% {
-    --color-brand-50:  oklch(0.97 0.025 35);
-    --color-brand-100: oklch(0.94 0.06 35);
-    --color-brand-200: oklch(0.88 0.11 35);
-    --color-brand-300: oklch(0.81 0.16 35);
-    --color-brand-400: oklch(0.75 0.19 35);
-    --color-brand-500: oklch(0.70 0.20 35);
-    --color-brand-600: oklch(0.60 0.19 35);
-    --color-brand-700: oklch(0.50 0.16 35);
-    --color-brand-800: oklch(0.40 0.13 35);
-    --color-brand-900: oklch(0.30 0.10 35);
-    --color-brand-950: oklch(0.20 0.07 35);
-  }
-  66% {
-    --color-brand-50:  oklch(0.97 0 0);
-    --color-brand-100: oklch(0.92 0 0);
-    --color-brand-200: oklch(0.84 0 0);
-    --color-brand-300: oklch(0.70 0 0);
-    --color-brand-400: oklch(0.55 0 0);
-    --color-brand-500: oklch(0.30 0 0);
-    --color-brand-600: oklch(0.22 0 0);
-    --color-brand-700: oklch(0.16 0 0);
-    --color-brand-800: oklch(0.12 0 0);
-    --color-brand-900: oklch(0.08 0 0);
-    --color-brand-950: oklch(0.04 0 0);
-  }
-}
-
-.landing-brand-cycle {
-  animation: landing-brand-cycle 18s ease-in-out infinite;
-}
-
-/* Hormati preferensi pengguna yang minta sedikit gerakan. */
-@media (prefers-reduced-motion: reduce) {
-  .landing-brand-cycle {
-    animation: none;
-  }
-}
-
 /* === BASE STYLES === */
 @layer base {
   html {

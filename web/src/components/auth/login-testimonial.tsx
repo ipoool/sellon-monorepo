@@ -107,7 +107,7 @@ export function MasukTestimonial() {
 
       {/* Pagination dots */}
       <div
-        className="mt-4 flex items-center justify-center gap-1.5"
+        className="mt-4 flex items-center justify-center gap-0"
         role="tablist"
         aria-label="Testimoni"
       >
@@ -119,13 +119,17 @@ export function MasukTestimonial() {
             aria-selected={idx === i}
             aria-label={`Testimoni ${idx + 1}`}
             onClick={() => setI(idx)}
-            className={cn(
-              "h-1.5 rounded-full transition-all",
-              idx === i
-                ? "w-6 bg-brand-500"
-                : "w-1.5 bg-white/70 hover:bg-white",
-            )}
-          />
+            className="p-3"
+          >
+            <span
+              className={cn(
+                "block h-1.5 rounded-full transition-all",
+                idx === i
+                  ? "w-6 bg-brand-500"
+                  : "w-1.5 bg-white/70 hover:bg-white",
+              )}
+            />
+          </button>
         ))}
       </div>
     </div>

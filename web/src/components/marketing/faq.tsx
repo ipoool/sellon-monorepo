@@ -1,4 +1,4 @@
-import { Plus } from "lucide-react";
+import { Plus, HelpCircle } from "lucide-react";
 import { Section } from "@/components/layout/section";
 import { Container } from "@/components/layout/container";
 
@@ -39,7 +39,10 @@ export function Faq() {
       <Container>
         <div className="mx-auto max-w-3xl">
           <div className="text-center">
-            <p className="text-sm font-medium text-brand-600">FAQ</p>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-brand-200 bg-brand-50 px-3 py-1 text-xs font-medium text-brand-700">
+              <HelpCircle className="size-3.5" aria-hidden />
+              FAQ
+            </span>
             <h2 className="mt-2 font-display text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
               Pertanyaan yang sering ditanyakan
             </h2>
@@ -47,7 +50,7 @@ export function Faq() {
               Belum nemu jawabannya? Kirim email ke{" "}
               <a
                 href="mailto:halo@sellon.id"
-                className="font-medium text-brand-600 hover:text-brand-700"
+                className="font-medium text-brand-700 hover:text-brand-800"
               >
                 halo@sellon.id
               </a>

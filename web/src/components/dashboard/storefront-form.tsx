@@ -61,7 +61,6 @@ export function StorefrontForm({ initial }: { initial: Store }) {
   const themeLocked = plan !== "pro" && plan !== "bisnis";
   const [logoUrl, setLogoUrl] = useState(initial.logo_url ?? "");
   const [bannerUrl, setBannerUrl] = useState(initial.banner_url ?? "");
-  const [tagline, setTagline] = useState(initial.tagline ?? "");
   const [themeHue, setThemeHue] = useState<number>(initial.theme_hue ?? 145);
   const [productLayout, setProductLayout] = useState<LayoutKey>(
     initial.product_layout ?? "grid",
@@ -102,7 +101,6 @@ export function StorefrontForm({ initial }: { initial: Store }) {
       body: JSON.stringify({
         logo_url: logoUrl,
         banner_url: bannerUrl,
-        tagline: tagline.trim(),
         theme_hue: themeHue,
         product_layout: effectiveLayout,
         show_hours_public: showHours,
@@ -182,7 +180,7 @@ export function StorefrontForm({ initial }: { initial: Store }) {
           <div>
             <h2 className="font-semibold text-neutral-900">Tampilan Toko</h2>
             <p className="mt-0.5 text-sm text-neutral-500">
-              Logo, banner, dan tagline yang muncul di halaman publik tokomu.
+              Logo dan banner yang muncul di halaman publik tokomu.
             </p>
           </div>
           <a
@@ -208,19 +206,6 @@ export function StorefrontForm({ initial }: { initial: Store }) {
             />
             <p className="text-xs text-neutral-500">
               PNG/JPG kotak (~512×512). Tampil sebagai avatar toko.
-            </p>
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="tagline">Tagline</Label>
-            <Input
-              id="tagline"
-              value={tagline}
-              onChange={(e) => setTagline(e.target.value)}
-              maxLength={120}
-              placeholder="Mis: Kopi Sangrai Lokal Terbaik di Jogja"
-            />
-            <p className="text-xs text-neutral-500">
-              Satu kalimat catchy. Muncul di banner halaman toko.
             </p>
           </div>
           <div className="flex flex-col gap-1.5 sm:col-span-2">

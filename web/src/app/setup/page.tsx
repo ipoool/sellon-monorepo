@@ -5,6 +5,7 @@ import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import type { Store } from "@/lib/types";
 import { SetupWizard } from "@/components/onboarding/setup-wizard";
+import { ImpersonationBanner } from "@/components/admin/impersonation-banner";
 
 export const metadata: Metadata = { title: "Setup Toko — SellOn" };
 
@@ -23,5 +24,10 @@ export default async function SetupPage() {
 
   const firstName = me.name.split(" ")[0] || "Juragan";
 
-  return <SetupWizard firstName={firstName} email={me.email} />;
+  return (
+    <>
+      <ImpersonationBanner me={me} />
+      <SetupWizard firstName={firstName} email={me.email} />
+    </>
+  );
 }

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Check } from "lucide-react";
+import { Check, CreditCard } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Section } from "@/components/layout/section";
 import { Container } from "@/components/layout/container";
@@ -40,7 +40,10 @@ export function Pricing({ plans }: Props) {
     <Section id="harga">
       <Container>
         <div className="mx-auto max-w-4xl text-center">
-          <p className="text-sm font-medium text-brand-600">Harga</p>
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-brand-200 bg-brand-50 px-3 py-1 text-xs font-medium text-brand-700">
+            <CreditCard className="size-3.5" aria-hidden />
+            Harga
+          </span>
           <h2 className="mt-2 font-display text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
             Bayar tetap per bulan, tanpa potongan per pesanan
           </h2>
@@ -84,7 +87,7 @@ export function Pricing({ plans }: Props) {
             >
               Tahunan
               {yearlyDiscountLabel && (
-                <span className="ml-1.5 text-xs text-success">
+                <span className={cn("ml-1.5 text-xs", period === "yearly" ? "text-brand-300" : "text-brand-700")}>
                   {yearlyDiscountLabel}
                 </span>
               )}

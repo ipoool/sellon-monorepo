@@ -18,9 +18,14 @@ export function Header({ me, variant = "marketing" }: HeaderProps) {
         <div className="flex h-16 items-center justify-between">
           <Link
             href="/"
-            className="font-display text-lg font-semibold tracking-tight text-neutral-900 transition-opacity hover:opacity-80"
+            className="transition-opacity hover:opacity-80"
+            aria-label="SellOn — Beranda"
           >
-            SellOn
+            <img
+              src="/sellon-logo.svg"
+              alt="SellOn"
+              className="h-7 w-auto"
+            />
           </Link>
 
           <nav className="flex items-center gap-2 sm:gap-5">
@@ -49,6 +54,12 @@ export function Header({ me, variant = "marketing" }: HeaderProps) {
                   className="hidden rounded-md px-2 py-1 text-sm font-medium text-neutral-600 transition-colors hover:text-neutral-900 lg:inline"
                 >
                   FAQ
+                </Link>
+                <Link
+                  href="/blog"
+                  className="hidden rounded-md px-2 py-1 text-sm font-medium text-neutral-600 transition-colors hover:text-neutral-900 lg:inline"
+                >
+                  Blog
                 </Link>
 
                 <span className="hidden h-5 w-px bg-neutral-200 md:inline-block" />

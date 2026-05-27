@@ -231,7 +231,7 @@ func wrapHTML(body string) string {
     <tr><td align="center">
       <table role="presentation" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;max-width:560px;width:100%;padding:32px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
         <tr><td style="padding-bottom:16px;border-bottom:1px solid #e2e8f0;">
-          <span style="font-weight:700;font-size:18px;color:#0f172a;">SellOn</span>
+          <img src="https://wcnvffkbarjtfmckznaj.supabase.co/storage/v1/object/public/commons/assets/sellon-logo.png" alt="SellOn" height="28" style="display:block;height:28px;width:auto;border:0;" />
         </td></tr>
         <tr><td style="padding-top:24px;padding-bottom:28px;">
           ` + body + `

@@ -53,6 +53,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	planRepo := repository.NewPlanRepo(pool)
 	downloadTokens := repository.NewDownloadTokenRepo(pool)
 	bulkJobs := repository.NewBulkJobRepo(pool)
+	resellerRepo := repository.NewResellerRepo(pool)
 
 	googleVerifier := auth.NewGoogleVerifier(cfg.GoogleClientID)
 	jwtSvc := auth.NewJWTService(cfg.JWTSecret, cfg.JWTTTL)
@@ -109,6 +110,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	staffHandler := handler.NewStaffHandler(stores, memberships, users, subscriptions, planRepo, mailer, publicWebURL, auditLogger, logger)
 	domainHandler := handler.NewDomainHandler(stores, subscriptions, auditLogger, cfg.CnameTarget, logger)
 	auditHandler := handler.NewAuditHandler(auditRepo, stores, users, logger)
+	resellerHandler := handler.NewResellerHandler(resellerRepo, stores, subscriptions, auditLogger, mailer, twilioClient, logger)
 	adminHandler := handler.NewAdminHandler(
 		users, stores, adminRepo, platformAuditRepo, auditRepo, subscriptions,
 		storageClient, jwtSvc, cfg.IsProd(), logger,
@@ -285,6 +287,30 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 				})
 
 				r.Get("/audit-log", auditHandler.List)
+
+				r.Route("/reseller", func(r chi.Router) {
+					// Supplier: program management (Pro/Bisnis only enforced per-handler)
+					r.Post("/programs", resellerHandler.CreateProgram)
+					r.Get("/programs", resellerHandler.ListMyPrograms)
+					r.Get("/programs/{id}", resellerHandler.GetProgram)
+					r.Put("/programs/{id}", resellerHandler.UpdateProgram)
+					r.Post("/programs/{id}/products", resellerHandler.SetProgramProducts)
+					r.Get("/programs/{id}/products", resellerHandler.ListProgramProducts)
+					r.Get("/programs/{id}/members", resellerHandler.ListProgramMembers)
+					r.Post("/programs/{id}/regenerate-code", resellerHandler.RegenerateInviteCode)
+					// Supplier: fulfill dropship orders
+					r.Get("/supplier/orders", resellerHandler.ListSupplierOrders)
+					r.Patch("/supplier/orders/{orderItemID}/ship", resellerHandler.MarkDropshipShipped)
+					// Reseller: join & manage (all tiers)
+					r.Get("/invite/preview", resellerHandler.PreviewInviteCode)
+					r.Post("/join", resellerHandler.JoinProgram)
+					r.Get("/memberships", resellerHandler.ListMemberships)
+					r.Get("/memberships/{id}/products", resellerHandler.ListAvailableProducts)
+					r.Post("/catalog", resellerHandler.ImportProduct)
+					r.Get("/catalog", resellerHandler.ListCatalog)
+					r.Delete("/catalog/{id}", resellerHandler.RemoveFromCatalog)
+					r.Put("/catalog/{id}/price", resellerHandler.UpdateCatalogPrice)
+				})
 			})
 
 			// Platform admin routes — gated by RequireAdmin (which itself

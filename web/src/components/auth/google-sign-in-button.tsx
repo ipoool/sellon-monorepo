@@ -46,7 +46,7 @@ function loadGISScript(onReady: () => void): () => void {
   return () => s.removeEventListener("load", onReady);
 }
 
-export function GoogleSignInButton() {
+export function GoogleSignInButton({ inviteCode }: { inviteCode?: string }) {
   const { push, refresh } = useRouter();
   const buttonRef = useRef<HTMLDivElement>(null);
   const [scriptReady, setScriptReady] = useState(false);
@@ -89,12 +89,22 @@ export function GoogleSignInButton() {
           if (!res.ok) {
             throw new Error(data.error || `HTTP ${res.status}`);
           }
-          // Platform admins land at /platform instead of being
-          // forced through /setup → /dashboard. Sellers (role 'user' or
-          // unset) keep the original flow; the dashboard layout still
-          // redirects them to /setup if they don't have a store yet.
-          const dest =
-            data?.role === "admin" ? "/platform" : "/dashboard";
+
+          // If there's a reseller invite code, auto-join before redirecting.
+          if (inviteCode && data?.role !== "admin") {
+            await fetch(`${apiBase}/api/v1/reseller/join`, {
+              method: "POST",
+              credentials: "include",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ invite_code: inviteCode }),
+            }).catch(() => {}); // fail-silent — join can be retried manually
+          }
+
+          const dest = data?.role === "admin"
+            ? "/platform"
+            : inviteCode
+            ? "/reseller/catalog"
+            : "/dashboard";
           push(dest);
           refresh();
         } catch (err) {

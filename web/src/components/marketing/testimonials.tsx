@@ -90,6 +90,7 @@ function StarRating({ value }: { value: number }) {
   const clamped = Math.max(0, Math.min(5, value));
   return (
     <div
+      role="img"
       className="inline-flex items-center gap-0.5"
       aria-label={`Rating ${clamped} dari 5`}
     >
@@ -245,7 +246,7 @@ export function Testimonials() {
 
         {/* Dot indicators */}
         <div
-          className="mt-6 flex items-center justify-center gap-2"
+          className="mt-6 flex items-center justify-center gap-0"
           aria-label="Navigasi testimoni"
         >
           {testimonials.map((t, i) => (
@@ -254,13 +255,17 @@ export function Testimonials() {
               type="button"
               onClick={() => setIndex(i)}
               aria-label={`Lompat ke testimoni ${i + 1}`}
-              className={cn(
-                "h-1.5 rounded-full transition-all",
-                i === index
-                  ? "w-6 bg-brand-500"
-                  : "w-1.5 bg-neutral-300 hover:bg-neutral-400",
-              )}
-            />
+              className="p-3"
+            >
+              <span
+                className={cn(
+                  "block h-1.5 rounded-full transition-all",
+                  i === index
+                    ? "w-6 bg-brand-500"
+                    : "w-1.5 bg-neutral-300 hover:bg-neutral-400",
+                )}
+              />
+            </button>
           ))}
         </div>
       </Container>

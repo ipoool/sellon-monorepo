@@ -26,7 +26,7 @@ func NewCitiesHandler(rk *rajaongkir.Client, logger *slog.Logger) *CitiesHandler
 // API key is configured so the frontend can show a graceful empty state.
 func (h *CitiesHandler) Search(w http.ResponseWriter, r *http.Request) {
 	if h.rajaongkir == nil || !h.rajaongkir.IsConfigured() {
-		response.Error(w, http.StatusServiceUnavailable, "rajaongkir belum dikonfigurasi")
+		response.JSON(w, http.StatusOK, map[string]any{"cities": []any{}})
 		return
 	}
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
