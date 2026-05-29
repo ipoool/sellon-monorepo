@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/sellon/sellon/api/internal/auth"
+	"github.com/sellon/sellon/api/internal/email"
 	"github.com/sellon/sellon/api/internal/pkg/response"
 	"github.com/sellon/sellon/api/internal/repository"
 	"github.com/sellon/sellon/api/internal/storage"
@@ -26,8 +27,11 @@ type AdminHandler struct {
 	platformAudit *repository.PlatformAuditRepo
 	auditRepo     *repository.AuditRepo
 	subs          *repository.SubscriptionRepo
+	plans         *repository.PlanRepo
 	storage       *storage.SupabaseClient
 	jwt           *auth.JWTService
+	mailer        *email.Mailer
+	webOrigin     string
 	cookieSecure  bool
 	logger        *slog.Logger
 }
@@ -39,16 +43,21 @@ func NewAdminHandler(
 	platformAudit *repository.PlatformAuditRepo,
 	auditRepo *repository.AuditRepo,
 	subs *repository.SubscriptionRepo,
+	plans *repository.PlanRepo,
 	storageCli *storage.SupabaseClient,
 	jwt *auth.JWTService,
+	mailer *email.Mailer,
+	webOrigin string,
 	cookieSecure bool,
 	logger *slog.Logger,
 ) *AdminHandler {
 	return &AdminHandler{
 		users: users, stores: stores, admin: admin,
 		platformAudit: platformAudit, auditRepo: auditRepo, subs: subs,
+		plans:   plans,
 		storage: storageCli,
-		jwt:     jwt, cookieSecure: cookieSecure, logger: logger,
+		jwt:     jwt, mailer: mailer, webOrigin: webOrigin,
+		cookieSecure: cookieSecure, logger: logger,
 	}
 }
 
@@ -841,9 +850,58 @@ func (h *AdminHandler) GrantSubscription(w http.ResponseWriter, r *http.Request)
 			"expires_at": expiresAt.Format(time.RFC3339),
 		})
 
+	// Notify the store owner that SellOn upgraded their tier — congrats +
+	// plan info + duration + tips/features. Only for paid grants; a "free"
+	// grant is a downgrade/reset and doesn't warrant a celebration email.
+	// Best-effort: failures are logged, never block the admin response.
+	if plan != "free" {
+		h.sendTierUpgradeEmail(r.Context(), storeID, plan, expiresAt)
+	}
+
 	response.JSON(w, http.StatusOK, map[string]any{
 		"ok":           true,
 		"subscription": sub,
+	})
+}
+
+// sendTierUpgradeEmail resolves the store owner + plan details and fires
+// the upgrade notification email. All lookups are best-effort — any miss
+// is logged and silently skipped so it never affects the admin action.
+func (h *AdminHandler) sendTierUpgradeEmail(ctx context.Context, storeID uuid.UUID, plan string, expiresAt time.Time) {
+	if h.mailer == nil || !h.mailer.Configured() {
+		return
+	}
+	store, err := h.stores.FindByID(ctx, storeID)
+	if err != nil {
+		h.logger.Warn("tier upgrade email: store lookup failed", "err", err, "store_id", storeID)
+		return
+	}
+	owner, err := h.users.FindByID(ctx, store.OwnerID)
+	if err != nil || owner.Email == "" {
+		h.logger.Warn("tier upgrade email: owner lookup failed", "err", err, "store_id", storeID)
+		return
+	}
+	planRow, err := h.plans.Get(ctx, plan)
+	if err != nil {
+		h.logger.Warn("tier upgrade email: plan lookup failed", "err", err, "plan", plan)
+		return
+	}
+
+	dashURL := strings.TrimRight(h.webOrigin, "/") + "/settings/subscription"
+	subject, text, htmlBody := email.RenderAdminTierUpgrade(email.AdminTierUpgradeData{
+		UserName:     owner.Name,
+		Plan:         plan,
+		ExpiresAt:    expiresAt,
+		Features:     planRow.Features,
+		DashboardURL: dashURL,
+	})
+	h.mailer.Send(email.Message{
+		To:       owner.Email,
+		ToName:   owner.Name,
+		Subject:  subject,
+		Text:     text,
+		HTML:     htmlBody,
+		Category: "tier_upgraded",
 	})
 }
 

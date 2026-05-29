@@ -33,6 +33,10 @@ type Product struct {
 	DigitalDeliveryURL  string
 	DigitalFileURL      string
 	DigitalInstructions string
+	GTIN                string // Global Trade Item Number (barcode); "" when unset
+	TakeawayEnabled     bool
+	TakeawayChargeCents int64
+	TakeawayMaterialID  *uuid.UUID // plastic/packaging consumed per take-away unit
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
 }
@@ -52,7 +56,8 @@ var ErrProductNotFound = errors.New("product not found")
 const productColumns = `id, store_id, category_id, name, slug, description, price_cents, stock,
 	low_stock_threshold, weight_g, length_cm, width_cm, height_cm,
 	status, photo_urls, has_variants, is_featured,
-	product_type, digital_delivery_url, digital_file_url, digital_instructions,
+	product_type, digital_delivery_url, digital_file_url, digital_instructions, gtin,
+	takeaway_enabled, takeaway_charge_cents, takeaway_material_id,
 	created_at, updated_at`
 
 func scanProduct(row pgx.Row, p *Product) error {
@@ -61,7 +66,8 @@ func scanProduct(row pgx.Row, p *Product) error {
 		&p.PriceCents, &p.Stock, &p.LowStockThreshold,
 		&p.WeightG, &p.LengthCm, &p.WidthCm, &p.HeightCm,
 		&p.Status, &p.PhotoURLs, &p.HasVariants, &p.IsFeatured,
-		&p.ProductType, &p.DigitalDeliveryURL, &p.DigitalFileURL, &p.DigitalInstructions,
+		&p.ProductType, &p.DigitalDeliveryURL, &p.DigitalFileURL, &p.DigitalInstructions, &p.GTIN,
+		&p.TakeawayEnabled, &p.TakeawayChargeCents, &p.TakeawayMaterialID,
 		&p.CreatedAt, &p.UpdatedAt,
 	)
 }
@@ -190,6 +196,10 @@ type SaveProductInput struct {
 	DigitalDeliveryURL  string
 	DigitalFileURL      string
 	DigitalInstructions string
+	GTIN                string
+	TakeawayEnabled     bool
+	TakeawayChargeCents int64
+	TakeawayMaterialID  *uuid.UUID
 }
 
 func (r *ProductRepo) Create(ctx context.Context, in SaveProductInput) (*Product, error) {
@@ -200,16 +210,18 @@ func (r *ProductRepo) Create(ctx context.Context, in SaveProductInput) (*Product
 		INSERT INTO products (store_id, category_id, name, slug, description, price_cents, stock,
 		                     low_stock_threshold,
 		                     weight_g, length_cm, width_cm, height_cm, status, photo_urls, is_featured,
-		                     product_type, digital_delivery_url, digital_file_url, digital_instructions)
+		                     product_type, digital_delivery_url, digital_file_url, digital_instructions, gtin,
+		                     takeaway_enabled, takeaway_charge_cents, takeaway_material_id)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-		        $16, $17, $18, $19)
+		        $16, $17, $18, $19, $20, $21, $22, $23)
 		RETURNING ` + productColumns
 	var p Product
 	if err := scanProduct(r.pool.QueryRow(ctx, q,
 		in.StoreID, in.CategoryID, in.Name, in.Slug, in.Description, in.PriceCents, in.Stock,
 		in.LowStockThreshold,
 		in.WeightG, in.LengthCm, in.WidthCm, in.HeightCm, in.Status, in.PhotoURLs, in.IsFeatured,
-		in.ProductType, in.DigitalDeliveryURL, in.DigitalFileURL, in.DigitalInstructions,
+		in.ProductType, in.DigitalDeliveryURL, in.DigitalFileURL, in.DigitalInstructions, in.GTIN,
+		in.TakeawayEnabled, in.TakeawayChargeCents, in.TakeawayMaterialID,
 	), &p); err != nil {
 		return nil, err
 	}
@@ -231,6 +243,10 @@ func (r *ProductRepo) Update(ctx context.Context, id uuid.UUID, in SaveProductIn
 		    digital_delivery_url = $18,
 		    digital_file_url = $19,
 		    digital_instructions = $20,
+		    gtin = $21,
+		    takeaway_enabled = $22,
+		    takeaway_charge_cents = $23,
+		    takeaway_material_id = $24,
 		    updated_at = now()
 		WHERE id = $1 AND store_id = $2
 		RETURNING ` + productColumns
@@ -239,7 +255,8 @@ func (r *ProductRepo) Update(ctx context.Context, id uuid.UUID, in SaveProductIn
 		id, in.StoreID, in.CategoryID, in.Name, in.Slug, in.Description, in.PriceCents, in.Stock,
 		in.LowStockThreshold,
 		in.WeightG, in.LengthCm, in.WidthCm, in.HeightCm, in.Status, in.PhotoURLs, in.IsFeatured,
-		in.ProductType, in.DigitalDeliveryURL, in.DigitalFileURL, in.DigitalInstructions,
+		in.ProductType, in.DigitalDeliveryURL, in.DigitalFileURL, in.DigitalInstructions, in.GTIN,
+		in.TakeawayEnabled, in.TakeawayChargeCents, in.TakeawayMaterialID,
 	), &p); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrProductNotFound

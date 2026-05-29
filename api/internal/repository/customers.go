@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"crypto/rand"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -23,6 +25,8 @@ type Customer struct {
 	TotalOrders     int
 	TotalSpentCents int64
 	LastOrderAt     *time.Time
+	LoyaltyPoints   int
+	MemberCode      string // "" when not a member yet
 	CreatedAt       time.Time
 }
 
@@ -58,7 +62,7 @@ func (r *CustomerRepo) ListByStore(
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, store_id, name, whatsapp_number, email, address, city, province,
 		       postal_code, notes, is_blacklisted, total_orders, total_spent_cents,
-		       last_order_at, created_at
+		       last_order_at, loyalty_points, COALESCE(member_code, ''), created_at
 		FROM customers
 		WHERE store_id = $1
 		ORDER BY last_order_at DESC NULLS LAST, created_at DESC
@@ -76,7 +80,7 @@ func (r *CustomerRepo) ListByStore(
 			&c.ID, &c.StoreID, &c.Name, &c.WhatsAppNumber, &c.Email,
 			&c.Address, &c.City, &c.Province, &c.PostalCode, &c.Notes,
 			&c.IsBlacklisted, &c.TotalOrders, &c.TotalSpentCents,
-			&c.LastOrderAt, &c.CreatedAt,
+			&c.LastOrderAt, &c.LoyaltyPoints, &c.MemberCode, &c.CreatedAt,
 		); err != nil {
 			return nil, 0, err
 		}
@@ -96,19 +100,90 @@ func (r *CustomerRepo) FindByID(ctx context.Context, storeID, id uuid.UUID) (*Cu
 	err := r.pool.QueryRow(ctx, `
 		SELECT id, store_id, name, whatsapp_number, email, address, city, province,
 		       postal_code, notes, is_blacklisted, total_orders, total_spent_cents,
-		       last_order_at, created_at
+		       last_order_at, loyalty_points, COALESCE(member_code, ''), created_at
 		FROM customers
 		WHERE store_id = $1 AND id = $2
 	`, storeID, id).Scan(
 		&c.ID, &c.StoreID, &c.Name, &c.WhatsAppNumber, &c.Email,
 		&c.Address, &c.City, &c.Province, &c.PostalCode, &c.Notes,
 		&c.IsBlacklisted, &c.TotalOrders, &c.TotalSpentCents,
-		&c.LastOrderAt, &c.CreatedAt,
+		&c.LastOrderAt, &c.LoyaltyPoints, &c.MemberCode, &c.CreatedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
 	return &c, nil
+}
+
+// EnsureMemberCode returns the customer's member code, generating + persisting a
+// unique one on first call. Retries on the (rare) unique collision.
+func (r *CustomerRepo) EnsureMemberCode(ctx context.Context, storeID, customerID uuid.UUID) (string, error) {
+	var existing string
+	err := r.pool.QueryRow(ctx,
+		`SELECT COALESCE(member_code, '') FROM customers WHERE store_id = $1 AND id = $2`,
+		storeID, customerID,
+	).Scan(&existing)
+	if err != nil {
+		return "", err
+	}
+	if existing != "" {
+		return existing, nil
+	}
+	for attempt := 0; attempt < 6; attempt++ {
+		code := generateMemberCode()
+		ct, err := r.pool.Exec(ctx, `
+			UPDATE customers SET member_code = $3, updated_at = now()
+			WHERE store_id = $1 AND id = $2 AND member_code IS NULL
+		`, storeID, customerID, code)
+		if err != nil {
+			// Unique collision → try a fresh code.
+			continue
+		}
+		if ct.RowsAffected() == 1 {
+			return code, nil
+		}
+		// Someone set it concurrently — re-read.
+		if err := r.pool.QueryRow(ctx,
+			`SELECT COALESCE(member_code, '') FROM customers WHERE store_id = $1 AND id = $2`,
+			storeID, customerID,
+		).Scan(&existing); err == nil && existing != "" {
+			return existing, nil
+		}
+	}
+	return "", errors.New("gagal membuat kode member")
+}
+
+// FindByMemberCode resolves a scanned member code to a customer (store-scoped).
+func (r *CustomerRepo) FindByMemberCode(ctx context.Context, storeID uuid.UUID, code string) (*Customer, error) {
+	var c Customer
+	err := r.pool.QueryRow(ctx, `
+		SELECT id, store_id, name, whatsapp_number, email, address, city, province,
+		       postal_code, notes, is_blacklisted, total_orders, total_spent_cents,
+		       last_order_at, loyalty_points, COALESCE(member_code, ''), created_at
+		FROM customers
+		WHERE store_id = $1 AND member_code = $2
+	`, storeID, code).Scan(
+		&c.ID, &c.StoreID, &c.Name, &c.WhatsAppNumber, &c.Email,
+		&c.Address, &c.City, &c.Province, &c.PostalCode, &c.Notes,
+		&c.IsBlacklisted, &c.TotalOrders, &c.TotalSpentCents,
+		&c.LastOrderAt, &c.LoyaltyPoints, &c.MemberCode, &c.CreatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+// generateMemberCode produces an 8-char code from an unambiguous charset
+// (no 0/O/1/I) for easy QR + manual entry.
+func generateMemberCode() string {
+	const charset = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	for i := range b {
+		b[i] = charset[int(b[i])%len(charset)]
+	}
+	return string(b)
 }
 
 // UpdateProfile patches the seller-editable fields (notes + blacklist flag).

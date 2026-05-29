@@ -8,6 +8,8 @@ import {
   Wallet,
   Calendar,
   Phone,
+  Sparkles,
+  Award,
 } from "lucide-react";
 
 import { DashboardShell } from "@/components/layout/dashboard-shell";
@@ -16,6 +18,7 @@ import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CustomerProfileForm } from "@/components/dashboard/customer-profile-form";
+import { MemberCard } from "@/components/dashboard/member-card";
 import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import { formatRupiah, formatDateID, formatDateTimeID } from "@/lib/format";
@@ -25,7 +28,18 @@ import type {
   CustomerOrderSummary,
   OrderStatus,
   PaymentStatus,
+  LoyaltyTransaction,
+  MembershipTier,
 } from "@/lib/types";
+
+function resolveTier(tiers: MembershipTier[], totalSpentCents: number): MembershipTier | null {
+  let best: MembershipTier | null = null;
+  for (const t of tiers) {
+    if (!t.is_active || t.min_spent_cents > totalSpentCents) continue;
+    if (!best || t.min_spent_cents > best.min_spent_cents) best = t;
+  }
+  return best;
+}
 
 export const metadata = { title: "Detail Pelanggan — SellOn" };
 
@@ -45,6 +59,17 @@ const paymentStatusLabel: Record<PaymentStatus, string> = {
   failed: "Gagal",
   refunded: "Direfund",
 };
+
+const loyaltyTxLabels: Record<LoyaltyTransaction["type"], string> = {
+  earn: "Poin masuk",
+  redeem: "Poin dipakai",
+  adjust: "Penyesuaian poin",
+  expire: "Poin kadaluarsa",
+};
+
+function loyaltyTxLabel(type: LoyaltyTransaction["type"]): string {
+  return loyaltyTxLabels[type] ?? "Transaksi poin";
+}
 
 function classifySegment(c: Customer): {
   label: string;
@@ -73,6 +98,17 @@ export default async function PelangganDetailPage({
   if (!data) notFound();
   const { customer, orders } = data;
   const seg = classifySegment(customer);
+
+  // Loyalty point ledger (earn/redeem history). Best-effort: a null/empty
+  // result just hides the history card.
+  const loyaltyRes = await serverApi<{ transactions: LoyaltyTransaction[] }>(
+    `/api/v1/pos/customers/${id}/loyalty/transactions`,
+  );
+  const loyaltyTx = loyaltyRes?.transactions ?? [];
+
+  // Membership tier (best-effort): derived from lifetime spend vs configured tiers.
+  const tiersRes = await serverApi<{ tiers: MembershipTier[] }>("/api/v1/membership/tiers");
+  const tier = resolveTier(tiersRes?.tiers ?? [], customer.total_spent_cents);
 
   const waUrl = customer.whatsapp_number
     ? waLink(
@@ -108,6 +144,13 @@ export default async function PelangganDetailPage({
                 </h2>
                 <div className="mt-1 flex flex-wrap items-center gap-1.5">
                   <Badge variant={seg.variant}>{seg.label}</Badge>
+                  {tier && (
+                    <Badge variant="brand">
+                      <Award className="mr-1 size-3" aria-hidden />
+                      {tier.name}
+                      {tier.discount_percent > 0 ? ` · diskon ${tier.discount_percent}%` : ""}
+                    </Badge>
+                  )}
                   {customer.created_at && (
                     <span className="text-xs text-neutral-500">
                       Bergabung {formatDateID(customer.created_at)}
@@ -209,6 +252,94 @@ export default async function PelangganDetailPage({
               </div>
             </div>
           </Card>
+
+          {(customer.loyalty_points ?? 0) > 0 && (
+            <Card>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="flex size-10 items-center justify-center rounded-lg bg-brand-50 text-brand-700">
+                    <Sparkles className="size-5" aria-hidden />
+                  </div>
+                  <div>
+                    <p className="text-sm text-neutral-500">Saldo Poin Loyalty</p>
+                    <p className="font-display text-2xl font-bold text-neutral-900">
+                      {(customer.loyalty_points ?? 0).toLocaleString("id-ID")}
+                    </p>
+                  </div>
+                </div>
+                <Link
+                  href="/settings/loyalty"
+                  className="text-xs font-medium text-brand-700 hover:text-brand-800"
+                >
+                  Pengaturan →
+                </Link>
+              </div>
+            </Card>
+          )}
+
+          <Card>
+            <div className="mb-3 flex items-center gap-2">
+              <Award className="size-4 text-brand-600" aria-hidden />
+              <h3 className="text-sm font-semibold text-neutral-900">Kartu Member</h3>
+            </div>
+            <MemberCard
+              customerId={customer.id}
+              customerName={customer.name}
+              initialCode={customer.member_code ?? ""}
+              tierName={tier?.name}
+            />
+          </Card>
+
+          {loyaltyTx.length > 0 && (
+            <Card>
+              <div className="flex items-center gap-2">
+                <Sparkles className="size-4 text-brand-600" aria-hidden />
+                <h3 className="text-sm font-semibold text-neutral-900">
+                  Riwayat Poin
+                </h3>
+              </div>
+              <ul className="mt-3 divide-y divide-neutral-100">
+                {loyaltyTx.map((tx) => {
+                  const isEarn = tx.points >= 0;
+                  return (
+                    <li
+                      key={tx.id}
+                      className="flex items-center justify-between gap-3 py-2.5"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-neutral-900">
+                          {loyaltyTxLabel(tx.type)}
+                        </p>
+                        <p className="mt-0.5 text-xs text-neutral-500">
+                          {tx.reason || formatDateTimeID(tx.created_at)}
+                          {tx.reason && (
+                            <span className="text-neutral-400">
+                              {" · "}
+                              {formatDateTimeID(tx.created_at)}
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p
+                          className={
+                            "text-sm font-bold tabular-nums " +
+                            (isEarn ? "text-success" : "text-danger")
+                          }
+                        >
+                          {isEarn ? "+" : ""}
+                          {tx.points.toLocaleString("id-ID")}
+                        </p>
+                        <p className="text-[11px] text-neutral-400">
+                          saldo {tx.balance_after.toLocaleString("id-ID")}
+                        </p>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </Card>
+          )}
 
           <Card>
             <h3 className="text-sm font-semibold text-neutral-900">

@@ -44,6 +44,8 @@ type customerDTO struct {
 	TotalOrders     int     `json:"total_orders"`
 	TotalSpentCents int64   `json:"total_spent_cents"`
 	LastOrderAt     *string `json:"last_order_at"`
+	LoyaltyPoints   int     `json:"loyalty_points"`
+	MemberCode      string  `json:"member_code"`
 	CreatedAt       string  `json:"created_at"`
 }
 
@@ -59,9 +61,36 @@ func toCustomerDTO(c repository.Customer) customerDTO {
 		Address: c.Address, PostalCode: c.PostalCode,
 		Notes: c.Notes, IsBlacklisted: c.IsBlacklisted,
 		TotalOrders: c.TotalOrders, TotalSpentCents: c.TotalSpentCents,
-		LastOrderAt: lastStr,
-		CreatedAt:   c.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		LastOrderAt:   lastStr,
+		LoyaltyPoints: c.LoyaltyPoints,
+		MemberCode:    c.MemberCode,
+		CreatedAt:     c.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
+}
+
+// POST /api/v1/customers/{id}/member-code — generate (or return existing) code.
+func (h *CustomerHandler) GenerateMemberCode(w http.ResponseWriter, r *http.Request) {
+	store, err := h.storeFor(r)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "toko belum dibuat")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "id invalid")
+		return
+	}
+	code, err := h.customers.EnsureMemberCode(r.Context(), store.ID, id)
+	if err != nil {
+		h.logger.Error("ensure member code", "err", err)
+		response.Error(w, http.StatusInternalServerError, "gagal membuat kode member")
+		return
+	}
+	h.audit.Log(r.Context(), store.ID, audit.Event{
+		Action: "customer.member_code_generated", EntityType: "customer", EntityID: id.String(),
+		Summary: "Buat kartu member",
+	})
+	response.JSON(w, http.StatusOK, map[string]any{"member_code": code})
 }
 
 // GET /api/v1/customers?limit=&offset=

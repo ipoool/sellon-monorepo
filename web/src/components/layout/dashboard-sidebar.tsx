@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -21,6 +21,12 @@ import {
   Zap,
   Crown,
   Truck,
+  ShoppingCart,
+  Clock,
+  ChevronDown,
+  Boxes,
+  TrendingUp,
+  ChefHat,
   type LucideIcon,
 } from "lucide-react";
 
@@ -44,9 +50,12 @@ const primaryNav: NavItem[] = [
   { label: "Dasbor", href: "/dashboard", icon: LayoutDashboard },
   { label: "Pesanan", href: "/orders", icon: ShoppingBag },
   { label: "Produk", href: "/products", icon: Package },
+  { label: "Bahan Baku", href: "/materials", icon: Boxes },
+  { label: "Pembelian", href: "/purchase-orders", icon: Truck },
   { label: "Pelanggan", href: "/customers", icon: Users },
   { label: "Promo", href: "/promos", icon: Megaphone },
   { label: "Laporan", href: "/reports", icon: BarChart3 },
+  { label: "Analytics", href: "/analytics", icon: TrendingUp },
 ];
 
 const secondaryNav: NavItem[] = [
@@ -129,6 +138,28 @@ function SidebarContent({
   // "warning" gold for Bisnis), free stays neutral.
   const tierVariant =
     plan === "pro" ? "brand" : plan === "bisnis" ? "warning" : "outline";
+
+  // Fade affordance: show a bottom gradient + chevron when the nav has
+  // more items below the fold. Hides once scrolled (near) bottom so the
+  // user knows there's nothing more to see.
+  const navRef = useRef<HTMLElement>(null);
+  const [showFade, setShowFade] = useState(false);
+  useEffect(() => {
+    const el = navRef.current;
+    if (!el) return;
+    const update = () => {
+      setShowFade(el.scrollHeight - el.clientHeight - el.scrollTop > 8);
+    };
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener("scroll", update);
+      ro.disconnect();
+    };
+  }, []);
+
   return (
     <>
       <div className="flex h-16 items-center justify-between gap-3 border-b border-neutral-200 px-5">
@@ -156,7 +187,11 @@ function SidebarContent({
               don't have their own store.
             - Seller (or admin currently impersonating): the regular
               seller menu, no platform items. */}
-      <nav className="flex flex-1 flex-col gap-6 overflow-y-auto p-3">
+      <div className="relative flex min-h-0 flex-1 flex-col">
+      <nav
+        ref={navRef}
+        className="no-scrollbar flex flex-1 flex-col gap-6 overflow-y-auto p-3"
+      >
         {me.role === "admin" && !me.is_impersonated ? (
           <>
             <NavGroup
@@ -197,18 +232,40 @@ function SidebarContent({
             />
           </>
         ) : me.store_role === "staff" ? (
-          // Staff members: operasional only — orders + products
-          <NavGroup
-            label="Menu"
-            items={[
-              { label: "Pesanan", href: "/orders", icon: ShoppingBag },
-              { label: "Produk", href: "/products", icon: Package },
-            ]}
-            pathname={pathname}
-          />
+          // Staff members: operasional + POS
+          <>
+            <NavGroup
+              label="Menu"
+              items={[
+                { label: "Pesanan", href: "/orders", icon: ShoppingBag },
+                { label: "Produk", href: "/products", icon: Package },
+              ]}
+              pathname={pathname}
+            />
+            <NavGroup
+              label="Kasir POS"
+              labelHref="/pos"
+              items={[
+                { label: "Buka Kasir", href: "/pos", icon: ShoppingCart },
+                { label: "Riwayat Shift", href: "/pos/sessions", icon: Clock },
+              ]}
+              pathname={pathname}
+            />
+          </>
         ) : (
           <>
             <NavGroup label="Menu" items={primaryNav} pathname={pathname} />
+            <NavGroup
+              label="Kasir POS"
+              labelHref="/pos"
+              items={[
+                { label: "Buka Kasir", href: "/pos", icon: ShoppingCart },
+                { label: "Kitchen Display", href: "/kds", icon: ChefHat },
+                { label: "Riwayat Shift", href: "/pos/sessions", icon: Clock },
+                { label: "Laporan POS", href: "/pos/reports", icon: BarChart3 },
+              ]}
+              pathname={pathname}
+            />
             <NavGroup
               label="Program Reseller"
               labelHref="/reseller/program"
@@ -224,6 +281,19 @@ function SidebarContent({
           </>
         )}
       </nav>
+
+      {/* Scroll affordance: fade + bouncing chevron, only when more
+          items exist below the fold. */}
+      <div
+        aria-hidden
+        className={cn(
+          "pointer-events-none absolute inset-x-0 bottom-0 flex h-14 items-end justify-center bg-gradient-to-t from-white via-white/85 to-transparent pb-2 transition-opacity duration-200",
+          showFade ? "opacity-100" : "opacity-0",
+        )}
+      >
+        <ChevronDown className="size-4 animate-bounce text-neutral-400" aria-hidden />
+      </div>
+      </div>
 
       <div className="border-t border-neutral-200 p-3">
         <div className="flex items-center gap-3 rounded-lg p-2">
@@ -299,10 +369,13 @@ function NavGroup({
           // "Home" entries match exactly only — otherwise the seller
           // /dashboard link stays highlighted on every /dashboard/* sub-page,
           // and the admin /platform link does the same on
-          // /platform/users etc. Anything deeper still
-          // highlights when its prefix matches.
+          // /platform/users etc. /pos is also a section root whose
+          // siblings (Riwayat Shift, Laporan POS) live under /pos/*.
+          // Anything deeper still highlights when its prefix matches.
           const isHome =
-            item.href === "/dashboard" || item.href === "/platform";
+            item.href === "/dashboard" ||
+            item.href === "/platform" ||
+            item.href === "/pos";
           const active =
             pathname === item.href ||
             (!isHome && pathname.startsWith(item.href + "/"));

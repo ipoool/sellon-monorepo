@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { formatRupiah } from "@/lib/format";
 import { waLink } from "@/lib/whatsapp";
 import { cn } from "@/lib/utils";
+import type { ModifierGroup, SelectedOption } from "@/lib/types";
 import { useCart, type CartItem } from "./cart-context";
 
 type StorefrontVariant = {
@@ -22,6 +23,7 @@ type StorefrontVariant = {
 };
 
 const EMPTY_VARIANTS: StorefrontVariant[] = [];
+const EMPTY_MODIFIERS: ModifierGroup[] = [];
 
 type Props = {
   storeSlug: string;
@@ -38,6 +40,7 @@ type Props = {
     product_type?: "physical" | "digital";
   };
   variants?: StorefrontVariant[];
+  modifiers?: ModifierGroup[];
   isOpen: boolean;
   acceptingOrders: boolean;
   acceptingOrdersReason: "" | "store_closed" | "order_limit";
@@ -54,6 +57,7 @@ export function AddToCartPanel({
   storeWhatsApp,
   product,
   variants = EMPTY_VARIANTS,
+  modifiers = EMPTY_MODIFIERS,
   isOpen,
   acceptingOrders,
   acceptingOrdersReason,
@@ -63,15 +67,44 @@ export function AddToCartPanel({
   const [qty, setQty] = useState(1);
   const [variantId, setVariantId] = useState<string>("");
   const [justAdded, setJustAdded] = useState(false);
+  // Selected option IDs per group. Single-select groups preselect their first
+  // option so the common default + required-single are satisfied out of the box.
+  const [selectedOpts, setSelectedOpts] = useState<Record<string, string[]>>(
+    () => {
+      const init: Record<string, string[]> = {};
+      for (const g of modifiers) {
+        if (!g.id) continue;
+        init[g.id] =
+          g.selection === "single" && g.options[0]?.id
+            ? [g.options[0].id]
+            : [];
+      }
+      return init;
+    },
+  );
 
   const isDigital = product.product_type === "digital";
   const selectedVariant = product.has_variants
     ? variants.find((v) => v.id === variantId) ?? null
     : null;
 
-  const unitPriceCents = selectedVariant
+  const optionDelta = modifiers.reduce((sum, g) => {
+    const ids = selectedOpts[g.id ?? ""] ?? [];
+    return (
+      sum +
+      g.options
+        .filter((o) => o.id && ids.includes(o.id))
+        .reduce((s, o) => s + o.price_delta_cents, 0)
+    );
+  }, 0);
+  const requiredUnmet = modifiers.some(
+    (g) => g.is_required && (selectedOpts[g.id ?? ""]?.length ?? 0) === 0,
+  );
+
+  const baseUnit = selectedVariant
     ? selectedVariant.price_cents
     : product.price_cents;
+  const unitPriceCents = baseUnit + optionDelta;
   const availableStock = isDigital
     ? Number.MAX_SAFE_INTEGER
     : product.has_variants
@@ -90,9 +123,21 @@ export function AddToCartPanel({
   // checkout — pesanan masuk antrian dan diproses seller saat buka.
   // Variant disabled via Select tetap berlaku (variant kosong stoknya
   // tidak masuk akal di-add).
-  const disabled = !acceptingOrders || outOfStock || variantNotPicked;
+  const disabled =
+    !acceptingOrders || outOfStock || variantNotPicked || requiredUnmet;
 
   function buildItem(): CartItem {
+    const selected_options: SelectedOption[] = modifiers.flatMap((g) => {
+      const ids = selectedOpts[g.id ?? ""] ?? [];
+      return g.options
+        .filter((o) => o.id && ids.includes(o.id))
+        .map((o) => ({
+          option_id: o.id!,
+          group_name: g.name,
+          option_name: o.name,
+          price_delta_cents: o.price_delta_cents,
+        }));
+    });
     return {
       product_id: product.id,
       product_slug: product.slug,
@@ -104,7 +149,21 @@ export function AddToCartPanel({
       photo_url: product.photo_urls?.[0],
       product_type: isDigital ? "digital" : "physical",
       available_stock: availableStock === Number.MAX_SAFE_INTEGER ? 0 : availableStock,
+      selected_options: selected_options.length > 0 ? selected_options : undefined,
     };
+  }
+
+  function pickSingle(gid: string, oid: string) {
+    setSelectedOpts((s) => ({ ...s, [gid]: [oid] }));
+  }
+  function toggleMulti(gid: string, oid: string) {
+    setSelectedOpts((s) => {
+      const cur = s[gid] ?? [];
+      return {
+        ...s,
+        [gid]: cur.includes(oid) ? cur.filter((x) => x !== oid) : [...cur, oid],
+      };
+    });
   }
 
   function handleAdd() {
@@ -193,6 +252,56 @@ export function AddToCartPanel({
           </Select>
         </div>
       )}
+
+      {/* Modifier option groups */}
+      {modifiers.map((g) => {
+        const ids = selectedOpts[g.id ?? ""] ?? [];
+        return (
+          <div key={g.id} className="mt-5 flex flex-col gap-1.5">
+            <Label>
+              {g.name}{" "}
+              {g.is_required ? (
+                <span className="text-danger">*</span>
+              ) : (
+                <span className="text-xs font-normal text-neutral-400">
+                  (opsional{g.selection === "multi" ? ", bisa pilih banyak" : ""})
+                </span>
+              )}
+            </Label>
+            <div className="flex flex-wrap gap-2">
+              {g.options.map((o) => {
+                const active = !!o.id && ids.includes(o.id);
+                return (
+                  <button
+                    key={o.id}
+                    type="button"
+                    onClick={() =>
+                      g.id && o.id
+                        ? g.selection === "single"
+                          ? pickSingle(g.id, o.id)
+                          : toggleMulti(g.id, o.id)
+                        : undefined
+                    }
+                    className={cn(
+                      "rounded-lg border px-3 py-2 text-sm transition-colors",
+                      active
+                        ? "border-brand-500 bg-brand-50 font-medium text-brand-700"
+                        : "border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50",
+                    )}
+                  >
+                    {o.name}
+                    {o.price_delta_cents > 0 && (
+                      <span className="ml-1 text-xs text-neutral-500">
+                        +{formatRupiah(o.price_delta_cents)}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
 
       {/* Qty stepper */}
       <div className="mt-5 flex items-center justify-between">

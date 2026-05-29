@@ -4,7 +4,24 @@ import (
 	"fmt"
 	"html"
 	"strings"
+	"time"
 )
+
+// idMonthsFull maps month number (1-12) to full Indonesian month name.
+var idMonthsFull = [13]string{
+	"", "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+	"Juli", "Agustus", "September", "Oktober", "November", "Desember",
+}
+
+// formatIndoDate renders a timestamp as "28 Juni 2026" in WIB (Asia/Jakarta).
+func formatIndoDate(t time.Time) string {
+	wib, err := time.LoadLocation("Asia/Jakarta")
+	if err != nil {
+		wib = time.FixedZone("WIB", 7*60*60)
+	}
+	lt := t.In(wib)
+	return fmt.Sprintf("%d %s %d", lt.Day(), idMonthsFull[int(lt.Month())], lt.Year())
+}
 
 // RenderRupiah formats a cents value into "Rp 1.234.567" with thousand
 // separators. Exported so callers building email payloads can reuse
@@ -330,6 +347,138 @@ Jika sudah kadaluarsa, minta pemilik toko untuk mengundang ulang.
 		html.EscapeString(d.Role),
 		html.EscapeString(d.LoginURL),
 		d.ExpiryDays,
+	))
+	return
+}
+
+// === Admin tier upgrade (gift from SellOn) ===
+
+type AdminTierUpgradeData struct {
+	UserName     string
+	Plan         string    // "pro" | "bisnis"
+	ExpiresAt    time.Time // when the granted plan expires
+	Features     []string  // plan.Features — what they can now use
+	DashboardURL string    // CTA target (e.g. .../settings/subscription)
+}
+
+// upgradeTips returns short, practical usage hints tailored to the tier.
+// These are guidance (how to make the most of the plan), distinct from
+// plan.Features which is the marketing bullet list.
+func upgradeTips(plan string) []string {
+	common := []string{
+		"Buka Mode Kasir POS untuk catat penjualan offline — stok auto-sinkron dengan katalog online.",
+	}
+	switch strings.ToLower(plan) {
+	case "bisnis":
+		return append([]string{
+			"Atur warna tema toko sesuai brand kamu di Pengaturan → Storefront.",
+			"Tambah anggota tim tanpa batas untuk bagi tugas operasional.",
+			"Manfaatkan Analisa AI untuk dapat saran stok & baca tren penjualan.",
+		}, common...)
+	default: // pro
+		return append([]string{
+			"Aktifkan template pesan WhatsApp biar balas pesanan makin cepat.",
+			"Hubungkan kurir untuk hitung ongkir otomatis di checkout.",
+			"Cek menu Laporan untuk lihat produk terlaris & export CSV.",
+		}, common...)
+	}
+}
+
+func RenderAdminTierUpgrade(d AdminTierUpgradeData) (subject, text, htmlBody string) {
+	planLabel := planDisplayName(d.Plan)
+	firstName := firstWordExpiry(d.UserName)
+	expiresStr := formatIndoDate(d.ExpiresAt)
+	tips := upgradeTips(d.Plan)
+
+	subject = fmt.Sprintf("Selamat! Akun kamu di-upgrade ke paket %s 🎉", planLabel)
+
+	// --- Plain text ---
+	var featLines strings.Builder
+	for _, f := range d.Features {
+		featLines.WriteString("  • ")
+		featLines.WriteString(f)
+		featLines.WriteString("\n")
+	}
+	var tipLines strings.Builder
+	for _, t := range tips {
+		tipLines.WriteString("  → ")
+		tipLines.WriteString(t)
+		tipLines.WriteString("\n")
+	}
+
+	text = fmt.Sprintf(`Halo %s,
+
+Kabar gembira! Tim SellOn baru saja meng-upgrade akunmu ke paket %s. Nikmati semua fitur premium-nya, gratis dari kami. 🎉
+
+Detail paket kamu:
+  Paket        : %s
+  Status       : Aktif
+  Berlaku s/d  : %s
+
+Fitur yang sekarang bisa kamu pakai:
+%s
+Tips biar makin maksimal:
+%s
+Buka dasbor dan langsung eksplor:
+%s
+
+Selamat berkembang bareng SellOn!
+
+— Tim SellOn
+`,
+		firstName, planLabel,
+		planLabel, expiresStr,
+		featLines.String(),
+		tipLines.String(),
+		d.DashboardURL,
+	)
+
+	// --- HTML ---
+	var featHTML strings.Builder
+	for _, f := range d.Features {
+		featHTML.WriteString(fmt.Sprintf(
+			`<li style="margin:0 0 8px;padding-left:4px;color:#1e293b;">%s</li>`,
+			html.EscapeString(f),
+		))
+	}
+	var tipsHTML strings.Builder
+	for _, t := range tips {
+		tipsHTML.WriteString(fmt.Sprintf(
+			`<li style="margin:0 0 8px;padding-left:4px;color:#334155;">%s</li>`,
+			html.EscapeString(t),
+		))
+	}
+
+	htmlBody = WrapHTML(fmt.Sprintf(`
+<p style="margin:0 0 4px;font-size:13px;color:#64748b;text-transform:uppercase;letter-spacing:0.06em;font-weight:600;">Hadiah dari SellOn</p>
+<h2 style="margin:0 0 8px;font-size:22px;line-height:1.3;color:#0f172a;">Selamat, %s! 🎉</h2>
+<p style="margin:0 0 24px;color:#475569;line-height:1.7;">Tim SellOn baru saja meng-upgrade akunmu ke paket <strong>%s</strong>. Semua fitur premium-nya sekarang aktif — gratis dari kami. Yuk manfaatkan sebaik mungkin!</p>
+
+<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%%;border-collapse:collapse;background:#f0fdf4;border-radius:8px;padding:16px;margin:0 0 28px;">
+  <tr><td style="padding:6px 12px;color:#166534;">Paket</td><td style="padding:6px 12px;font-weight:700;color:#0f172a;">%s</td></tr>
+  <tr><td style="padding:6px 12px;color:#166534;">Status</td><td style="padding:6px 12px;color:#0f172a;">Aktif</td></tr>
+  <tr><td style="padding:6px 12px;color:#166534;">Berlaku sampai</td><td style="padding:6px 12px;font-weight:600;color:#0f172a;">%s</td></tr>
+</table>
+
+<h3 style="margin:0 0 12px;font-size:15px;color:#0f172a;">Fitur yang sekarang bisa kamu pakai</h3>
+<ul style="margin:0 0 28px;padding-left:20px;line-height:1.6;">%s</ul>
+
+<h3 style="margin:0 0 12px;font-size:15px;color:#0f172a;">Tips biar makin maksimal 🚀</h3>
+<ul style="margin:0 0 28px;padding-left:20px;line-height:1.6;">%s</ul>
+
+<p style="margin:0 0 8px;text-align:center;">
+  <a href="%s" style="display:inline-block;background:#10b981;color:#fff;padding:14px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px;">Buka Dasbor &amp; Eksplor →</a>
+</p>
+<p style="margin:0;color:#94a3b8;font-size:12px;text-align:center;">Paket %s aktif sampai %s. Nikmati setiap fiturnya!</p>`,
+		html.EscapeString(firstName),
+		html.EscapeString(planLabel),
+		html.EscapeString(planLabel),
+		html.EscapeString(expiresStr),
+		featHTML.String(),
+		tipsHTML.String(),
+		html.EscapeString(d.DashboardURL),
+		html.EscapeString(planLabel),
+		html.EscapeString(expiresStr),
 	))
 	return
 }

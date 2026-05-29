@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   BarChart3,
   Download,
+  Boxes,
 } from "lucide-react";
 
 import { AiInsightButton } from "@/components/dashboard/ai-insight-button";
@@ -112,6 +113,12 @@ export default async function LaporanPage({
       pageSubtitle="Ringkasan penjualan & insight pelanggan"
       actions={
         <div className="flex items-center gap-3">
+          <Link href="/reports/materials">
+            <Button size="sm" variant="outline">
+              <Boxes className="size-4" aria-hidden />
+              <span className="hidden sm:inline">Laporan Bahan</span>
+            </Button>
+          </Link>
           <a
             href={`${apiBase}/api/v1/reports/export?view=${view}`}
             download

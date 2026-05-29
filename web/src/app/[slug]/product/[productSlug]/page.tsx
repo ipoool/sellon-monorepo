@@ -11,6 +11,7 @@ import { BuyerShareButton } from "@/components/storefront/buyer-share-button";
 import { ProductPhotoGallery } from "@/components/storefront/product-photo-gallery";
 import { formatRupiah } from "@/lib/format";
 import { themeStyleForHue } from "@/lib/storefront-theme";
+import type { ModifierGroup } from "@/lib/types";
 
 const apiBase =
   process.env.API_INTERNAL_URL ||
@@ -69,6 +70,7 @@ async function fetchProduct(
   store: Store;
   product: Product;
   variants: StorefrontVariant[];
+  modifiers?: ModifierGroup[];
   payment?: StorefrontPayment;
 } | null> {
   try {
@@ -124,7 +126,7 @@ export default async function ProductDetailPage({
     fetchRelated(slug, productSlug),
   ]);
   if (!data) notFound();
-  const { store, product, variants = [], payment } = data;
+  const { store, product, variants = [], modifiers = [], payment } = data;
   const totalStock = product.has_variants
     ? variants.reduce((sum, v) => sum + v.stock, 0)
     : product.stock;
@@ -229,6 +231,7 @@ export default async function ProductDetailPage({
                     product_type: product.product_type,
                   }}
                   variants={variants}
+                  modifiers={modifiers}
                   isOpen={store.is_open}
                   acceptingOrders={store.accepting_orders ?? store.is_open}
                   acceptingOrdersReason={store.accepting_orders_reason ?? ""}

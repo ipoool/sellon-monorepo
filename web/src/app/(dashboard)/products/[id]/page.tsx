@@ -1,8 +1,9 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Barcode } from "lucide-react";
 import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { ProdukForm } from "@/components/dashboard/produk-form";
+import { Button } from "@/components/ui/button";
 import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import type { Product } from "@/lib/types";
@@ -26,6 +27,14 @@ export default async function ProdukEditPage({
       me={me}
       pageTitle={data.product.name}
       pageSubtitle="Edit produk"
+      actions={
+        <Link href={`/products/${id}/barcode`} target="_blank">
+          <Button size="sm" variant="outline">
+            <Barcode className="size-4" aria-hidden />
+            Cetak Barcode
+          </Button>
+        </Link>
+      }
     >
       <div className="mb-4">
         <Link

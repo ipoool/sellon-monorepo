@@ -15,6 +15,9 @@ import {
   X,
   ShoppingCart,
   Loader2,
+  ClipboardCheck,
+  MapPin,
+  ShieldCheck,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -27,7 +30,7 @@ import { CityPicker } from "@/components/dashboard/city-picker";
 import { formatRupiah } from "@/lib/format";
 import { fillTemplate, waLink } from "@/lib/whatsapp";
 import { cn } from "@/lib/utils";
-import { useCart } from "./cart-context";
+import { useCart, cartItemKey } from "./cart-context";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
@@ -118,7 +121,7 @@ type Props = {
   payment: StorefrontPayment;
 };
 
-type Step = 1 | 2 | 3;
+type Step = 1 | 2 | 3 | 4;
 
 export function CheckoutWizard({
   storeSlug,
@@ -328,14 +331,16 @@ export function CheckoutWizard({
       showError(reason);
       return;
     }
+    // All-digital carts skip the shipping step (2).
     if (step === 1 && skipShippingStep) {
       setStep(3);
       return;
     }
-    setStep((s) => (s < 3 ? ((s + 1) as Step) : s));
+    setStep((s) => (s < 4 ? ((s + 1) as Step) : s));
   }
 
   function back() {
+    // From Payment (3) back to Identitas (1) when shipping is skipped.
     if (step === 3 && skipShippingStep) {
       setStep(1);
       return;
@@ -344,7 +349,7 @@ export function CheckoutWizard({
   }
 
   async function submit() {
-    const finalCheck = blockReason(3);
+    const finalCheck = blockReason(4);
     if (finalCheck) {
       showError(finalCheck);
       return;
@@ -382,6 +387,9 @@ export function CheckoutWizard({
             product_id: it.product_id,
             variant_id: it.variant_id || undefined,
             quantity: it.qty,
+            selected_option_ids: (it.selected_options ?? []).map(
+              (o) => o.option_id,
+            ),
           })),
         }),
       });
@@ -439,7 +447,16 @@ export function CheckoutWizard({
     { num: 1, label: "Identitas", icon: User },
     ...(skipShippingStep ? [] : [{ num: 2 as Step, label: "Pengiriman", icon: Truck }]),
     { num: 3, label: "Pembayaran", icon: CreditCard },
+    { num: 4, label: "Review", icon: ClipboardCheck },
   ];
+
+  const paymentLabelText =
+    paymentMethods.find((p) => p.value === paymentMethod)?.label || "—";
+  const courierLabelText = skipShippingStep
+    ? "Digital — kirim via link"
+    : pickedOption
+      ? `${pickedOption.courier} ${pickedOption.service}`
+      : "Dikonfirmasi penjual";
 
   return (
     <div className="flex flex-col gap-5">
@@ -726,6 +743,57 @@ export function CheckoutWizard({
                 <p className="text-xs font-medium text-danger">{promoError}</p>
               )}
             </div>
+          </div>
+        </StepCard>
+      )}
+
+      {step === 4 && (
+        <StepCard title="Review & Konfirmasi" icon={ClipboardCheck}>
+          <div className="flex flex-col gap-4">
+            {/* Data pembeli */}
+            <div className="rounded-lg border border-neutral-200 bg-white p-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-neutral-900">
+                <User className="size-4 text-brand-600" aria-hidden />
+                Kontak
+              </div>
+              <dl className="mt-2 flex flex-col gap-1 text-sm">
+                <InfoRow label="Nama" value={customerName.trim() || "—"} />
+                <InfoRow label="WhatsApp" value={customerWA.trim() || "—"} />
+                {customerEmail.trim() && (
+                  <InfoRow label="Email" value={customerEmail.trim()} />
+                )}
+              </dl>
+            </div>
+
+            {/* Pengiriman */}
+            {!skipShippingStep && (
+              <div className="rounded-lg border border-neutral-200 bg-white p-4">
+                <div className="flex items-center gap-2 text-sm font-semibold text-neutral-900">
+                  <MapPin className="size-4 text-brand-600" aria-hidden />
+                  Pengiriman
+                </div>
+                <dl className="mt-2 flex flex-col gap-1 text-sm">
+                  <InfoRow label="Alamat" value={customerAddress.trim() || "—"} />
+                  <InfoRow label="Kota" value={city.trim() || "—"} />
+                  <InfoRow label="Kurir" value={courierLabelText} />
+                </dl>
+              </div>
+            )}
+
+            {/* Pembayaran + catatan */}
+            <div className="rounded-lg border border-neutral-200 bg-white p-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-neutral-900">
+                <CreditCard className="size-4 text-brand-600" aria-hidden />
+                Pembayaran
+              </div>
+              <dl className="mt-2 flex flex-col gap-1 text-sm">
+                <InfoRow label="Metode" value={paymentLabelText} />
+                {appliedPromo && (
+                  <InfoRow label="Promo" value={appliedPromo.code} />
+                )}
+                {notes.trim() && <InfoRow label="Catatan" value={notes.trim()} />}
+              </dl>
+            </div>
 
             <ReviewSummary
               items={items}
@@ -742,7 +810,6 @@ export function CheckoutWizard({
         </StepCard>
       )}
 
-      
       <div className="flex items-center justify-between gap-3">
         {step === 1 ? (
           <Link href={`/${storeSlug}/cart`}>
@@ -764,7 +831,7 @@ export function CheckoutWizard({
           </Button>
         )}
 
-        {step < 3 ? (
+        {step < 4 ? (
           <Button
             type="button"
             size="md"
@@ -790,6 +857,21 @@ export function CheckoutWizard({
           </Button>
         )}
       </div>
+
+      {/* Trust note — moved here from the page header. */}
+      <div className="flex items-center justify-center gap-1.5 text-xs text-neutral-500">
+        <ShieldCheck className="size-3.5 text-success" aria-hidden />
+        Checkout aman — data kamu terenkripsi & tidak dibagikan.
+      </div>
+    </div>
+  );
+}
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <dt className="shrink-0 text-neutral-500">{label}</dt>
+      <dd className="min-w-0 text-right text-neutral-800">{value}</dd>
     </div>
   );
 }
@@ -890,13 +972,20 @@ function ReviewSummary({
       <ul className="mt-3 flex flex-col gap-1.5 text-sm">
         {items.map((it) => (
           <li
-            key={`${it.product_id}:${it.variant_id ?? ""}`}
+            key={cartItemKey(it)}
             className="flex items-baseline justify-between gap-3"
           >
             <span className="min-w-0 truncate text-neutral-700">
               {it.qty}× {it.product_name}
               {it.variant_name && (
                 <span className="text-neutral-400"> ({it.variant_name})</span>
+              )}
+              {it.selected_options && it.selected_options.length > 0 && (
+                <span className="text-neutral-400">
+                  {" "}
+                  ·{" "}
+                  {it.selected_options.map((o) => o.option_name).join(", ")}
+                </span>
               )}
             </span>
             <span className="shrink-0 font-mono text-neutral-700">

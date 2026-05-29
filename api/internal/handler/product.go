@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -21,16 +22,19 @@ import (
 )
 
 type ProductHandler struct {
-	products *repository.ProductRepo
-	variants *repository.VariantRepo
-	stores   *repository.StoreRepo
-	subs     *repository.SubscriptionRepo
-	plans    *repository.PlanRepo
-	bulkJobs *repository.BulkJobRepo
-	storage  *storage.SupabaseClient
-	broker   *events.Broker
-	audit    *audit.Logger
-	logger   *slog.Logger
+	products  *repository.ProductRepo
+	variants  *repository.VariantRepo
+	stores    *repository.StoreRepo
+	subs      *repository.SubscriptionRepo
+	plans     *repository.PlanRepo
+	bulkJobs  *repository.BulkJobRepo
+	discounts *repository.ProductDiscountRepo
+	modifiers *repository.ModifierRepo
+	materials *repository.MaterialRepo
+	storage   *storage.SupabaseClient
+	broker    *events.Broker
+	audit     *audit.Logger
+	logger    *slog.Logger
 	// pool buat goroutine background — Context dari request dibuang
 	// karena req sudah balas 202 sebelum job selesai. Worker punya
 	// context.Background() sendiri yang independen.
@@ -44,6 +48,9 @@ func NewProductHandler(
 	subs *repository.SubscriptionRepo,
 	plans *repository.PlanRepo,
 	bulkJobs *repository.BulkJobRepo,
+	discounts *repository.ProductDiscountRepo,
+	modifiers *repository.ModifierRepo,
+	materials *repository.MaterialRepo,
 	storageCli *storage.SupabaseClient,
 	broker *events.Broker,
 	audit *audit.Logger,
@@ -51,13 +58,16 @@ func NewProductHandler(
 ) *ProductHandler {
 	h := &ProductHandler{
 		products: products, variants: variants, stores: stores,
-		subs:     subs,
-		plans:    plans,
-		bulkJobs: bulkJobs,
-		storage:  storageCli,
-		broker:   broker,
-		audit:    audit,
-		logger:   logger,
+		subs:      subs,
+		plans:     plans,
+		bulkJobs:  bulkJobs,
+		discounts: discounts,
+		modifiers: modifiers,
+		materials: materials,
+		storage:   storageCli,
+		broker:    broker,
+		audit:     audit,
+		logger:    logger,
 	}
 	h.bulkPool = newBulkJobRunner(h)
 	return h
@@ -127,13 +137,60 @@ type productDTO struct {
 	DigitalDeliveryURL  string       `json:"digital_delivery_url"`
 	DigitalFileURL      string       `json:"digital_file_url"`
 	DigitalInstructions string       `json:"digital_instructions"`
+	GTIN                string       `json:"gtin"`
+	TakeawayEnabled      bool   `json:"takeaway_enabled"`
+	TakeawayChargeCents  int64  `json:"takeaway_charge_cents"`
+	TakeawayMaterialID   string `json:"takeaway_material_id"`
+	TakeawayMaterialName string `json:"takeaway_material_name"`
 	Variants            []variantDTO `json:"variants"`
 	// VariantsCount + VariantsStock are list-only aggregates so the dashboard
 	// "Stok" column can show "N varian · stok M" instead of the parent's
 	// stale stock cell. Zero when has_variants=false.
 	VariantsCount int    `json:"variants_count"`
 	VariantsStock int    `json:"variants_stock"`
+	Discounts     []map[string]any `json:"discounts,omitempty"`
+	BaseRecipe    []map[string]any `json:"base_recipe,omitempty"`
+	Modifiers     []map[string]any `json:"modifiers,omitempty"`
 	CreatedAt     string `json:"created_at"`
+}
+
+func modifiersToDTO(groups []repository.ModifierGroup) []map[string]any {
+	out := make([]map[string]any, 0, len(groups))
+	for _, g := range groups {
+		opts := make([]map[string]any, 0, len(g.Options))
+		for _, o := range g.Options {
+			recipe := make([]map[string]any, 0, len(o.Recipe))
+			for _, ri := range o.Recipe {
+				recipe = append(recipe, map[string]any{
+					"material_id":   ri.MaterialID,
+					"material_name": ri.MaterialName,
+					"base_unit":     ri.BaseUnit,
+					"quantity":      ri.Quantity,
+				})
+			}
+			opts = append(opts, map[string]any{
+				"id":                o.ID,
+				"name":              o.Name,
+				"price_delta_cents": o.PriceDeltaCents,
+				"recipe":            recipe,
+			})
+		}
+		out = append(out, map[string]any{
+			"id":          g.ID,
+			"name":        g.Name,
+			"selection":   g.Selection,
+			"is_required": g.IsRequired,
+			"options":     opts,
+		})
+	}
+	return out
+}
+
+func uuidPtrString(id *uuid.UUID) string {
+	if id == nil {
+		return ""
+	}
+	return id.String()
 }
 
 func toProductDTO(p *repository.Product, variants []repository.Variant) productDTO {
@@ -164,6 +221,10 @@ func toProductDTO(p *repository.Product, variants []repository.Variant) productD
 		DigitalDeliveryURL:  p.DigitalDeliveryURL,
 		DigitalFileURL:      p.DigitalFileURL,
 		DigitalInstructions: p.DigitalInstructions,
+		GTIN:                p.GTIN,
+		TakeawayEnabled:     p.TakeawayEnabled,
+		TakeawayChargeCents: p.TakeawayChargeCents,
+		TakeawayMaterialID:  uuidPtrString(p.TakeawayMaterialID),
 		Variants:            vDTOs,
 		CreatedAt:           p.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
@@ -215,6 +276,26 @@ func (h *ProductHandler) List(w http.ResponseWriter, r *http.Request) {
 		aggs = map[uuid.UUID]repository.VariantAggregate{}
 	}
 
+	// Batch-load active tier discounts in one query so POS can auto-apply
+	// without N+1 round trips.
+	productIDs := make([]uuid.UUID, 0, len(items))
+	for i := range items {
+		productIDs = append(productIDs, items[i].ID)
+	}
+	activeDiscounts, _ := h.discounts.ListActiveForProducts(r.Context(), productIDs)
+	// Batch-load modifier groups so the POS grid can show option pickers
+	// without per-product round trips.
+	modsByProduct, _ := h.modifiers.GetForProducts(r.Context(), productIDs)
+	// Batch-load take-away packaging material names so POS can label the
+	// charge line without per-product round trips.
+	matIDs := make([]uuid.UUID, 0)
+	for i := range items {
+		if items[i].TakeawayMaterialID != nil {
+			matIDs = append(matIDs, *items[i].TakeawayMaterialID)
+		}
+	}
+	matNames, _ := h.materials.NamesByIDs(r.Context(), store.ID, matIDs)
+
 	out := make([]productDTO, 0, len(items))
 	for i := range items {
 		// List view doesn't fetch variants for each row (N+1 avoidance);
@@ -223,6 +304,15 @@ func (h *ProductHandler) List(w http.ResponseWriter, r *http.Request) {
 		if agg, ok := aggs[items[i].ID]; ok {
 			dto.VariantsCount = agg.Count
 			dto.VariantsStock = agg.StockTotal
+		}
+		if ds := activeDiscounts[items[i].ID]; len(ds) > 0 {
+			dto.Discounts = discountsToDTO(ds)
+		}
+		if mg := modsByProduct[items[i].ID]; len(mg) > 0 {
+			dto.Modifiers = modifiersToDTO(mg)
+		}
+		if items[i].TakeawayMaterialID != nil {
+			dto.TakeawayMaterialName = matNames[*items[i].TakeawayMaterialID]
 		}
 		out = append(out, dto)
 	}
@@ -253,7 +343,195 @@ func (h *ProductHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	variants, _ := h.variants.ListByProduct(r.Context(), p.ID)
-	response.JSON(w, http.StatusOK, map[string]any{"product": toProductDTO(p, variants)})
+	discounts, _ := h.discounts.ListByProduct(r.Context(), p.ID)
+	baseRecipe, _ := h.modifiers.GetBaseRecipe(r.Context(), p.ID)
+	groups, _ := h.modifiers.GetForProduct(r.Context(), p.ID)
+	dto := toProductDTO(p, variants)
+	dto.Discounts = discountsToDTO(discounts)
+	dto.BaseRecipe = baseRecipeToDTO(baseRecipe)
+	dto.Modifiers = modifiersToDTO(groups)
+	if p.TakeawayMaterialID != nil {
+		if names, err := h.materials.NamesByIDs(r.Context(), store.ID, []uuid.UUID{*p.TakeawayMaterialID}); err == nil {
+			dto.TakeawayMaterialName = names[*p.TakeawayMaterialID]
+		}
+	}
+	response.JSON(w, http.StatusOK, map[string]any{"product": dto})
+}
+
+func baseRecipeToDTO(items []repository.RecipeItemDetail) []map[string]any {
+	out := make([]map[string]any, 0, len(items))
+	for _, it := range items {
+		out = append(out, map[string]any{
+			"material_id":   it.MaterialID,
+			"material_name": it.MaterialName,
+			"base_unit":     it.BaseUnit,
+			"quantity":      it.Quantity,
+		})
+	}
+	return out
+}
+
+// SetModifiers batch-replaces a product's base recipe (Sprint 2). Modifier
+// groups/options follow in a later sprint and will extend this endpoint.
+func (h *ProductHandler) SetModifiers(w http.ResponseWriter, r *http.Request) {
+	store, err := h.requireStore(r)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "toko belum dibuat")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	if _, err := h.products.FindByID(r.Context(), store.ID, id); err != nil {
+		response.Error(w, http.StatusNotFound, "produk tidak ditemukan")
+		return
+	}
+	var body struct {
+		BaseRecipe []struct {
+			MaterialID string `json:"material_id"`
+			Quantity   int64  `json:"quantity"`
+		} `json:"base_recipe"`
+		Groups []struct {
+			Name       string `json:"name"`
+			Selection  string `json:"selection"`
+			IsRequired bool   `json:"is_required"`
+			Options    []struct {
+				Name            string `json:"name"`
+				PriceDeltaCents int64  `json:"price_delta_cents"`
+				Recipe          []struct {
+					MaterialID string `json:"material_id"`
+					Quantity   int64  `json:"quantity"`
+				} `json:"recipe"`
+			} `json:"options"`
+		} `json:"groups"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	items := make([]repository.RecipeItem, 0, len(body.BaseRecipe))
+	for _, it := range body.BaseRecipe {
+		mid, perr := uuid.Parse(it.MaterialID)
+		if perr != nil || it.Quantity <= 0 {
+			continue
+		}
+		items = append(items, repository.RecipeItem{MaterialID: mid, Quantity: it.Quantity})
+	}
+	if err := h.modifiers.ReplaceBaseRecipe(r.Context(), store.ID, id, items); err != nil {
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	groups := make([]repository.ModifierGroupInput, 0, len(body.Groups))
+	for _, g := range body.Groups {
+		gi := repository.ModifierGroupInput{
+			Name: g.Name, Selection: g.Selection, IsRequired: g.IsRequired,
+		}
+		for _, o := range g.Options {
+			oi := repository.ModifierOptionInput{
+				Name: o.Name, PriceDeltaCents: o.PriceDeltaCents,
+			}
+			for _, ri := range o.Recipe {
+				mid, perr := uuid.Parse(ri.MaterialID)
+				if perr != nil || ri.Quantity <= 0 {
+					continue
+				}
+				oi.Recipe = append(oi.Recipe, repository.RecipeItem{MaterialID: mid, Quantity: ri.Quantity})
+			}
+			gi.Options = append(gi.Options, oi)
+		}
+		groups = append(groups, gi)
+	}
+	if err := h.modifiers.ReplaceModifierGroups(r.Context(), store.ID, id, groups); err != nil {
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	h.audit.Log(r.Context(), store.ID, audit.Event{
+		Action: "product.modifiers_updated", EntityType: "product", EntityID: id.String(),
+		Summary: "Update resep & opsi produk",
+	})
+	response.JSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func discountsToDTO(discounts []repository.ProductDiscount) []map[string]any {
+	out := make([]map[string]any, 0, len(discounts))
+	for _, d := range discounts {
+		out = append(out, map[string]any{
+			"id":             d.ID,
+			"min_quantity":   d.MinQuantity,
+			"discount_type":  d.DiscountType,
+			"discount_value": d.DiscountValue,
+			"starts_at":      d.StartsAt,
+			"ends_at":        d.EndsAt,
+			"is_active":      d.IsActive,
+		})
+	}
+	return out
+}
+
+// SetDiscounts batch-replaces tier discounts for a product.
+func (h *ProductHandler) SetDiscounts(w http.ResponseWriter, r *http.Request) {
+	store, err := h.requireStore(r)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "toko belum dibuat")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	// Verify product belongs to this store.
+	if _, err := h.products.FindByID(r.Context(), store.ID, id); err != nil {
+		response.Error(w, http.StatusNotFound, "produk tidak ditemukan")
+		return
+	}
+	var body struct {
+		Discounts []struct {
+			MinQuantity   int     `json:"min_quantity"`
+			DiscountType  string  `json:"discount_type"`
+			DiscountValue int64   `json:"discount_value"`
+			StartsAt      *string `json:"starts_at"`
+			EndsAt        *string `json:"ends_at"`
+			IsActive      bool    `json:"is_active"`
+		} `json:"discounts"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	inputs := make([]repository.ProductDiscountInput, 0, len(body.Discounts))
+	for _, d := range body.Discounts {
+		in := repository.ProductDiscountInput{
+			MinQuantity:   d.MinQuantity,
+			DiscountType:  d.DiscountType,
+			DiscountValue: d.DiscountValue,
+			IsActive:      d.IsActive,
+		}
+		if d.StartsAt != nil && *d.StartsAt != "" {
+			if t, err := time.Parse(time.RFC3339, *d.StartsAt); err == nil {
+				in.StartsAt = &t
+			}
+		}
+		if d.EndsAt != nil && *d.EndsAt != "" {
+			if t, err := time.Parse(time.RFC3339, *d.EndsAt); err == nil {
+				in.EndsAt = &t
+			}
+		}
+		inputs = append(inputs, in)
+	}
+	if err := h.discounts.Replace(r.Context(), id, inputs); err != nil {
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	h.audit.Log(r.Context(), store.ID, audit.Event{
+		Action: "product.discounts_updated", EntityType: "product", EntityID: id.String(),
+		Summary: "Update tier diskon produk",
+	})
+	response.JSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 type variantInput struct {
@@ -283,6 +561,10 @@ type productInput struct {
 	DigitalDeliveryURL  string         `json:"digital_delivery_url"`
 	DigitalFileURL      string         `json:"digital_file_url"`
 	DigitalInstructions string         `json:"digital_instructions"`
+	GTIN                string         `json:"gtin"`
+	TakeawayEnabled     bool           `json:"takeaway_enabled"`
+	TakeawayChargeCents int64          `json:"takeaway_charge_cents"`
+	TakeawayMaterialID  string         `json:"takeaway_material_id"`
 	Variants            []variantInput `json:"variants"`
 }
 
@@ -325,6 +607,41 @@ func (in productInput) sanitize() (repository.SaveProductInput, error) {
 		in.LowStockThreshold = 0
 	}
 
+	// GTIN (barcode): optional. Sellers often paste with spaces/dashes, so we
+	// strip those, then require 8–14 digits (covers GTIN-8/12/13/14).
+	gtin := strings.TrimSpace(in.GTIN)
+	if gtin != "" {
+		var b strings.Builder
+		for _, ch := range gtin {
+			if ch == ' ' || ch == '-' {
+				continue
+			}
+			if ch < '0' || ch > '9' {
+				return repository.SaveProductInput{}, errors.New("GTIN hanya boleh berisi angka")
+			}
+			b.WriteRune(ch)
+		}
+		gtin = b.String()
+		if l := len(gtin); l < 8 || l > 14 {
+			return repository.SaveProductInput{}, errors.New("GTIN harus 8–14 digit (mis. EAN-13 atau UPC)")
+		}
+	}
+
+	// Take-away packaging config. Charge can't be negative; material is
+	// optional (only consumed when set). Cross-tenant safety is enforced at
+	// order time (consume scoped by store_id).
+	var takeawayMaterialID *uuid.UUID
+	if strings.TrimSpace(in.TakeawayMaterialID) != "" {
+		parsed, err := uuid.Parse(in.TakeawayMaterialID)
+		if err != nil {
+			return repository.SaveProductInput{}, errors.New("takeaway_material_id invalid")
+		}
+		takeawayMaterialID = &parsed
+	}
+	if in.TakeawayChargeCents < 0 {
+		in.TakeawayChargeCents = 0
+	}
+
 	productType := strings.ToLower(strings.TrimSpace(in.ProductType))
 	if productType != "digital" {
 		productType = "physical"
@@ -364,6 +681,10 @@ func (in productInput) sanitize() (repository.SaveProductInput, error) {
 		DigitalDeliveryURL:  strings.TrimSpace(in.DigitalDeliveryURL),
 		DigitalFileURL:      strings.TrimSpace(in.DigitalFileURL),
 		DigitalInstructions: strings.TrimSpace(in.DigitalInstructions),
+		GTIN:                gtin,
+		TakeawayEnabled:     in.TakeawayEnabled,
+		TakeawayChargeCents: in.TakeawayChargeCents,
+		TakeawayMaterialID:  takeawayMaterialID,
 	}, nil
 }
 

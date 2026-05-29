@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { FlaskConical, ArrowRight, X } from "lucide-react";
 
@@ -11,25 +11,18 @@ type Props = { visible: boolean };
 
 export function SandboxBanner({ visible }: Props) {
   const [dismissed, setDismissed] = useState(true); // default hidden to avoid flash
-  const prevVisibleRef = useRef(false);
 
   useEffect(() => {
-    const justBecameVisible = visible && !prevVisibleRef.current;
-    prevVisibleRef.current = visible;
-
-    if (justBecameVisible) {
-      // Mode switched to sandbox — reset dismissal so banner always shows fresh.
-      localStorage.removeItem(STORAGE_KEY);
-      setDismissed(false);
+    if (!visible) {
+      setDismissed(true);
       return;
     }
-
-    if (!visible) return;
-
+    // Cek timestamp dismiss terakhir. Jika < 7 hari, tetap hidden;
+    // jika sudah lewat 7 hari (atau belum pernah di-dismiss), tampilkan.
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const dismissedAt = parseInt(raw, 10);
-      if (Date.now() - dismissedAt < TTL_MS) {
+      if (!Number.isNaN(dismissedAt) && Date.now() - dismissedAt < TTL_MS) {
         setDismissed(true);
         return;
       }

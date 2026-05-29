@@ -112,6 +112,17 @@
     background-clip: text;
     color: transparent;
   }
+
+  /* Tetap bisa di-scroll tapi scrollbar disembunyikan. Dipakai di
+     sidebar nav supaya area menu yang panjang tetap scrollable tanpa
+     scrollbar yang mengganggu visual. */
+  .no-scrollbar {
+    -ms-overflow-style: none; /* IE/Edge legacy */
+    scrollbar-width: none; /* Firefox */
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none; /* Chrome/Safari/WebKit */
+  }
 }
 
 /* === LANDING BRAND CYCLE ===

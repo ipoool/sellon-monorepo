@@ -4,7 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { Trash2, Save, ArrowLeft, Plus, X, Layers, Star, Box, Download, Info } from "lucide-react";
+import { Trash2, Save, ArrowLeft, Plus, X, Layers, Star, Box, Download, Info, Boxes } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,7 +16,7 @@ import { Switch } from "@/components/ui/switch";
 import { PhotoUploader } from "@/components/dashboard/photo-uploader";
 import { cn } from "@/lib/utils";
 import { showError, showSuccess } from "@/lib/toast";
-import type { Category, Product, Variant } from "@/lib/types";
+import type { Category, Material, Product, ProductDiscount, Variant } from "@/lib/types";
 
 type VariantDraft = {
   id: string; // empty for new
@@ -24,6 +24,33 @@ type VariantDraft = {
   sku: string;
   price_cents: number;
   stock: number;
+};
+
+type DiscountDraft = {
+  min_quantity: number;
+  discount_type: "percent" | "fixed";
+  discount_value: number;
+  starts_at: string; // datetime-local format or ""
+  ends_at: string;
+  is_active: boolean;
+};
+
+type RecipeDraft = {
+  material_id: string;
+  quantity: number;
+};
+
+type OptionDraft = {
+  name: string;
+  price_delta_rupiah: number;
+  recipe: RecipeDraft[];
+};
+
+type GroupDraft = {
+  name: string;
+  selection: "single" | "multi";
+  is_required: boolean;
+  options: OptionDraft[];
 };
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -56,6 +83,58 @@ export function ProdukForm({ initial }: Props) {
   const [productType, setProductType] = useState<"physical" | "digital">(
     initial?.product_type ?? "physical",
   );
+
+  // ISO date helper untuk datetime-local input value (drop seconds + tz).
+  const isoToLocalInput = (iso: string | null): string => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    // YYYY-MM-DDTHH:MM in local tz
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  const [discounts, setDiscounts] = useState<DiscountDraft[]>(() =>
+    (initial?.discounts ?? []).map((d: ProductDiscount) => ({
+      min_quantity: d.min_quantity,
+      discount_type: d.discount_type,
+      discount_value: d.discount_value,
+      starts_at: isoToLocalInput(d.starts_at),
+      ends_at: isoToLocalInput(d.ends_at),
+      is_active: d.is_active,
+    })),
+  );
+  const [materials, setMaterials] = useState<Material[]>([]);
+  const [recipe, setRecipe] = useState<RecipeDraft[]>(() =>
+    (initial?.base_recipe ?? []).map((r) => ({
+      material_id: r.material_id,
+      quantity: r.quantity,
+    })),
+  );
+  const [groups, setGroups] = useState<GroupDraft[]>(() =>
+    (initial?.modifiers ?? []).map((g) => ({
+      name: g.name,
+      selection: g.selection,
+      is_required: g.is_required,
+      options: g.options.map((o) => ({
+        name: o.name,
+        price_delta_rupiah: Math.floor(o.price_delta_cents / 100),
+        recipe: (o.recipe ?? []).map((r) => ({
+          material_id: r.material_id,
+          quantity: r.quantity,
+        })),
+      })),
+    })),
+  );
+  const [takeawayEnabled, setTakeawayEnabled] = useState<boolean>(
+    initial?.takeaway_enabled ?? false,
+  );
+  const [takeawayCharge, setTakeawayCharge] = useState<number>(
+    initial ? Math.floor((initial.takeaway_charge_cents ?? 0) / 100) : 0,
+  );
+  const [takeawayMaterialId, setTakeawayMaterialId] = useState<string>(
+    initial?.takeaway_material_id ?? "",
+  );
   const [digitalDeliveryURL, setDigitalDeliveryURL] = useState<string>(
     initial?.digital_delivery_url ?? "",
   );
@@ -76,6 +155,18 @@ export function ProdukForm({ initial }: Props) {
         if (!res.ok) return;
         const data = (await res.json()) as { categories: Category[] };
         setCategories(data.categories ?? []);
+      } catch {
+        // ignore
+      }
+    })();
+    void (async () => {
+      try {
+        const res = await fetch(`${apiBase}/api/v1/materials?limit=200`, {
+          credentials: "include",
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as { materials: Material[] };
+        setMaterials(data.materials ?? []);
       } catch {
         // ignore
       }
@@ -151,6 +242,12 @@ export function ProdukForm({ initial }: Props) {
       width_cm: isDigital ? 0 : Math.max(0, Number(fd.get("width_cm") ?? 0)),
       height_cm: isDigital ? 0 : Math.max(0, Number(fd.get("height_cm") ?? 0)),
       status: String(fd.get("status") ?? "active"),
+      gtin: String(fd.get("gtin") ?? "").trim(),
+      takeaway_enabled: takeawayEnabled,
+      takeaway_charge_cents: takeawayEnabled
+        ? Math.max(0, Math.round(takeawayCharge)) * 100
+        : 0,
+      takeaway_material_id: takeawayEnabled ? takeawayMaterialId : "",
       photo_urls: photoUrls,
       is_featured: fd.get("is_featured") === "on",
       product_type: productType,
@@ -172,6 +269,63 @@ export function ProdukForm({ initial }: Props) {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+
+      // Save tier discounts (separate endpoint). Skip jika new product (need id).
+      const productId = isEditing ? initial.id : data?.product?.id;
+      if (productId) {
+        const localToISO = (s: string) => (s ? new Date(s).toISOString() : null);
+        await fetch(`${apiBase}/api/v1/products/${productId}/discounts`, {
+          method: "PUT",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            discounts: discounts.map((d) => ({
+              min_quantity: d.min_quantity,
+              discount_type: d.discount_type,
+              discount_value: d.discount_value,
+              starts_at: localToISO(d.starts_at),
+              ends_at: localToISO(d.ends_at),
+              is_active: d.is_active,
+            })),
+          }),
+        }).catch(() => {});
+
+        // Save base recipe (material consumption) — separate endpoint.
+        await fetch(`${apiBase}/api/v1/products/${productId}/modifiers`, {
+          method: "PUT",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            base_recipe: recipe
+              .filter((r) => r.material_id && r.quantity > 0)
+              .map((r) => ({ material_id: r.material_id, quantity: r.quantity })),
+            groups: groups
+              .filter(
+                (g) =>
+                  g.name.trim() && g.options.some((o) => o.name.trim()),
+              )
+              .map((g) => ({
+                name: g.name.trim(),
+                selection: g.selection,
+                is_required: g.is_required,
+                options: g.options
+                  .filter((o) => o.name.trim())
+                  .map((o) => ({
+                    name: o.name.trim(),
+                    price_delta_cents:
+                      Math.max(0, Math.round(o.price_delta_rupiah || 0)) * 100,
+                    recipe: o.recipe
+                      .filter((r) => r.material_id && r.quantity > 0)
+                      .map((r) => ({
+                        material_id: r.material_id,
+                        quantity: r.quantity,
+                      })),
+                  })),
+              })),
+          }),
+        }).catch(() => {});
+      }
+
       showSuccess(isEditing ? "Produk tersimpan" : "Produk baru ditambahkan");
       push("/products");
       refresh();
@@ -414,6 +568,19 @@ export function ProdukForm({ initial }: Props) {
               <option value="sold_out">Stok habis</option>
             </Select>
           </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="gtin">Barcode / GTIN</Label>
+            <Input
+              id="gtin"
+              name="gtin"
+              inputMode="numeric"
+              defaultValue={initial?.gtin ?? ""}
+              placeholder="Mis. 8991002123455"
+            />
+            <p className="text-xs text-neutral-500">
+              Global Trade Item Number (EAN/UPC), 8–14 digit. Opsional.
+            </p>
+          </div>
         </div>
 
         <label
@@ -437,6 +604,680 @@ export function ProdukForm({ initial }: Props) {
             defaultChecked={initial?.is_featured ?? false}
           />
         </label>
+      </Card>
+
+      <Card>
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <h2 className="font-semibold text-neutral-900">Potongan Volume</h2>
+            <p className="mt-0.5 text-sm text-neutral-500">
+              Otomatis kasih diskon saat pembeli beli minimal qty tertentu. Bisa di-set masa berlaku.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() =>
+              setDiscounts([
+                ...discounts,
+                {
+                  min_quantity: 2,
+                  discount_type: "percent",
+                  discount_value: 5,
+                  starts_at: "",
+                  ends_at: "",
+                  is_active: true,
+                },
+              ])
+            }
+            className="inline-flex shrink-0 items-center gap-1 rounded-md border border-neutral-200 bg-white px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
+          >
+            <Plus className="size-3.5" aria-hidden />
+            Tambah Tier
+          </button>
+        </div>
+
+        {discounts.length === 0 ? (
+          <p className="rounded-lg border border-dashed border-neutral-200 bg-neutral-50 py-6 text-center text-sm text-neutral-500">
+            Belum ada potongan volume. Klik "Tambah Tier" untuk mulai.
+          </p>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {discounts.map((d, i) => (
+              <div
+                key={i}
+                className={cn(
+                  "rounded-lg border p-3",
+                  d.is_active ? "border-neutral-200 bg-white" : "border-neutral-200 bg-neutral-50 opacity-70",
+                )}
+              >
+                <div className="grid gap-2 sm:grid-cols-[110px_120px_1fr_auto]">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-medium text-neutral-600">Min. Qty</label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={d.min_quantity || ""}
+                      onChange={(e) =>
+                        setDiscounts(
+                          discounts.map((x, j) =>
+                            j === i ? { ...x, min_quantity: parseInt(e.target.value, 10) || 1 } : x,
+                          ),
+                        )
+                      }
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-medium text-neutral-600">Tipe</label>
+                    <Select
+                      value={d.discount_type}
+                      onChange={(e) =>
+                        setDiscounts(
+                          discounts.map((x, j) =>
+                            j === i
+                              ? { ...x, discount_type: e.target.value as "percent" | "fixed" }
+                              : x,
+                          ),
+                        )
+                      }
+                    >
+                      <option value="percent">Persen %</option>
+                      <option value="fixed">Nominal Rp</option>
+                    </Select>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-medium text-neutral-600">
+                      Nilai {d.discount_type === "percent" ? "(%)" : "(Rp)"}
+                    </label>
+                    {d.discount_type === "percent" ? (
+                      <Input
+                        type="number"
+                        min={0}
+                        max={100}
+                        value={d.discount_value || ""}
+                        onChange={(e) =>
+                          setDiscounts(
+                            discounts.map((x, j) =>
+                              j === i ? { ...x, discount_value: Math.min(100, parseInt(e.target.value, 10) || 0) } : x,
+                            ),
+                          )
+                        }
+                      />
+                    ) : (
+                      <div className="relative">
+                        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-neutral-400">Rp</span>
+                        <Input
+                          type="text"
+                          inputMode="numeric"
+                          value={d.discount_value > 0 ? Math.floor(d.discount_value / 100).toLocaleString("id-ID") : ""}
+                          onChange={(e) => {
+                            const digits = e.target.value.replace(/\D/g, "");
+                            const rupiah = digits === "" ? 0 : parseInt(digits, 10);
+                            setDiscounts(
+                              discounts.map((x, j) => (j === i ? { ...x, discount_value: rupiah * 100 } : x)),
+                            );
+                          }}
+                          className="pl-10 text-right"
+                        />
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-end gap-1">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setDiscounts(
+                          discounts.map((x, j) => (j === i ? { ...x, is_active: !x.is_active } : x)),
+                        )
+                      }
+                      className={cn(
+                        "h-10 rounded-md border px-2.5 text-xs font-medium transition-colors",
+                        d.is_active
+                          ? "border-brand-200 bg-brand-50 text-brand-700"
+                          : "border-neutral-200 bg-white text-neutral-500",
+                      )}
+                    >
+                      {d.is_active ? "Aktif" : "Off"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDiscounts(discounts.filter((_, j) => j !== i))}
+                      className="flex size-10 items-center justify-center rounded-md text-neutral-400 hover:bg-danger/10 hover:text-danger"
+                    >
+                      <X className="size-4" aria-hidden />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-medium text-neutral-600">
+                      Mulai <span className="text-neutral-400">(opsional)</span>
+                    </label>
+                    <Input
+                      type="datetime-local"
+                      value={d.starts_at}
+                      onChange={(e) =>
+                        setDiscounts(
+                          discounts.map((x, j) => (j === i ? { ...x, starts_at: e.target.value } : x)),
+                        )
+                      }
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-medium text-neutral-600">
+                      Sampai <span className="text-neutral-400">(opsional)</span>
+                    </label>
+                    <Input
+                      type="datetime-local"
+                      value={d.ends_at}
+                      onChange={(e) =>
+                        setDiscounts(
+                          discounts.map((x, j) => (j === i ? { ...x, ends_at: e.target.value } : x)),
+                        )
+                      }
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {/* Resep Dasar Produk — bahan yang terpakai tiap 1 produk terjual */}
+      <Card>
+        <div className="mb-4 flex items-center gap-2">
+          <Boxes className="size-4 text-brand-600" aria-hidden />
+          <div>
+            <h2 className="font-semibold text-neutral-900">Resep Dasar Produk</h2>
+            <p className="mt-0.5 text-sm text-neutral-500">
+              Bahan yang otomatis terpakai (dan stoknya berkurang) tiap 1 produk
+              ini terjual — di POS maupun toko online.
+            </p>
+          </div>
+        </div>
+
+        {materials.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-neutral-300 bg-neutral-50 px-4 py-5 text-center text-sm text-neutral-500">
+            Belum ada bahan baku.{" "}
+            <Link href="/materials" className="font-medium text-brand-700 hover:underline">
+              Tambah bahan dulu
+            </Link>{" "}
+            untuk bisa pasang resep.
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {recipe.map((row, i) => {
+              const mat = materials.find((m) => m.id === row.material_id);
+              return (
+                <div key={i} className="flex items-center gap-2">
+                  <Select
+                    value={row.material_id}
+                    onChange={(e) =>
+                      setRecipe(
+                        recipe.map((x, j) =>
+                          j === i ? { ...x, material_id: e.target.value } : x,
+                        ),
+                      )
+                    }
+                    className="flex-1"
+                  >
+                    <option value="">— pilih bahan —</option>
+                    {materials.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name} ({m.base_unit})
+                      </option>
+                    ))}
+                  </Select>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={row.quantity || ""}
+                    onChange={(e) =>
+                      setRecipe(
+                        recipe.map((x, j) =>
+                          j === i
+                            ? { ...x, quantity: parseInt(e.target.value, 10) || 0 }
+                            : x,
+                        ),
+                      )
+                    }
+                    placeholder="Qty"
+                    className="w-24 text-right"
+                  />
+                  <span className="w-10 shrink-0 text-xs text-neutral-400">
+                    {mat?.base_unit ?? ""}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setRecipe(recipe.filter((_, j) => j !== i))}
+                    className="flex size-9 shrink-0 items-center justify-center rounded-md text-neutral-400 hover:bg-danger/10 hover:text-danger"
+                    aria-label="Hapus bahan"
+                  >
+                    <Trash2 className="size-4" aria-hidden />
+                  </button>
+                </div>
+              );
+            })}
+            <div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  setRecipe([...recipe, { material_id: "", quantity: 1 }])
+                }
+              >
+                <Plus className="size-4" aria-hidden />
+                Tambah Bahan
+              </Button>
+            </div>
+          </div>
+        )}
+      </Card>
+
+      {/* Penyajian — Dine In / Take Away (POS only) */}
+      <Card>
+        <div className="mb-4 flex items-center gap-2">
+          <Box className="size-4 text-brand-600" aria-hidden />
+          <div>
+            <h2 className="font-semibold text-neutral-900">
+              Penyajian (Dine In / Take Away)
+            </h2>
+            <p className="mt-0.5 text-sm text-neutral-500">
+              Saat aktif, kasir diminta pilih Dine In / Take Away ketika produk
+              ini di-tap. Take Away menambah baris charge kemasan yang ditagih
+              ke pembeli.
+            </p>
+          </div>
+        </div>
+
+        <label className="flex cursor-pointer items-start justify-between gap-4 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2.5">
+          <div>
+            <p className="text-sm font-medium text-neutral-900">
+              Aktifkan pilihan Dine In / Take Away
+            </p>
+            <p className="text-xs text-neutral-600">
+              Hanya untuk produk yang perlu kemasan saat dibawa pulang.
+            </p>
+          </div>
+          <Switch
+            checked={takeawayEnabled}
+            onChange={(e) => setTakeawayEnabled(e.target.checked)}
+          />
+        </label>
+
+        {takeawayEnabled && (
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="takeaway_charge">Charge kemasan / porsi (Rp)</Label>
+              <Input
+                id="takeaway_charge"
+                inputMode="numeric"
+                value={takeawayCharge ? takeawayCharge.toLocaleString("id-ID") : ""}
+                onChange={(e) =>
+                  setTakeawayCharge(
+                    parseInt(e.target.value.replace(/\D/g, ""), 10) || 0,
+                  )
+                }
+                placeholder="1000"
+              />
+              <p className="text-xs text-neutral-500">
+                Ditagih ke pembeli sebagai baris terpisah di struk.
+              </p>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="takeaway_material">Bahan yang dipotong</Label>
+              <Select
+                id="takeaway_material"
+                value={takeawayMaterialId}
+                onChange={(e) => setTakeawayMaterialId(e.target.value)}
+              >
+                <option value="">— tidak potong stok —</option>
+                {materials.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name} ({m.base_unit})
+                  </option>
+                ))}
+              </Select>
+              <p className="text-xs text-neutral-500">
+                1 dipotong tiap porsi take away + masuk laporan konsumsi.
+              </p>
+            </div>
+          </div>
+        )}
+      </Card>
+
+      {/* Opsi Produk — grup pilihan (ukuran, kemasan, add-on) dengan harga */}
+      <Card>
+        <div className="mb-4 flex items-center gap-2">
+          <Layers className="size-4 text-brand-600" aria-hidden />
+          <div>
+            <h2 className="font-semibold text-neutral-900">Opsi Produk</h2>
+            <p className="mt-0.5 text-sm text-neutral-500">
+              Pilihan yang ditawarkan ke pembeli (Ukuran, Kemasan, Topping…).
+              Tiap opsi bisa menambah harga jual.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-4">
+          {groups.map((g, gi) => (
+            <div
+              key={gi}
+              className="rounded-lg border border-neutral-200 bg-neutral-50/60 p-3"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <Input
+                  value={g.name}
+                  onChange={(e) =>
+                    setGroups(
+                      groups.map((x, j) =>
+                        j === gi ? { ...x, name: e.target.value } : x,
+                      ),
+                    )
+                  }
+                  placeholder="Nama grup (mis. Ukuran)"
+                  className="min-w-0 flex-1"
+                />
+                <Select
+                  value={g.selection}
+                  onChange={(e) =>
+                    setGroups(
+                      groups.map((x, j) =>
+                        j === gi
+                          ? { ...x, selection: e.target.value as GroupDraft["selection"] }
+                          : x,
+                      ),
+                    )
+                  }
+                  className="h-9 w-32"
+                >
+                  <option value="single">Pilih 1</option>
+                  <option value="multi">Pilih banyak</option>
+                </Select>
+                <label className="flex items-center gap-1.5 text-xs text-neutral-600">
+                  <Switch
+                    size="sm"
+                    checked={g.is_required}
+                    onChange={(e) =>
+                      setGroups(
+                        groups.map((x, j) =>
+                          j === gi ? { ...x, is_required: e.target.checked } : x,
+                        ),
+                      )
+                    }
+                  />
+                  Wajib
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setGroups(groups.filter((_, j) => j !== gi))}
+                  className="flex size-9 items-center justify-center rounded-md text-neutral-400 hover:bg-danger/10 hover:text-danger"
+                  aria-label="Hapus grup"
+                >
+                  <Trash2 className="size-4" aria-hidden />
+                </button>
+              </div>
+
+              <div className="mt-3 flex flex-col gap-3">
+                {g.options.map((o, oi) => (
+                  <div key={oi} className="flex flex-col gap-1.5 rounded-md border border-neutral-200 bg-white p-2">
+                   <div className="flex items-center gap-2">
+                    <Input
+                      value={o.name}
+                      onChange={(e) =>
+                        setGroups(
+                          groups.map((x, j) =>
+                            j === gi
+                              ? {
+                                  ...x,
+                                  options: x.options.map((y, k) =>
+                                    k === oi ? { ...y, name: e.target.value } : y,
+                                  ),
+                                }
+                              : x,
+                          ),
+                        )
+                      }
+                      placeholder="Nama opsi (mis. Large)"
+                      className="min-w-0 flex-1"
+                    />
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs text-neutral-400">+Rp</span>
+                      <Input
+                        inputMode="numeric"
+                        value={
+                          o.price_delta_rupiah
+                            ? o.price_delta_rupiah.toLocaleString("id-ID")
+                            : ""
+                        }
+                        onChange={(e) =>
+                          setGroups(
+                            groups.map((x, j) =>
+                              j === gi
+                                ? {
+                                    ...x,
+                                    options: x.options.map((y, k) =>
+                                      k === oi
+                                        ? {
+                                            ...y,
+                                            price_delta_rupiah:
+                                              parseInt(
+                                                e.target.value.replace(/\D/g, ""),
+                                                10,
+                                              ) || 0,
+                                          }
+                                        : y,
+                                    ),
+                                  }
+                                : x,
+                            ),
+                          )
+                        }
+                        placeholder="0"
+                        className="w-24 text-right"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setGroups(
+                          groups.map((x, j) =>
+                            j === gi
+                              ? { ...x, options: x.options.filter((_, k) => k !== oi) }
+                              : x,
+                          ),
+                        )
+                      }
+                      className="flex size-9 shrink-0 items-center justify-center rounded-md text-neutral-400 hover:bg-danger/10 hover:text-danger"
+                      aria-label="Hapus opsi"
+                    >
+                      <X className="size-4" aria-hidden />
+                    </button>
+                   </div>
+
+                   {/* Per-option recipe: materials consumed when chosen */}
+                   {materials.length > 0 && (
+                     <div className="flex flex-col gap-1.5 border-t border-neutral-100 pt-1.5 pl-1">
+                       {o.recipe.map((r, ri) => {
+                         const mat = materials.find((m) => m.id === r.material_id);
+                         return (
+                           <div key={ri} className="flex items-center gap-2">
+                             <span className="text-[10px] uppercase tracking-wider text-neutral-400">
+                               pakai
+                             </span>
+                             <Select
+                               value={r.material_id}
+                               onChange={(e) =>
+                                 setGroups(
+                                   groups.map((x, j) =>
+                                     j === gi
+                                       ? {
+                                           ...x,
+                                           options: x.options.map((y, k) =>
+                                             k === oi
+                                               ? {
+                                                   ...y,
+                                                   recipe: y.recipe.map((z, m) =>
+                                                     m === ri
+                                                       ? { ...z, material_id: e.target.value }
+                                                       : z,
+                                                   ),
+                                                 }
+                                               : y,
+                                           ),
+                                         }
+                                       : x,
+                                   ),
+                                 )
+                               }
+                               className="h-8 min-w-0 flex-1 text-xs"
+                             >
+                               <option value="">— bahan —</option>
+                               {materials.map((m) => (
+                                 <option key={m.id} value={m.id}>
+                                   {m.name} ({m.base_unit})
+                                 </option>
+                               ))}
+                             </Select>
+                             <Input
+                               type="number"
+                               min={1}
+                               value={r.quantity || ""}
+                               onChange={(e) =>
+                                 setGroups(
+                                   groups.map((x, j) =>
+                                     j === gi
+                                       ? {
+                                           ...x,
+                                           options: x.options.map((y, k) =>
+                                             k === oi
+                                               ? {
+                                                   ...y,
+                                                   recipe: y.recipe.map((z, m) =>
+                                                     m === ri
+                                                       ? {
+                                                           ...z,
+                                                           quantity:
+                                                             parseInt(e.target.value, 10) || 0,
+                                                         }
+                                                       : z,
+                                                   ),
+                                                 }
+                                               : y,
+                                           ),
+                                         }
+                                       : x,
+                                   ),
+                                 )
+                               }
+                               placeholder="Qty"
+                               className="h-8 w-20 text-right text-xs"
+                             />
+                             <span className="w-8 shrink-0 text-[10px] text-neutral-400">
+                               {mat?.base_unit ?? ""}
+                             </span>
+                             <button
+                               type="button"
+                               onClick={() =>
+                                 setGroups(
+                                   groups.map((x, j) =>
+                                     j === gi
+                                       ? {
+                                           ...x,
+                                           options: x.options.map((y, k) =>
+                                             k === oi
+                                               ? { ...y, recipe: y.recipe.filter((_, m) => m !== ri) }
+                                               : y,
+                                           ),
+                                         }
+                                       : x,
+                                   ),
+                                 )
+                               }
+                               className="flex size-7 shrink-0 items-center justify-center rounded text-neutral-300 hover:text-danger"
+                               aria-label="Hapus bahan opsi"
+                             >
+                               <X className="size-3.5" aria-hidden />
+                             </button>
+                           </div>
+                         );
+                       })}
+                       <button
+                         type="button"
+                         onClick={() =>
+                           setGroups(
+                             groups.map((x, j) =>
+                               j === gi
+                                 ? {
+                                     ...x,
+                                     options: x.options.map((y, k) =>
+                                       k === oi
+                                         ? { ...y, recipe: [...y.recipe, { material_id: "", quantity: 1 }] }
+                                         : y,
+                                     ),
+                                   }
+                                 : x,
+                             ),
+                           )
+                         }
+                         className="inline-flex w-fit items-center gap-1 text-[11px] font-medium text-brand-700 hover:underline"
+                       >
+                         <Plus className="size-3" aria-hidden />
+                         Pakai bahan saat opsi ini dipilih
+                       </button>
+                     </div>
+                   )}
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() =>
+                    setGroups(
+                      groups.map((x, j) =>
+                        j === gi
+                          ? {
+                              ...x,
+                              options: [
+                                ...x.options,
+                                { name: "", price_delta_rupiah: 0, recipe: [] },
+                              ],
+                            }
+                          : x,
+                      ),
+                    )
+                  }
+                  className="ml-2 inline-flex w-fit items-center gap-1 text-xs font-medium text-brand-700 hover:underline"
+                >
+                  <Plus className="size-3.5" aria-hidden />
+                  Tambah Opsi
+                </button>
+              </div>
+            </div>
+          ))}
+          <div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                setGroups([
+                  ...groups,
+                  {
+                    name: "",
+                    selection: "single",
+                    is_required: false,
+                    options: [{ name: "", price_delta_rupiah: 0, recipe: [] }],
+                  },
+                ])
+              }
+            >
+              <Plus className="size-4" aria-hidden />
+              Tambah Grup Opsi
+            </Button>
+          </div>
+        </div>
       </Card>
 
       <Card>

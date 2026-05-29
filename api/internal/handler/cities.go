@@ -42,9 +42,10 @@ func (h *CitiesHandler) Search(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]map[string]string, 0, len(cities))
 	for _, c := range cities {
+		name := strings.TrimSpace(c.Type + " " + c.CityName)
 		out = append(out, map[string]string{
 			"id":          c.CityID,
-			"name":        c.Type + " " + c.CityName,
+			"name":        name,
 			"province":    c.Province,
 			"postal_code": c.PostalCode,
 		})

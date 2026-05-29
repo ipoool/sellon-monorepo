@@ -10,6 +10,10 @@ import {
   StickyNote,
   Package,
   Printer,
+  ShoppingCart,
+  Store as StoreIcon,
+  MessageCircle,
+  Sparkles,
 } from "lucide-react";
 
 import { DashboardShell } from "@/components/layout/dashboard-shell";
@@ -106,6 +110,7 @@ export default async function OrderDetailPage({
         <div className="flex flex-col gap-5 lg:col-span-8">
           <Card>
             <div className="flex flex-wrap items-center gap-2">
+              <OrderSourceBadge source={order.source} />
               <Badge variant={statusBadge[order.status].variant}>
                 {statusBadge[order.status].label}
               </Badge>
@@ -184,14 +189,37 @@ export default async function OrderDetailPage({
                 <span>Subtotal</span>
                 <span>{formatRupiah(order.subtotal_cents)}</span>
               </div>
-              {order.discount_cents > 0 && (
-                <div className="flex justify-between text-success">
-                  <span>
-                    Diskon{order.promo_code ? ` (${order.promo_code})` : ""}
-                  </span>
-                  <span>−{formatRupiah(order.discount_cents)}</span>
-                </div>
-              )}
+              {(() => {
+                const loyaltyDisc = order.loyalty_discount_cents ?? 0;
+                const loyaltyPts = order.loyalty_points_redeemed ?? 0;
+                // discount_cents is the combined total; split out the loyalty
+                // portion so each source is labelled distinctly.
+                const manualDisc = Math.max(0, order.discount_cents - loyaltyDisc);
+                return (
+                  <>
+                    {manualDisc > 0 && (
+                      <div className="flex justify-between text-success">
+                        <span>
+                          Diskon{order.promo_code ? ` (${order.promo_code})` : ""}
+                        </span>
+                        <span>−{formatRupiah(manualDisc)}</span>
+                      </div>
+                    )}
+                    {loyaltyDisc > 0 && (
+                      <div className="flex items-center justify-between text-success">
+                        <span className="inline-flex items-center gap-1.5">
+                          <Sparkles className="size-3.5" aria-hidden />
+                          Poin Loyalty
+                          <span className="text-xs text-neutral-500">
+                            ({loyaltyPts.toLocaleString("id-ID")} poin ditukar)
+                          </span>
+                        </span>
+                        <span>−{formatRupiah(loyaltyDisc)}</span>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
               <div className="flex justify-between text-neutral-600">
                 <span>Ongkir{order.courier ? ` (${order.courier})` : ""}</span>
                 <span>{formatRupiah(order.shipping_cents)}</span>
@@ -368,5 +396,31 @@ export default async function OrderDetailPage({
         </div>
       </div>
     </DashboardShell>
+  );
+}
+
+function OrderSourceBadge({ source }: { source?: string }) {
+  const s = source || "storefront";
+  if (s === "pos") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full border border-brand-200 bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700">
+        <ShoppingCart className="size-3" aria-hidden />
+        Kasir POS
+      </span>
+    );
+  }
+  if (s === "whatsapp") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
+        <MessageCircle className="size-3" aria-hidden />
+        WhatsApp
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-neutral-200 bg-neutral-50 px-2 py-0.5 text-xs font-medium text-neutral-700">
+      <StoreIcon className="size-3" aria-hidden />
+      Toko Online
+    </span>
   );
 }

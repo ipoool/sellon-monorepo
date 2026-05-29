@@ -100,6 +100,13 @@ export function CartView({
                           {it.variant_name}
                         </p>
                       )}
+                      {it.selected_options && it.selected_options.length > 0 && (
+                        <p className="mt-0.5 text-xs text-neutral-500">
+                          {it.selected_options
+                            .map((o) => o.option_name)
+                            .join(" · ")}
+                        </p>
+                      )}
                       {it.product_type === "digital" && (
                         <Badge variant="brand" className="mt-1.5 text-[10px]">
                           Digital

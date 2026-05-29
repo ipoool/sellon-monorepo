@@ -13,6 +13,11 @@ import {
   Users,
   Palette,
   History,
+  Sparkles,
+  Award,
+  Printer,
+  QrCode,
+  ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -21,8 +26,12 @@ const tabs = [
   { label: "Storefront", href: "/settings/storefront", icon: Palette },
   { label: "Domain", href: "/settings/domain", icon: Globe },
   { label: "Pembayaran", href: "/settings/payment", icon: CreditCard },
+  { label: "Loyalty", href: "/settings/loyalty", icon: Sparkles },
+  { label: "Membership", href: "/settings/membership", icon: Award },
+  { label: "Meja & QR", href: "/settings/tables", icon: QrCode },
   { label: "Kategori", href: "/settings/categories", icon: Tag },
   { label: "Pengiriman", href: "/settings/shipping", icon: Truck },
+  { label: "Printer", href: "/settings/printer", icon: Printer },
   { label: "WhatsApp", href: "/settings/whatsapp", icon: MessageCircle },
   { label: "Tim", href: "/settings/team", icon: Users },
   { label: "Aktivitas", href: "/settings/activity", icon: History },
@@ -33,39 +42,45 @@ export function PengaturanTabs() {
   const pathname = usePathname();
 
   return (
-    // Wrapper is `relative` so the right-edge fade can hint horizontal
-    // overflow on viewports too narrow for all 9 tabs (e.g., 1280px).
-    // The fade pseudo-overlay is decorative — scrolling itself is handled
-    // by `overflow-x-auto` on the inner nav.
-    <div className="relative -mx-4 sm:mx-0">
-      <nav className="overflow-x-auto border-b border-neutral-200 px-4 sm:px-0">
-        <ul className="flex gap-0.5 whitespace-nowrap">
-          {tabs.map(({ label, href, icon: Icon }) => {
-            const active =
-              pathname === href || pathname.startsWith(href + "/");
-            return (
-              <li key={href}>
-                <Link
-                  href={href}
-                  className={cn(
-                    "flex items-center gap-2 border-b-2 px-2.5 py-3 text-sm font-medium transition-colors",
-                    active
-                      ? "border-brand-500 text-brand-700"
-                      : "border-transparent text-neutral-600 hover:text-neutral-900",
-                  )}
-                >
-                  <Icon className="size-4" aria-hidden />
-                  {label}
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      </nav>
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-neutral-50 to-transparent"
-      />
-    </div>
+    // Vertical tab rail on desktop (lg+): stacks as a left column beside
+    // the content. On mobile it falls back to a horizontal scroll row so
+    // 11 tabs don't push the content far down the page. Pill highlight
+    // works for both orientations (an underline would only fit horizontal).
+    <nav className="no-scrollbar -mx-4 flex flex-row gap-1 overflow-x-auto border-b border-neutral-200 px-4 pb-2 sm:mx-0 sm:px-0 lg:flex-col lg:gap-1 lg:overflow-visible lg:border-b-0 lg:pb-0">
+      {tabs.map(({ label, href, icon: Icon }) => {
+        const active = pathname === href || pathname.startsWith(href + "/");
+        return (
+          <Link
+            key={href}
+            href={href}
+            aria-current={active ? "page" : undefined}
+            className={cn(
+              "group flex items-center gap-2.5 whitespace-nowrap rounded-lg px-3 py-2.5 text-sm transition-colors lg:w-full",
+              active
+                ? "bg-brand-50 font-semibold text-brand-700"
+                : "font-medium text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900",
+            )}
+          >
+            <Icon
+              className={cn(
+                "size-4 shrink-0 transition-colors",
+                active
+                  ? "text-brand-600"
+                  : "text-neutral-400 group-hover:text-neutral-600",
+              )}
+              aria-hidden
+            />
+            {label}
+            <ChevronRight
+              className={cn(
+                "ml-auto hidden size-4 shrink-0 text-brand-600 transition-opacity lg:block",
+                active ? "opacity-100" : "opacity-0",
+              )}
+              aria-hidden
+            />
+          </Link>
+        );
+      })}
+    </nav>
   );
 }

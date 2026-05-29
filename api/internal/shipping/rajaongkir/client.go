@@ -1,7 +1,11 @@
-// Package rajaongkir wraps the bits of the RajaOngkir API we need:
-// cities (cached) + cost (computed per request).
+// Package rajaongkir wraps the bits of the RajaOngkir shipping API we need:
+// destination search + domestic cost.
 //
-// API docs: https://rajaongkir.com/dokumentasi/starter
+// NOTE: RajaOngkir's legacy api.rajaongkir.com endpoints were shut down after
+// the Komerce migration. This client targets the current Komerce platform:
+//   https://rajaongkir.komerce.id/api/v1
+// Existing RajaOngkir API keys continue to work via Komerce. Destinations are
+// subdistrict-level (finer than the old city list) and searched server-side.
 package rajaongkir
 
 import (
@@ -14,12 +18,13 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
-// Tier maps to RajaOngkir's starter / basic / pro plans. The endpoint
-// path differs per tier; the rest of the API surface is consistent.
+const baseURL = "https://rajaongkir.komerce.id/api/v1"
+
+// Tier is retained for config/wiring compatibility but no longer changes the
+// endpoint — Komerce uses a single base URL for all plans.
 type Tier string
 
 const (
@@ -32,25 +37,20 @@ type Client struct {
 	apiKey string
 	tier   Tier
 	http   *http.Client
-
-	mu          sync.RWMutex
-	cities      []City
-	citiesAt    time.Time
-	citiesTTL   time.Duration
-	citiesError error
 }
 
+// City mirrors a Komerce destination row. Field names are kept stable for
+// callers; CityID is the Komerce destination id (used as origin/destination
+// in cost calls), CityName is the human-readable full label.
 type City struct {
-	CityID     string `json:"city_id"`
-	ProvinceID string `json:"province_id"`
-	Province   string `json:"province"`
-	Type       string `json:"type"` // "Kota" or "Kabupaten"
-	CityName   string `json:"city_name"`
-	PostalCode string `json:"postal_code"`
+	CityID     string
+	ProvinceID string
+	Province   string
+	Type       string
+	CityName   string
+	PostalCode string
 }
 
-// IsConfigured returns true when an API key is set. Handlers should treat
-// a non-configured client as a soft "fall back to built-in table".
 func (c *Client) IsConfigured() bool {
 	return c != nil && c.apiKey != ""
 }
@@ -63,134 +63,91 @@ func New(apiKey, tier string) *Client {
 		t = TierStarter
 	}
 	return &Client{
-		apiKey:    apiKey,
-		tier:      t,
-		http:      &http.Client{Timeout: 12 * time.Second},
-		citiesTTL: 24 * time.Hour,
+		apiKey: apiKey,
+		tier:   t,
+		http:   &http.Client{Timeout: 12 * time.Second},
 	}
 }
 
-func (c *Client) baseURL() string {
-	switch c.tier {
-	case TierBasic:
-		return "https://api.rajaongkir.com/basic"
-	case TierPro:
-		return "https://pro.rajaongkir.com/api"
-	default:
-		return "https://api.rajaongkir.com/starter"
-	}
+type komerceDestination struct {
+	ID           int    `json:"id"`
+	Label        string `json:"label"`
+	ProvinceName string `json:"province_name"`
+	CityName     string `json:"city_name"`
+	DistrictName string `json:"district_name"`
+	SubdistName  string `json:"subdistrict_name"`
+	ZipCode      string `json:"zip_code"`
 }
 
-// Cities returns the full city list, cached for 24 hours. The list is
-// ~500 rows so we keep it in process memory and search locally — saves
-// a round-trip per buyer keystroke.
-func (c *Client) Cities(ctx context.Context) ([]City, error) {
+// SearchCities queries Komerce's domestic-destination search. Unlike the old
+// client this hits the API per query (server-side search) — destinations are
+// subdistrict-level and far too numerous to cache + scan locally.
+func (c *Client) SearchCities(ctx context.Context, query string, limit int) ([]City, error) {
 	if !c.IsConfigured() {
 		return nil, errors.New("rajaongkir not configured")
 	}
-	c.mu.RLock()
-	if c.cities != nil && time.Since(c.citiesAt) < c.citiesTTL {
-		out := c.cities
-		c.mu.RUnlock()
-		return out, nil
+	if limit <= 0 || limit > 50 {
+		limit = 12
 	}
-	c.mu.RUnlock()
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.cities != nil && time.Since(c.citiesAt) < c.citiesTTL {
-		return c.cities, nil
+	q := strings.TrimSpace(query)
+	if q == "" {
+		// No useful "list all" on a subdistrict dataset — let the picker
+		// prompt the user to type. Empty result keeps the UI graceful.
+		return []City{}, nil
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL()+"/city", nil)
+	u := fmt.Sprintf(
+		"%s/destination/domestic-destination?search=%s&limit=%d&offset=0",
+		baseURL, url.QueryEscape(q), limit,
+	)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("key", c.apiKey)
+
 	resp, err := c.http.Do(req)
 	if err != nil {
-		c.citiesError = err
 		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return nil, fmt.Errorf("rajaongkir city status %d: %s", resp.StatusCode, body)
+		return nil, fmt.Errorf("komerce destination status %d: %s", resp.StatusCode, body)
 	}
 
 	var env struct {
-		RajaOngkir struct {
-			Results []City `json:"results"`
-		} `json:"rajaongkir"`
+		Data []komerceDestination `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
 		return nil, err
 	}
-	c.cities = env.RajaOngkir.Results
-	c.citiesAt = time.Now()
-	c.citiesError = nil
-	return c.cities, nil
-}
 
-// SearchCities does a case-insensitive substring match over the cached
-// list. Returns up to `limit` matches.
-func (c *Client) SearchCities(ctx context.Context, query string, limit int) ([]City, error) {
-	if limit <= 0 || limit > 50 {
-		limit = 12
-	}
-	cities, err := c.Cities(ctx)
-	if err != nil {
-		return nil, err
-	}
-	q := strings.ToLower(strings.TrimSpace(query))
-	if q == "" {
-		// Empty query: return first N alphabetically — useful for default state.
-		out := make([]City, 0, limit)
-		for i := 0; i < limit && i < len(cities); i++ {
-			out = append(out, cities[i])
-		}
-		return out, nil
-	}
-	out := make([]City, 0, limit)
-	for _, ct := range cities {
-		hay := strings.ToLower(ct.CityName + " " + ct.Province)
-		if strings.Contains(hay, q) {
-			out = append(out, ct)
-			if len(out) >= limit {
-				break
-			}
-		}
+	out := make([]City, 0, len(env.Data))
+	for _, d := range env.Data {
+		out = append(out, City{
+			CityID:     strconv.Itoa(d.ID),
+			Province:   d.ProvinceName,
+			CityName:   d.Label,
+			PostalCode: d.ZipCode,
+		})
 	}
 	return out, nil
-}
-
-// FindCityByID is a quick lookup over the cached list.
-func (c *Client) FindCityByID(ctx context.Context, id string) (*City, error) {
-	cities, err := c.Cities(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for i := range cities {
-		if cities[i].CityID == id {
-			return &cities[i], nil
-		}
-	}
-	return nil, errors.New("city not found")
 }
 
 // === Cost ===
 
 type CostRequest struct {
-	Origin      string // city_id
-	Destination string // city_id
+	Origin      string // Komerce destination id
+	Destination string // Komerce destination id
 	WeightG     int
-	Courier     string // "jne" | "tiki" | "pos" (starter); more on basic/pro
+	Courier     string // single code ("jne") or colon-joined ("jne:tiki:pos")
 }
 
 type CostOption struct {
-	CourierCode string // "jne", "tiki", etc.
-	CourierName string // "Jalur Nugraha Ekakurir (JNE)"
-	Service     string // "REG", "YES"
+	CourierCode string
+	CourierName string
+	Service     string
 	Description string
 	PriceRpah   int64
 	ETA         string
@@ -209,6 +166,7 @@ func (c *Client) Cost(ctx context.Context, req CostRequest) ([]CostOption, error
 	if req.Courier == "" {
 		return nil, errors.New("courier kosong")
 	}
+
 	form := url.Values{}
 	form.Set("origin", req.Origin)
 	form.Set("destination", req.Destination)
@@ -216,7 +174,7 @@ func (c *Client) Cost(ctx context.Context, req CostRequest) ([]CostOption, error
 	form.Set("courier", strings.ToLower(req.Courier))
 
 	httpReq, err := http.NewRequestWithContext(ctx,
-		http.MethodPost, c.baseURL()+"/cost",
+		http.MethodPost, baseURL+"/calculate/domestic-cost",
 		strings.NewReader(form.Encode()),
 	)
 	if err != nil {
@@ -232,45 +190,47 @@ func (c *Client) Cost(ctx context.Context, req CostRequest) ([]CostOption, error
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return nil, fmt.Errorf("rajaongkir cost status %d: %s", resp.StatusCode, body)
+		return nil, fmt.Errorf("komerce cost status %d: %s", resp.StatusCode, body)
 	}
 
 	var env struct {
-		RajaOngkir struct {
-			Results []struct {
-				Code  string `json:"code"`
-				Name  string `json:"name"`
-				Costs []struct {
-					Service     string `json:"service"`
-					Description string `json:"description"`
-					Cost        []struct {
-						Value int64  `json:"value"`
-						ETD   string `json:"etd"`
-						Note  string `json:"note"`
-					} `json:"cost"`
-				} `json:"costs"`
-			} `json:"results"`
-		} `json:"rajaongkir"`
+		Data []struct {
+			Name        string `json:"name"`
+			Code        string `json:"code"`
+			Service     string `json:"service"`
+			Description string `json:"description"`
+			Cost        int64  `json:"cost"`
+			ETD         string `json:"etd"`
+		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
 		return nil, err
 	}
 
-	out := make([]CostOption, 0, 4)
-	for _, r := range env.RajaOngkir.Results {
-		for _, s := range r.Costs {
-			if len(s.Cost) == 0 {
-				continue
-			}
-			out = append(out, CostOption{
-				CourierCode: r.Code,
-				CourierName: r.Name,
-				Service:     s.Service,
-				Description: s.Description,
-				PriceRpah:   s.Cost[0].Value,
-				ETA:         s.Cost[0].ETD,
-			})
-		}
+	out := make([]CostOption, 0, len(env.Data))
+	for _, d := range env.Data {
+		out = append(out, CostOption{
+			CourierCode: d.Code,
+			CourierName: d.Name,
+			Service:     d.Service,
+			Description: d.Description,
+			PriceRpah:   d.Cost,
+			ETA:         cleanETD(d.ETD),
+		})
 	}
 	return out, nil
+}
+
+// cleanETD strips trailing unit words from Komerce's etd ("6 day",
+// "12-15 day") leaving just the number/range so callers can append their own
+// unit label. Returns "" when no estimate is given.
+func cleanETD(etd string) string {
+	s := strings.TrimSpace(etd)
+	if s == "" {
+		return ""
+	}
+	for _, suffix := range []string{"days", "day", "hari"} {
+		s = strings.TrimSpace(strings.TrimSuffix(s, suffix))
+	}
+	return s
 }

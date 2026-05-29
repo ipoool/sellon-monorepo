@@ -19,6 +19,7 @@ type Order struct {
 	Status             string
 	PaymentStatus      string
 	PaymentMethod      string
+	Source             string // "storefront" | "pos" | "whatsapp"
 	SubtotalCents      int64
 	ShippingCents      int64
 	DiscountCents      int64
@@ -48,8 +49,16 @@ type Order struct {
 	PaymentProofURL  string
 	PaymentProofNote string
 	PaymentProofAt   *time.Time
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	// Loyalty redemption applied to this order (POS). LoyaltyDiscountCents is
+	// the portion of discount_cents that came from redeeming points.
+	LoyaltyPointsRedeemed int
+	LoyaltyDiscountCents  int64
+	// Dine-in / kitchen pipeline (NULL/empty for non-kitchen orders).
+	QueueNumber   *int
+	KitchenStatus *string
+	ServingType   string
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
 }
 
 type OrderItem struct {
@@ -61,6 +70,7 @@ type OrderItem struct {
 	Quantity       int
 	SubtotalCents  int64
 	ProductType    string // "physical" | "digital"
+	ServingType    string // "" | "dine_in" | "takeaway"
 }
 
 type OrderItemInput struct {
@@ -71,6 +81,10 @@ type OrderItemInput struct {
 	UnitCents   int64
 	Quantity    int
 	ProductType string // "physical" | "digital" — when "digital", Create skips stock decrement
+	// Modifiers are the chosen option snapshots for this line (already
+	// validated + priced by the handler). UnitCents already includes their
+	// price deltas.
+	Modifiers []OptionSnapshot
 }
 
 type CreateOrderInput struct {
@@ -88,6 +102,10 @@ type CreateOrderInput struct {
 	PromoCode       string     // for record-keeping
 	PromoID         *uuid.UUID // FK if redeemed (nil means no promo)
 	Items           []OrderItemInput
+	// Dine-in self-order routing (set by the table-QR flow).
+	TableID       *uuid.UUID
+	ServingType   string // "dine_in" | "takeaway" | ""
+	KitchenStatus string // "queued" to route into the kitchen now; "" otherwise
 }
 
 type OrderRepo struct {
@@ -247,7 +265,7 @@ func (r *OrderRepo) SetPaymentProof(ctx context.Context, orderID uuid.UUID, proo
 // FindByID returns full order with all fields. Tenant-isolated by storeID.
 func (r *OrderRepo) FindByID(ctx context.Context, storeID, id uuid.UUID) (*Order, error) {
 	const q = `
-		SELECT id, store_id, order_number, status, payment_status, payment_method,
+		SELECT id, store_id, order_number, status, payment_status, payment_method, source,
 		       subtotal_cents, shipping_cents, discount_cents, promo_code, total_cents,
 		       courier, courier_service, tracking_number,
 		       customer_name, customer_whatsapp, customer_email, customer_address, customer_city,
@@ -255,12 +273,13 @@ func (r *OrderRepo) FindByID(ctx context.Context, storeID, id uuid.UUID) (*Order
 		       paid_at, shipped_at, completed_at, cancelled_at, cancellation_reason,
 		       refund_amount_cents, refund_reason, refunded_at,
 		       payment_proof_url, payment_proof_note, payment_proof_at,
+		       loyalty_points_redeemed, loyalty_discount_cents,
 		       created_at, updated_at
 		FROM orders WHERE id = $1 AND store_id = $2
 	`
 	var o Order
 	err := r.pool.QueryRow(ctx, q, id, storeID).Scan(
-		&o.ID, &o.StoreID, &o.OrderNumber, &o.Status, &o.PaymentStatus, &o.PaymentMethod,
+		&o.ID, &o.StoreID, &o.OrderNumber, &o.Status, &o.PaymentStatus, &o.PaymentMethod, &o.Source,
 		&o.SubtotalCents, &o.ShippingCents, &o.DiscountCents, &o.PromoCode, &o.TotalCents,
 		&o.Courier, &o.CourierService, &o.TrackingNumber,
 		&o.CustomerName, &o.CustomerWhatsApp, &o.CustomerEmail, &o.CustomerAddress, &o.CustomerCity,
@@ -268,6 +287,7 @@ func (r *OrderRepo) FindByID(ctx context.Context, storeID, id uuid.UUID) (*Order
 		&o.PaidAt, &o.ShippedAt, &o.CompletedAt, &o.CancelledAt, &o.CancellationReason,
 		&o.RefundAmountCents, &o.RefundReason, &o.RefundedAt,
 		&o.PaymentProofURL, &o.PaymentProofNote, &o.PaymentProofAt,
+		&o.LoyaltyPointsRedeemed, &o.LoyaltyDiscountCents,
 		&o.CreatedAt, &o.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -281,7 +301,7 @@ func (r *OrderRepo) FindByID(ctx context.Context, storeID, id uuid.UUID) (*Order
 
 func (r *OrderRepo) ListItems(ctx context.Context, orderID uuid.UUID) ([]OrderItem, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, product_id, product_name, variant_name, unit_price_cents, quantity, subtotal_cents, product_type
+		SELECT id, product_id, product_name, variant_name, unit_price_cents, quantity, subtotal_cents, product_type, serving_type
 		FROM order_items WHERE order_id = $1 ORDER BY created_at ASC
 	`, orderID)
 	if err != nil {
@@ -293,11 +313,41 @@ func (r *OrderRepo) ListItems(ctx context.Context, orderID uuid.UUID) ([]OrderIt
 		var it OrderItem
 		if err := rows.Scan(
 			&it.ID, &it.ProductID, &it.ProductName, &it.VariantName,
-			&it.UnitPriceCents, &it.Quantity, &it.SubtotalCents, &it.ProductType,
+			&it.UnitPriceCents, &it.Quantity, &it.SubtotalCents, &it.ProductType, &it.ServingType,
 		); err != nil {
 			return nil, err
 		}
 		out = append(out, it)
+	}
+	return out, rows.Err()
+}
+
+// ListModifiersByOrder batch-loads chosen modifier snapshots for all lines of
+// an order, keyed by order_item_id. Used by receipts / order detail.
+func (r *OrderRepo) ListModifiersByOrder(ctx context.Context, orderID uuid.UUID) (map[uuid.UUID][]OptionSnapshot, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT oim.order_item_id, oim.option_id, oim.group_name, oim.option_name, oim.price_delta_cents
+		FROM order_item_modifiers oim
+		JOIN order_items oi ON oi.id = oim.order_item_id
+		WHERE oi.order_id = $1
+		ORDER BY oim.created_at ASC
+	`, orderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[uuid.UUID][]OptionSnapshot{}
+	for rows.Next() {
+		var itemID uuid.UUID
+		var optID *uuid.UUID
+		var s OptionSnapshot
+		if err := rows.Scan(&itemID, &optID, &s.GroupName, &s.OptionName, &s.PriceDeltaCents); err != nil {
+			return nil, err
+		}
+		if optID != nil {
+			s.OptionID = *optID
+		}
+		out[itemID] = append(out[itemID], s)
 	}
 	return out, rows.Err()
 }
@@ -544,7 +594,7 @@ func (r *OrderRepo) Refund(ctx context.Context, storeID, id uuid.UUID, amountCen
 // Used by the webhook handler to map a Midtrans order_id back to our row.
 func (r *OrderRepo) FindByOrderNumber(ctx context.Context, storeID uuid.UUID, orderNumber string) (*Order, error) {
 	const q = `
-		SELECT id, store_id, order_number, status, payment_status, payment_method,
+		SELECT id, store_id, order_number, status, payment_status, payment_method, source,
 		       subtotal_cents, shipping_cents, discount_cents, promo_code, total_cents,
 		       courier, courier_service, tracking_number,
 		       customer_name, customer_whatsapp, customer_email, customer_address, customer_city,
@@ -552,12 +602,13 @@ func (r *OrderRepo) FindByOrderNumber(ctx context.Context, storeID uuid.UUID, or
 		       paid_at, shipped_at, completed_at, cancelled_at, cancellation_reason,
 		       refund_amount_cents, refund_reason, refunded_at,
 		       payment_proof_url, payment_proof_note, payment_proof_at,
+		       loyalty_points_redeemed, loyalty_discount_cents,
 		       created_at, updated_at
 		FROM orders WHERE store_id = $1 AND order_number = $2
 	`
 	var o Order
 	err := r.pool.QueryRow(ctx, q, storeID, orderNumber).Scan(
-		&o.ID, &o.StoreID, &o.OrderNumber, &o.Status, &o.PaymentStatus, &o.PaymentMethod,
+		&o.ID, &o.StoreID, &o.OrderNumber, &o.Status, &o.PaymentStatus, &o.PaymentMethod, &o.Source,
 		&o.SubtotalCents, &o.ShippingCents, &o.DiscountCents, &o.PromoCode, &o.TotalCents,
 		&o.Courier, &o.CourierService, &o.TrackingNumber,
 		&o.CustomerName, &o.CustomerWhatsApp, &o.CustomerEmail, &o.CustomerAddress, &o.CustomerCity,
@@ -565,6 +616,7 @@ func (r *OrderRepo) FindByOrderNumber(ctx context.Context, storeID uuid.UUID, or
 		&o.PaidAt, &o.ShippedAt, &o.CompletedAt, &o.CancelledAt, &o.CancellationReason,
 		&o.RefundAmountCents, &o.RefundReason, &o.RefundedAt,
 		&o.PaymentProofURL, &o.PaymentProofNote, &o.PaymentProofAt,
+		&o.LoyaltyPointsRedeemed, &o.LoyaltyDiscountCents,
 		&o.CreatedAt, &o.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -721,6 +773,27 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 	// Generate human-friendly order number: SO-YYYYMMDD-XXXX (4-char random)
 	orderNum := generateOrderNumber()
 
+	// Dine-in kitchen routing: when the order should enter the kitchen now,
+	// allocate today's (WIB) queue number atomically.
+	var queueNum *int
+	var queueDate *string
+	var kitchenStatus *string
+	if in.KitchenStatus == "queued" {
+		qd := time.Now().In(time.FixedZone("WIB", 7*3600)).Format("2006-01-02")
+		n, qerr := allocQueueNumberTx(ctx, tx, in.StoreID, qd)
+		if qerr != nil {
+			return nil, fmt.Errorf("alloc queue: %w", qerr)
+		}
+		queueNum = &n
+		queueDate = &qd
+		ks := "queued"
+		kitchenStatus = &ks
+	}
+	servingType := in.ServingType
+	if servingType != "dine_in" && servingType != "takeaway" {
+		servingType = ""
+	}
+
 	var o Order
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO orders (store_id, customer_id, order_number, status, payment_status,
@@ -728,21 +801,25 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 		                   promo_code, promo_id, total_cents,
 		                   courier, customer_name, customer_whatsapp, customer_email,
 		                   customer_address, customer_city,
-		                   notes)
-		VALUES ($1, $2, $3, 'pending', 'unpaid', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+		                   notes, table_id, serving_type, kitchen_status, queue_number, queue_date)
+		VALUES ($1, $2, $3, 'pending', 'unpaid', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
+		        $18, $19, $20, $21, $22::date)
 		RETURNING id, store_id, order_number, status, payment_status, payment_method,
 		          subtotal_cents, shipping_cents, discount_cents, promo_code, total_cents, courier,
-		          customer_name, customer_whatsapp, customer_email, customer_city, created_at
+		          customer_name, customer_whatsapp, customer_email, customer_city, created_at,
+		          queue_number, kitchen_status, serving_type
 	`,
 		in.StoreID, customerID, orderNum,
 		in.PaymentMethod, subtotal, in.ShippingCents, discount,
 		in.PromoCode, in.PromoID, total,
 		in.Courier, in.CustomerName, in.CustomerWA, in.CustomerEmail,
 		in.CustomerAddress, in.CustomerCity, in.Notes,
+		in.TableID, servingType, kitchenStatus, queueNum, queueDate,
 	).Scan(
 		&o.ID, &o.StoreID, &o.OrderNumber, &o.Status, &o.PaymentStatus, &o.PaymentMethod,
 		&o.SubtotalCents, &o.ShippingCents, &o.DiscountCents, &o.PromoCode, &o.TotalCents, &o.Courier,
 		&o.CustomerName, &o.CustomerWhatsApp, &o.CustomerEmail, &o.CustomerCity, &o.CreatedAt,
+		&o.QueueNumber, &o.KitchenStatus, &o.ServingType,
 	); err != nil {
 		return nil, fmt.Errorf("insert order: %w", err)
 	}
@@ -784,15 +861,31 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 		if productType != "digital" {
 			productType = "physical"
 		}
-		if _, err := tx.Exec(ctx, `
+		var orderItemID uuid.UUID
+		if err := tx.QueryRow(ctx, `
 			INSERT INTO order_items (order_id, product_id, variant_id, product_name, variant_name,
 			                         unit_price_cents, quantity, subtotal_cents, product_type)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			RETURNING id
 		`,
 			o.ID, it.ProductID, it.VariantID, it.ProductName, it.VariantName,
 			it.UnitCents, it.Quantity, it.UnitCents*int64(it.Quantity), productType,
-		); err != nil {
+		).Scan(&orderItemID); err != nil {
 			return nil, fmt.Errorf("insert order_item: %w", err)
+		}
+
+		if err := insertOrderItemModifiersTx(ctx, tx, orderItemID, it.Modifiers); err != nil {
+			return nil, fmt.Errorf("insert order_item_modifiers: %w", err)
+		}
+
+		// Record raw-material consumption (base recipe + selected option
+		// recipes, × qty). Soft: a config gap / shortage never blocks the order.
+		consume, err := resolveConsumptionTx(ctx, tx, it.ProductID, optionIDsFromSnaps(it.Modifiers), it.Quantity)
+		if err != nil {
+			return nil, fmt.Errorf("resolve consumption: %w", err)
+		}
+		if err := applyConsumptionTx(ctx, tx, in.StoreID, o.ID, orderItemID, consume); err != nil {
+			return nil, fmt.Errorf("apply consumption: %w", err)
 		}
 	}
 

@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { Package, Trash2, Loader2, MoreHorizontal } from "lucide-react";
+import { Package, Trash2, Loader2, MoreHorizontal, Percent } from "lucide-react";
 import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
@@ -217,6 +217,12 @@ export function ProductsTable({
                     {p.product_type !== "digital" && !p.has_variants && p.low_stock_threshold > 0 && p.stock <= p.low_stock_threshold && p.stock > 0 && (
                       <Badge variant="warning">Stok rendah</Badge>
                     )}
+                    {p.discounts && p.discounts.length > 0 && (
+                      <Badge variant="brand" className="inline-flex items-center gap-0.5">
+                        <Percent className="size-3" aria-hidden />
+                        Potongan
+                      </Badge>
+                    )}
                   </div>
                   <p className="mt-0.5 text-xs text-neutral-500">
                     {p.product_type === "digital" ? "Digital" :
@@ -320,7 +326,19 @@ export function ProductsTable({
                     </div>
                   </td>
                   <td className="px-5 py-3 font-medium text-neutral-900">
-                    {formatRupiah(p.price_cents)}
+                    <div className="flex items-center gap-2">
+                      <span>{formatRupiah(p.price_cents)}</span>
+                      {p.discounts && p.discounts.length > 0 && (
+                        <Badge
+                          variant="brand"
+                          className="inline-flex items-center gap-0.5"
+                          title={`${p.discounts.length} tier diskon aktif`}
+                        >
+                          <Percent className="size-3" aria-hidden />
+                          Potongan
+                        </Badge>
+                      )}
+                    </div>
                   </td>
                   <td className="px-5 py-3">
                     <div className="flex items-center gap-2">

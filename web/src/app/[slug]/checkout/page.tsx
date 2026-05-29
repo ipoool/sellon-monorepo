@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, ShieldCheck } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 
 import { Container } from "@/components/layout/container";
 import { CheckoutWizard } from "@/components/storefront/checkout-wizard";
@@ -86,10 +86,6 @@ export default async function CheckoutPage({ params }: { params: Params }) {
               <ArrowLeft className="size-3.5" aria-hidden />
               Keranjang
             </Link>
-            <div className="flex items-center gap-1.5 text-sm font-semibold text-neutral-900">
-              <ShieldCheck className="size-4 text-success" aria-hidden />
-              Checkout aman
-            </div>
           </div>
         </Container>
       </header>

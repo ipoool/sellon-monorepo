@@ -106,11 +106,205 @@ export type Product = {
   digital_delivery_url: string;
   digital_file_url: string;
   digital_instructions: string;
+  gtin: string;
+  takeaway_enabled: boolean;
+  takeaway_charge_cents: number;
+  takeaway_material_id: string;
+  takeaway_material_name: string;
   variants?: Variant[];
   // Aggregates surfaced by the list endpoint when has_variants=true so the
   // dashboard "Stok" column reflects per-variant edits. Zero otherwise.
   variants_count?: number;
   variants_stock?: number;
+  discounts?: ProductDiscount[];
+  base_recipe?: ProductRecipeItem[];
+  modifiers?: ModifierGroup[];
+  created_at: string;
+};
+
+export type ProductRecipeItem = {
+  material_id: string;
+  material_name: string;
+  base_unit: string;
+  quantity: number;
+};
+
+export type ModifierOption = {
+  id?: string;
+  name: string;
+  price_delta_cents: number;
+  recipe?: ProductRecipeItem[];
+};
+
+export type ModifierGroup = {
+  id?: string;
+  name: string;
+  selection: "single" | "multi";
+  is_required: boolean;
+  options: ModifierOption[];
+};
+
+// SelectedOption is a chosen modifier carried on a cart line / order.
+export type SelectedOption = {
+  option_id: string;
+  group_name: string;
+  option_name: string;
+  price_delta_cents: number;
+};
+
+export type LoyaltyTransaction = {
+  id: string;
+  order_id: string | null;
+  type: "earn" | "redeem" | "adjust" | "expire";
+  points: number; // signed: + earn, − redeem
+  balance_after: number;
+  reason: string;
+  created_at: string;
+};
+
+export type Supplier = {
+  id: string;
+  name: string;
+  phone: string;
+  note: string;
+};
+
+export type PurchaseOrder = {
+  id: string;
+  supplier_id: string;
+  supplier_name: string;
+  status: "draft" | "ordered" | "received" | "cancelled";
+  note: string;
+  total_cents: number;
+  item_count: number;
+  ordered_at: string | null;
+  received_at: string | null;
+  created_at: string;
+};
+
+export type POItem = {
+  id?: string;
+  material_id: string;
+  material_name?: string;
+  base_unit?: string;
+  quantity: number;
+  unit_cost_cents: number;
+};
+
+export type KitchenOrder = {
+  order_id: string;
+  order_number: string;
+  queue_number: number | null;
+  kitchen_status: "queued" | "preparing" | "ready" | "served";
+  serving_type: string;
+  table_label: string;
+  customer_name: string;
+  created_at: string;
+  items: { name: string; quantity: number }[];
+};
+
+export type RestaurantTable = {
+  id: string;
+  label: string;
+  area: string;
+  qr_token: string;
+};
+
+export type DineInSettings = {
+  enabled: boolean;
+  payment_mode: "cashier" | "online";
+  kds_enabled: boolean;
+};
+
+export type AnalyticsDayPoint = {
+  date: string;
+  in_cents: number;
+  out_cents: number;
+  revenue_cents: number;
+};
+
+export type AnalyticsPaySlice = { method: string; amount_cents: number };
+
+export type AnalyticsOverview = {
+  revenue_cents: number;
+  orders: number;
+  aov_cents: number;
+  cogs_cents: number;
+  gross_profit_cents: number;
+  margin_pct: number;
+  cash_in_cents: number;
+  cash_out_cents: number;
+  net_cash_cents: number;
+  series: AnalyticsDayPoint[];
+  payments: AnalyticsPaySlice[];
+};
+
+export type CashEntry = {
+  id: string;
+  direction: "in" | "out";
+  category: string;
+  amount_cents: number;
+  occurred_on: string;
+  note: string;
+};
+
+export type StockTake = {
+  id: string;
+  status: "draft" | "posted";
+  note: string;
+  item_count?: number;
+  posted_at: string | null;
+  created_at: string;
+};
+
+export type StockTakeItem = {
+  id: string;
+  material_id: string;
+  material_name: string;
+  base_unit: string;
+  system_qty: number;
+  counted_qty: number;
+};
+
+export type MembershipTier = {
+  id?: string;
+  name: string;
+  min_spent_cents: number;
+  point_multiplier: number;
+  discount_percent: number;
+  is_active: boolean;
+};
+
+export type ProductDiscount = {
+  id?: string;
+  min_quantity: number;
+  discount_type: "percent" | "fixed";
+  discount_value: number; // percent (0-100) or cents
+  starts_at: string | null;
+  ends_at: string | null;
+  is_active: boolean;
+};
+
+export type Material = {
+  id: string;
+  name: string;
+  kind: "ingredient" | "packaging";
+  base_unit: string; // "gram" | "ml" | "pcs" | custom
+  cost_cents: number; // modal per 1 base_unit
+  stock: number; // may be negative (soft tracking)
+  low_stock_threshold: number;
+  low_stock: boolean;
+  is_active: boolean;
+  created_at: string;
+};
+
+export type MaterialMovement = {
+  id: string;
+  movement_type: "restock" | "consume" | "adjust";
+  quantity: number; // signed: + restock, - consume
+  unit_cost_cents: number;
+  order_id: string | null;
+  note: string;
   created_at: string;
 };
 
@@ -152,6 +346,12 @@ type OrderItem = {
   unit_price_cents: number;
   quantity: number;
   subtotal_cents: number;
+  serving_type?: "dine_in" | "takeaway" | "";
+  modifiers?: {
+    group_name: string;
+    option_name: string;
+    price_delta_cents: number;
+  }[];
 };
 
 export type OrderDetail = {
@@ -160,11 +360,14 @@ export type OrderDetail = {
   status: OrderStatus;
   payment_status: PaymentStatus;
   payment_method: string;
+  source?: "storefront" | "pos" | "whatsapp" | string;
   subtotal_cents: number;
   shipping_cents: number;
   discount_cents: number;
   promo_code: string;
   total_cents: number;
+  loyalty_points_redeemed?: number;
+  loyalty_discount_cents?: number;
   courier: string;
   courier_service: string;
   tracking_number: string;
@@ -233,6 +436,8 @@ export type Customer = {
   total_orders: number;
   total_spent_cents: number;
   last_order_at: string | null;
+  loyalty_points?: number;
+  member_code?: string;
   created_at?: string;
 };
 
@@ -499,5 +704,165 @@ export type DropshipOrderItem = {
   tracking_number: string;
   shipped_at: string | null;
   reseller_store_name: string;
+};
+
+// ─── POS Kasir types ─────────────────────────────────────────────────────────
+
+export type POSPaymentMethod =
+  | "cash"
+  | "qris"
+  | "manual_transfer"
+  | "midtrans"
+  | "edc_debit"
+  | "edc_kredit";
+
+export type POSSession = {
+  id: string;
+  store_id: string;
+  opened_by: string;
+  opened_by_name: string;
+  closed_by: string | null;
+  closed_by_name: string;
+  opening_cash_cents: number;
+  closing_cash_cents: number | null;
+  expected_cash_cents: number | null;
+  notes: string;
+  status: "open" | "closed";
+  opened_at: string;
+  closed_at: string | null;
+};
+
+export type POSSessionSummary = {
+  session: POSSession;
+  total_sales: number;
+  total_cash: number;
+  total_qris: number;
+  total_transfer: number;
+  total_midtrans: number;
+  total_cash_in: number;
+  total_cash_out: number;
+  order_count: number;
+  expected_cash: number;
+};
+
+export type POSCashMovement = {
+  id: string;
+  type: "in" | "out";
+  amount_cents: number;
+  reason: string;
+  created_at: string;
+};
+
+export type POSHeldOrder = {
+  id: string;
+  label: string;
+  cart_snapshot: unknown; // POSCartItem[] serialized
+  created_at: string;
+};
+
+export type POSCartItem = {
+  product_id: string;
+  variant_id?: string | null;
+  product_name: string;
+  variant_name?: string;
+  product_type: "physical" | "digital";
+  unit_cents: number;
+  quantity: number;
+  photo_url?: string;
+  stock?: number;
+  // Active tier discounts at the time the product was added (frontend only).
+  // POS recalculates line discount on every qty change based on min_quantity.
+  discounts?: ProductDiscount[];
+  // Chosen modifier options (frontend). unit_cents already includes their
+  // price deltas. Sent as selected_option_ids when the order is created.
+  selected_options?: SelectedOption[];
+  // Serving choice for products with take-away enabled. When "takeaway", the
+  // cart shows a separate packaging line (charge below) and the backend
+  // recomputes + persists it. unit_cents stays the plain product price.
+  serving_type?: "dine_in" | "takeaway";
+  takeaway_charge_cents?: number;
+  takeaway_label?: string;
+};
+
+export type POSPayment = {
+  method: POSPaymentMethod;
+  amount_cents: number;
+  // EDC fields — only used when method is edc_debit/edc_kredit
+  card_brand?: string;
+  card_last4?: string;
+  reference_number?: string;
+  approval_code?: string;
+};
+
+export type POSOrderResult = {
+  order_id: string;
+  order_number: string;
+  subtotal_cents: number;
+  discount_cents: number;
+  total_cents: number;
+  payment_method: string;
+  change_amount_cents: number;
+  created_at: string;
+};
+
+export type POSSessionOrder = {
+  order_id: string;
+  order_number: string;
+  status: "completed" | "cancelled" | string;
+  payment_method: string;
+  subtotal_cents: number;
+  discount_cents: number;
+  total_cents: number;
+  change_amount_cents: number;
+  customer_name: string;
+  customer_wa: string;
+  notes: string;
+  created_at: string;
+  item_count: number;
+  payments: POSPayment[];
+  refunded_at: string | null;
+  refund_reason: string;
+};
+
+export type POSCashier = {
+  user_id: string;
+  name: string;
+  email: string;
+};
+
+export type POSReportDailyPoint = {
+  date: string;
+  order_count: number;
+  total_cents: number;
+};
+
+export type POSReportProduct = {
+  product_id: string;
+  product_name: string;
+  quantity: number;
+  total_cents: number;
+};
+
+export type POSReportCashier = {
+  cashier_id: string;
+  cashier_name: string;
+  order_count: number;
+  total_cents: number;
+};
+
+export type POSReport = {
+  order_count: number;
+  total_gross: number;
+  total_refunded: number;
+  avg_transaction: number;
+  total_cash: number;
+  total_qris: number;
+  total_transfer: number;
+  total_midtrans: number;
+  total_edc_debit: number;
+  total_edc_kredit: number;
+  daily_series: POSReportDailyPoint[];
+  top_products: POSReportProduct[];
+  by_cashier: POSReportCashier[];
 };
 

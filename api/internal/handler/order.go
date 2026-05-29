@@ -77,12 +77,26 @@ type orderListItemDTO struct {
 }
 
 type orderItemDTO struct {
-	ID             string `json:"id"`
-	ProductName    string `json:"product_name"`
-	VariantName    string `json:"variant_name"`
-	UnitPriceCents int64  `json:"unit_price_cents"`
-	Quantity       int    `json:"quantity"`
-	SubtotalCents  int64  `json:"subtotal_cents"`
+	ID             string           `json:"id"`
+	ProductName    string           `json:"product_name"`
+	VariantName    string           `json:"variant_name"`
+	UnitPriceCents int64            `json:"unit_price_cents"`
+	Quantity       int              `json:"quantity"`
+	SubtotalCents  int64            `json:"subtotal_cents"`
+	ServingType    string           `json:"serving_type,omitempty"`
+	Modifiers      []map[string]any `json:"modifiers,omitempty"`
+}
+
+func optionSnapsToDTO(snaps []repository.OptionSnapshot) []map[string]any {
+	out := make([]map[string]any, 0, len(snaps))
+	for _, s := range snaps {
+		out = append(out, map[string]any{
+			"group_name":        s.GroupName,
+			"option_name":       s.OptionName,
+			"price_delta_cents": s.PriceDeltaCents,
+		})
+	}
+	return out
 }
 
 type orderDetailDTO struct {
@@ -91,11 +105,14 @@ type orderDetailDTO struct {
 	Status             string         `json:"status"`
 	PaymentStatus      string         `json:"payment_status"`
 	PaymentMethod      string         `json:"payment_method"`
+	Source             string         `json:"source"`
 	SubtotalCents      int64          `json:"subtotal_cents"`
 	ShippingCents      int64          `json:"shipping_cents"`
 	DiscountCents      int64          `json:"discount_cents"`
 	PromoCode          string         `json:"promo_code"`
 	TotalCents         int64          `json:"total_cents"`
+	LoyaltyPointsRedeemed int         `json:"loyalty_points_redeemed"`
+	LoyaltyDiscountCents  int64       `json:"loyalty_discount_cents"`
 	Courier            string         `json:"courier"`
 	CourierService     string         `json:"courier_service"`
 	TrackingNumber     string         `json:"tracking_number"`
@@ -244,12 +261,18 @@ func (h *OrderHandler) Get(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+	modsByItem, _ := h.orders.ListModifiersByOrder(r.Context(), o.ID)
 	itemsDTO := make([]orderItemDTO, 0, len(items))
 	for _, it := range items {
-		itemsDTO = append(itemsDTO, orderItemDTO{
+		dto := orderItemDTO{
 			ID: it.ID.String(), ProductName: it.ProductName, VariantName: it.VariantName,
 			UnitPriceCents: it.UnitPriceCents, Quantity: it.Quantity, SubtotalCents: it.SubtotalCents,
-		})
+			ServingType: it.ServingType,
+		}
+		if m := modsByItem[it.ID]; len(m) > 0 {
+			dto.Modifiers = optionSnapsToDTO(m)
+		}
+		itemsDTO = append(itemsDTO, dto)
 	}
 	response.JSON(w, http.StatusOK, map[string]any{"order": orderDetailToDTO(o, itemsDTO)})
 }
@@ -284,9 +307,12 @@ func orderDetailToDTO(o *repository.Order, items []orderItemDTO) orderDetailDTO 
 	return orderDetailDTO{
 		ID: o.ID.String(), OrderNumber: o.OrderNumber,
 		Status: o.Status, PaymentStatus: o.PaymentStatus, PaymentMethod: o.PaymentMethod,
+		Source:        o.Source,
 		SubtotalCents: o.SubtotalCents, ShippingCents: o.ShippingCents,
 		DiscountCents: o.DiscountCents, PromoCode: o.PromoCode,
-		TotalCents: o.TotalCents,
+		TotalCents:            o.TotalCents,
+		LoyaltyPointsRedeemed: o.LoyaltyPointsRedeemed,
+		LoyaltyDiscountCents:  o.LoyaltyDiscountCents,
 		Courier: o.Courier, CourierService: o.CourierService, TrackingNumber: o.TrackingNumber,
 		CustomerName: o.CustomerName, CustomerWhatsApp: o.CustomerWhatsApp,
 		CustomerAddress: o.CustomerAddress, CustomerCity: o.CustomerCity,
@@ -450,6 +476,7 @@ func (h *OrderHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 		itemsDTO = append(itemsDTO, orderItemDTO{
 			ID: it.ID.String(), ProductName: it.ProductName, VariantName: it.VariantName,
 			UnitPriceCents: it.UnitPriceCents, Quantity: it.Quantity, SubtotalCents: it.SubtotalCents,
+			ServingType: it.ServingType,
 		})
 	}
 

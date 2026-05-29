@@ -11,6 +11,8 @@ import {
   type ReactNode,
 } from "react";
 
+import type { SelectedOption } from "@/lib/types";
+
 // Cart entries are denormalized snapshots — server re-validates price
 // and stock at checkout, so a stale cart can't underpay or oversell.
 // We persist to localStorage keyed by store slug so different stores
@@ -26,6 +28,8 @@ export type CartItem = {
   photo_url?: string;
   product_type: "physical" | "digital";
   available_stock: number;
+  // Chosen modifier options. unit_price_cents already includes their deltas.
+  selected_options?: SelectedOption[];
 };
 
 type CartState = {
@@ -50,8 +54,14 @@ const CartContext = createContext<CartContextValue | null>(null);
 
 const cartKey = (slug: string) => `sellon:cart:${slug}`;
 
-function itemKey(it: Pick<CartItem, "product_id" | "variant_id">): string {
-  return `${it.product_id}:${it.variant_id ?? ""}`;
+function itemKey(
+  it: Pick<CartItem, "product_id" | "variant_id" | "selected_options">,
+): string {
+  const opts = (it.selected_options ?? [])
+    .map((o) => o.option_id)
+    .sort()
+    .join(",");
+  return `${it.product_id}:${it.variant_id ?? ""}:${opts}`;
 }
 
 type Props = {
@@ -184,6 +194,8 @@ export function useOptionalCart(): CartContextValue | null {
   return use(CartContext);
 }
 
-export function cartItemKey(it: Pick<CartItem, "product_id" | "variant_id">): string {
+export function cartItemKey(
+  it: Pick<CartItem, "product_id" | "variant_id" | "selected_options">,
+): string {
   return itemKey(it);
 }

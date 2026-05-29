@@ -38,6 +38,8 @@ type StorefrontHandler struct {
 	plans       *repository.PlanRepo
 	users       *repository.UserRepo
 	waTemplates *repository.WATemplateRepo
+	modifiers   *repository.ModifierRepo
+	tables      *repository.TableRepo
 	broker      *events.Broker
 	rajaongkir  *rajaongkir.Client
 	mailer      *email.Mailer
@@ -56,6 +58,8 @@ func NewStorefrontHandler(
 	plans *repository.PlanRepo,
 	users *repository.UserRepo,
 	waTemplates *repository.WATemplateRepo,
+	modifiers *repository.ModifierRepo,
+	tables *repository.TableRepo,
 	broker *events.Broker,
 	rk *rajaongkir.Client,
 	mailer *email.Mailer,
@@ -71,6 +75,8 @@ func NewStorefrontHandler(
 		plans:       plans,
 		users:       users,
 		waTemplates: waTemplates,
+		modifiers:   modifiers,
+		tables:      tables,
 		broker:      broker, rajaongkir: rk,
 		mailer: mailer, twilio: twilio,
 		storage:  storageCli,
@@ -469,23 +475,46 @@ func (h *StorefrontHandler) GetProduct(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	// Modifier groups/options (price deltas only — recipes are seller-private).
+	groups, _ := h.modifiers.GetForProduct(r.Context(), p.ID)
+	modOut := make([]map[string]any, 0, len(groups))
+	for _, g := range groups {
+		opts := make([]map[string]any, 0, len(g.Options))
+		for _, o := range g.Options {
+			opts = append(opts, map[string]any{
+				"id":                o.ID.String(),
+				"name":              o.Name,
+				"price_delta_cents": o.PriceDeltaCents,
+			})
+		}
+		modOut = append(modOut, map[string]any{
+			"id":          g.ID.String(),
+			"name":        g.Name,
+			"selection":   g.Selection,
+			"is_required": g.IsRequired,
+			"options":     opts,
+		})
+	}
+
 	storeDTO := toPublicStore(store)
 	storeDTO.AcceptingOrders, storeDTO.AcceptingOrdersReason =
 		h.acceptingOrdersStatus(r.Context(), store)
 
 	response.JSON(w, http.StatusOK, map[string]any{
-		"store":    storeDTO,
-		"product":  toPublicProduct(p),
-		"variants": vOut,
-		"payment":  h.buildPaymentDTO(r.Context(), store.ID),
-		"shipping": h.buildShippingDTO(store),
+		"store":     storeDTO,
+		"product":   toPublicProduct(p),
+		"variants":  vOut,
+		"modifiers": modOut,
+		"payment":   h.buildPaymentDTO(r.Context(), store.ID),
+		"shipping":  h.buildShippingDTO(store),
 	})
 }
 
 type orderItemReq struct {
-	ProductID string `json:"product_id"`
-	VariantID string `json:"variant_id"`
-	Quantity  int    `json:"quantity"`
+	ProductID         string   `json:"product_id"`
+	VariantID         string   `json:"variant_id"`
+	Quantity          int      `json:"quantity"`
+	SelectedOptionIDs []string `json:"selected_option_ids"`
 }
 
 type createOrderReq struct {
@@ -497,6 +526,8 @@ type createOrderReq struct {
 	Courier         string         `json:"courier"`
 	PaymentMethod   string         `json:"payment_method"`
 	Notes           string         `json:"notes"`
+	TableID         string         `json:"table_id"`
+	ServingType     string         `json:"serving_type"`
 	ShippingCents   int64          `json:"shipping_cents"`
 	PromoCode       string         `json:"promo_code"`
 	Items           []orderItemReq `json:"items"`
@@ -609,6 +640,29 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 				"stok "+productName+" tidak cukup")
 			return
 		}
+
+		// Resolve modifier options: validate against the product, recompute
+		// price from DB (never trust client deltas), capture snapshots.
+		var optionSnaps []repository.OptionSnapshot
+		if len(it.SelectedOptionIDs) > 0 {
+			optIDs := make([]uuid.UUID, 0, len(it.SelectedOptionIDs))
+			for _, s := range it.SelectedOptionIDs {
+				oid, perr := uuid.Parse(s)
+				if perr != nil {
+					response.Error(w, http.StatusBadRequest, "opsi tidak valid")
+					return
+				}
+				optIDs = append(optIDs, oid)
+			}
+			delta, snaps, serr := h.modifiers.ResolveSelection(r.Context(), p.ID, optIDs)
+			if serr != nil {
+				response.Error(w, http.StatusBadRequest, serr.Error())
+				return
+			}
+			unitCents += delta
+			optionSnaps = snaps
+		}
+
 		items = append(items, repository.OrderItemInput{
 			ProductID:   p.ID,
 			VariantID:   variantID,
@@ -617,6 +671,7 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 			UnitCents:   unitCents,
 			Quantity:    it.Quantity,
 			ProductType: p.ProductType,
+			Modifiers:   optionSnaps,
 		})
 	}
 
@@ -680,6 +735,26 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Dine-in self-order routing: a table QR submission routes the order into
+	// the kitchen. Cashier mode → queued immediately; online-first → kitchen
+	// stays empty until payment (handled on the payment webhook).
+	var tableID *uuid.UUID
+	dineKitchen := ""
+	dineServing := ""
+	if strings.TrimSpace(req.TableID) != "" {
+		if tid, perr := uuid.Parse(req.TableID); perr == nil {
+			if ds, derr := h.tables.GetDineInSettings(r.Context(), store.ID); derr == nil && ds.Enabled {
+				tableID = &tid
+				if req.ServingType == "dine_in" || req.ServingType == "takeaway" {
+					dineServing = req.ServingType
+				}
+				if ds.PaymentMode == "cashier" {
+					dineKitchen = "queued"
+				}
+			}
+		}
+	}
+
 	order, err := h.orders.Create(r.Context(), repository.CreateOrderInput{
 		StoreID:         store.ID,
 		CustomerName:    req.CustomerName,
@@ -695,6 +770,9 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 		PromoCode:       promoCode,
 		PromoID:         promoID,
 		Items:           items,
+		TableID:         tableID,
+		ServingType:     dineServing,
+		KitchenStatus:   dineKitchen,
 	})
 	if err != nil {
 		// Concurrency: another buyer just bought the last unit between our
@@ -731,6 +809,17 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 				"created_at":    order.CreatedAt.Format(time.RFC3339),
 			},
 		})
+		// Kitchen Display + queue board: notify when the order entered the
+		// kitchen pipeline now (cashier-mode dine-in).
+		if order.KitchenStatus != nil {
+			h.broker.Publish(store.ID, events.Event{
+				Type: "kds.order.created",
+				Payload: map[string]any{
+					"order_id":     order.ID.String(),
+					"queue_number": order.QueueNumber,
+				},
+			})
+		}
 	}
 
 	// Outbound WhatsApp alert to the seller's notification number, if
@@ -765,6 +854,8 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 		"order_id":     order.ID.String(),
 		"order_number": order.OrderNumber,
 		"total_cents":  order.TotalCents,
+		"queue_number": order.QueueNumber,
+		"serving_type": order.ServingType,
 	})
 }
 
@@ -1083,12 +1174,16 @@ func (h *StorefrontHandler) ShippingQuote(w http.ResponseWriter, r *http.Request
 				continue
 			}
 			for _, opt := range res {
+				eta := opt.ETA
+				if eta != "" {
+					eta += " hari"
+				}
 				options = append(options, shipping.Option{
 					Courier:   opt.CourierName,
 					Code:      opt.CourierCode,
 					Service:   opt.Service,
 					PriceRpah: opt.PriceRpah,
-					ETA:       opt.ETA + " hari",
+					ETA:       eta,
 					Zone:      "rajaongkir",
 				})
 			}

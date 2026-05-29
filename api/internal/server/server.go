@@ -54,6 +54,18 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	downloadTokens := repository.NewDownloadTokenRepo(pool)
 	bulkJobs := repository.NewBulkJobRepo(pool)
 	resellerRepo := repository.NewResellerRepo(pool)
+	posRepo := repository.NewPOSRepo(pool)
+	productDiscounts := repository.NewProductDiscountRepo(pool)
+	materialRepo := repository.NewMaterialRepo(pool)
+	membershipTierRepo := repository.NewMembershipTierRepo(pool)
+	supplierRepo := repository.NewSupplierRepo(pool)
+	purchaseOrderRepo := repository.NewPurchaseOrderRepo(pool)
+	stockTakeRepo := repository.NewStockTakeRepo(pool)
+	cashEntryRepo := repository.NewCashEntryRepo(pool)
+	analyticsRepo := repository.NewAnalyticsRepo(pool)
+	tableRepo := repository.NewTableRepo(pool)
+	kitchenRepo := repository.NewKitchenRepo(pool)
+	modifierRepo := repository.NewModifierRepo(pool)
 
 	googleVerifier := auth.NewGoogleVerifier(cfg.GoogleClientID)
 	jwtSvc := auth.NewJWTService(cfg.JWTSecret, cfg.JWTTTL)
@@ -76,15 +88,21 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 
 	authHandler := handler.NewAuthHandler(users, memberships, googleVerifier, jwtSvc, mailer, publicWebURL, logger, cfg.IsProd())
 	storeHandler := handler.NewStoreHandler(stores, subscriptions, auditLogger, logger)
-	productHandler := handler.NewProductHandler(products, variants, stores, subscriptions, planRepo, bulkJobs, storageClient, broker, auditLogger, logger)
+	productHandler := handler.NewProductHandler(products, variants, stores, subscriptions, planRepo, bulkJobs, productDiscounts, modifierRepo, materialRepo, storageClient, broker, auditLogger, logger)
 	uploadHandler := handler.NewUploadHandler(stores, storageClient, logger)
 	orderHandler := handler.NewOrderHandler(orders, stores, gateways, encryptor, midtransClient, auditLogger, fulfiller, mailer, publicWebURL, logger)
 	customerHandler := handler.NewCustomerHandler(customers, orders, stores, auditLogger, logger)
+	materialHandler := handler.NewMaterialHandler(materialRepo, stores, subscriptions, auditLogger, logger)
+	membershipHandler := handler.NewMembershipHandler(membershipTierRepo, stores, subscriptions, auditLogger, logger)
+	purchasingHandler := handler.NewPurchasingHandler(supplierRepo, purchaseOrderRepo, stockTakeRepo, stores, subscriptions, auditLogger, logger)
+	analyticsHandler := handler.NewAnalyticsHandler(analyticsRepo, cashEntryRepo, stores, subscriptions, auditLogger, logger)
+	tableHandler := handler.NewTableHandler(tableRepo, stores, subscriptions, auditLogger, logger)
+	kdsHandler := handler.NewKDSHandler(kitchenRepo, stores, broker, logger)
 	paymentHandler := handler.NewPaymentHandler(gateways, stores, encryptor, midtransClient, auditLogger, logger, cfg.WebhookBaseURL)
 	dashHandler := handler.NewDashboardHandler(stores, products, orders, customers, logger)
 	storefrontHandler := handler.NewStorefrontHandler(
 		stores, products, variants, orders, bankAccounts, categories, promos, gateways,
-		subscriptions, planRepo, users, waTemplates, broker, rajaOngkir, mailer, twilioClient,
+		subscriptions, planRepo, users, waTemplates, modifierRepo, tableRepo, broker, rajaOngkir, mailer, twilioClient,
 		storageClient, auditLogger, publicWebURL, logger,
 	)
 	orderStreamHandler := handler.NewOrderStreamHandler(stores, broker, logger)
@@ -111,9 +129,10 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	domainHandler := handler.NewDomainHandler(stores, subscriptions, auditLogger, cfg.CnameTarget, logger)
 	auditHandler := handler.NewAuditHandler(auditRepo, stores, users, logger)
 	resellerHandler := handler.NewResellerHandler(resellerRepo, stores, subscriptions, auditLogger, mailer, twilioClient, logger)
+	posHandler := handler.NewPOSHandler(posRepo, stores, products, variants, orders, customers, memberships, subscriptions, waTemplates, users, modifierRepo, materialRepo, membershipTierRepo, twilioClient, auditLogger, logger)
 	adminHandler := handler.NewAdminHandler(
 		users, stores, adminRepo, platformAuditRepo, auditRepo, subscriptions,
-		storageClient, jwtSvc, cfg.IsProd(), logger,
+		planRepo, storageClient, jwtSvc, mailer, publicWebURL, cfg.IsProd(), logger,
 	)
 
 	requireAuth := middleware.RequireAuth(jwtSvc)
@@ -149,6 +168,9 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 		// the static segment "domain-lookup" before the wildcard {slug}.
 		r.Get("/storefront/domain-lookup", storefrontHandler.DomainLookup)
 
+		// Public table QR resolution (scan a table → store + table).
+		r.Get("/tables/resolve/{token}", tableHandler.Resolve)
+
 		// Public storefront (no auth)
 		r.Route("/storefront/{slug}", func(r chi.Router) {
 			r.Get("/", storefrontHandler.GetStore)
@@ -159,6 +181,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 			r.Post("/orders/{number}/payment-proof", storefrontHandler.UploadPaymentProof)
 			r.Post("/shipping/quote", storefrontHandler.ShippingQuote)
 			r.Post("/promos/validate", storefrontHandler.ValidatePromo)
+			r.Get("/queue", kdsHandler.PublicQueue)
 		})
 
 		r.Route("/auth", func(r chi.Router) {
@@ -192,6 +215,8 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 					r.Put("/custom-domain", domainHandler.Set)
 					r.Post("/custom-domain/verify", domainHandler.Verify)
 					r.Delete("/custom-domain", domainHandler.Delete)
+					r.Get("/dinein", tableHandler.GetDineIn)
+					r.Put("/dinein", tableHandler.UpdateDineIn)
 				})
 
 				r.Route("/products", func(r chi.Router) {
@@ -207,6 +232,61 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 					r.Put("/{id}", productHandler.Update)
 					r.Delete("/{id}", productHandler.Delete)
 					r.Post("/{id}/duplicate", productHandler.Duplicate)
+					r.Put("/{id}/discounts", productHandler.SetDiscounts)
+					r.Put("/{id}/modifiers", productHandler.SetModifiers)
+				})
+
+				r.Route("/membership", func(r chi.Router) {
+					r.Get("/tiers", membershipHandler.ListTiers)
+					r.Put("/tiers", membershipHandler.ReplaceTiers)
+				})
+				r.Route("/suppliers", func(r chi.Router) {
+					r.Get("/", purchasingHandler.ListSuppliers)
+					r.Post("/", purchasingHandler.CreateSupplier)
+					r.Put("/{id}", purchasingHandler.UpdateSupplier)
+					r.Delete("/{id}", purchasingHandler.DeleteSupplier)
+				})
+				r.Route("/purchase-orders", func(r chi.Router) {
+					r.Get("/", purchasingHandler.ListPOs)
+					r.Post("/", purchasingHandler.CreatePO)
+					r.Get("/{id}", purchasingHandler.GetPO)
+					r.Post("/{id}/status", purchasingHandler.SetPOStatus)
+					r.Post("/{id}/receive", purchasingHandler.ReceivePO)
+				})
+				r.Route("/stock-takes", func(r chi.Router) {
+					r.Get("/", purchasingHandler.ListStockTakes)
+					r.Post("/", purchasingHandler.CreateStockTake)
+					r.Get("/{id}", purchasingHandler.GetStockTake)
+					r.Post("/{id}/post", purchasingHandler.PostStockTake)
+				})
+				r.Get("/analytics/overview", analyticsHandler.Overview)
+				r.Route("/cash-entries", func(r chi.Router) {
+					r.Get("/", analyticsHandler.ListCashEntries)
+					r.Post("/", analyticsHandler.CreateCashEntry)
+					r.Delete("/{id}", analyticsHandler.DeleteCashEntry)
+				})
+				r.Route("/tables", func(r chi.Router) {
+					r.Get("/", tableHandler.List)
+					r.Post("/", tableHandler.Create)
+					r.Put("/{id}", tableHandler.Update)
+					r.Delete("/{id}", tableHandler.Delete)
+				})
+				r.Route("/kds", func(r chi.Router) {
+					r.Get("/orders", kdsHandler.List)
+					r.Post("/orders/{id}/bump", kdsHandler.Bump)
+					r.Get("/stream", kdsHandler.Stream)
+				})
+				r.Route("/materials", func(r chi.Router) {
+					r.Get("/", materialHandler.List)
+					r.Get("/summary", materialHandler.Summary)
+					r.Post("/", materialHandler.Create)
+					r.Get("/report", materialHandler.GetReport)
+					r.Get("/report.csv", materialHandler.ExportReportCSV)
+					r.Put("/{id}", materialHandler.Update)
+					r.Delete("/{id}", materialHandler.Delete)
+					r.Post("/{id}/restock", materialHandler.Restock)
+					r.Post("/{id}/adjust", materialHandler.Adjust)
+					r.Get("/{id}/movements", materialHandler.ListMovements)
 				})
 
 				r.Post("/uploads/image", uploadHandler.Image)
@@ -228,6 +308,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 					r.Get("/export", customerHandler.ExportCSV)
 					r.Get("/{id}", customerHandler.Get)
 					r.Put("/{id}", customerHandler.Update)
+					r.Post("/{id}/member-code", customerHandler.GenerateMemberCode)
 				})
 
 				r.Route("/payments/midtrans", func(r chi.Router) {
@@ -310,6 +391,43 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 					r.Get("/catalog", resellerHandler.ListCatalog)
 					r.Delete("/catalog/{id}", resellerHandler.RemoveFromCatalog)
 					r.Put("/catalog/{id}/price", resellerHandler.UpdateCatalogPrice)
+				})
+
+				r.Route("/pos", func(r chi.Router) {
+					// Sessions
+					r.Post("/sessions", posHandler.OpenSession)
+					r.Get("/sessions", posHandler.ListSessions)
+					r.Get("/sessions/active", posHandler.GetActiveSession)
+					r.Get("/sessions/{id}", posHandler.GetSession)
+					r.Get("/sessions/{id}/summary", posHandler.GetSessionSummary)
+					r.Get("/sessions/{id}/orders", posHandler.ListSessionOrders)
+					r.Get("/sessions/{id}/orders.csv", posHandler.ExportSessionOrdersCSV)
+					r.Post("/sessions/{id}/close", posHandler.CloseSession)
+					// Cash movements
+					r.Post("/sessions/{id}/cash-movements", posHandler.AddCashMovement)
+					r.Get("/sessions/{id}/cash-movements", posHandler.ListCashMovements)
+					// Orders
+					r.Post("/orders", posHandler.CreatePOSOrder)
+					r.Post("/orders/{id}/void", posHandler.VoidOrder)
+					r.Post("/orders/{id}/return", posHandler.ReturnOrder)
+					r.Post("/orders/{id}/send-receipt", posHandler.SendReceiptWA)
+					// Held orders
+					r.Post("/held", posHandler.CreateHeldOrder)
+					r.Get("/held", posHandler.ListHeldOrders)
+					r.Delete("/held/{id}", posHandler.DeleteHeldOrder)
+					// Reports
+					r.Get("/cashiers", posHandler.ListCashiers)
+					r.Get("/reports", posHandler.GetReport)
+					r.Get("/reports.csv", posHandler.ExportReportCSV)
+					// Loyalty
+					r.Get("/loyalty/config", posHandler.GetLoyaltyConfig)
+					r.Put("/loyalty/config", posHandler.UpdateLoyaltyConfig)
+					r.Get("/members/resolve/{code}", posHandler.ResolveMember)
+					r.Get("/printer/config", posHandler.GetPrinterConfig)
+					r.Put("/printer/config", posHandler.UpdatePrinterConfig)
+					r.Get("/customers/lookup", posHandler.LookupCustomer)
+					r.Get("/customers/search", posHandler.SearchCustomers)
+					r.Get("/customers/{customerID}/loyalty/transactions", posHandler.ListLoyaltyTransactions)
 				})
 			})
 
