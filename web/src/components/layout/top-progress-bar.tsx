@@ -35,23 +35,29 @@ export function TopProgressBar() {
       }, 220);
     };
 
-    // Patch history so both <Link> and programmatic router.push() trigger us.
+    // Next's router calls history.pushState from inside a useInsertionEffect,
+    // where scheduling React state updates synchronously is forbidden. So we
+    // run the original first, then defer start() to a microtask — moving the
+    // setState out of the insertion-effect phase.
+    const schedule = () => queueMicrotask(start);
     const origPush = history.pushState;
     const origReplace = history.replaceState;
     history.pushState = function (...args) {
-      start();
-      return origPush.apply(this, args as Parameters<typeof origPush>);
+      const res = origPush.apply(this, args as Parameters<typeof origPush>);
+      schedule();
+      return res;
     };
     history.replaceState = function (...args) {
-      start();
-      return origReplace.apply(this, args as Parameters<typeof origReplace>);
+      const res = origReplace.apply(this, args as Parameters<typeof origReplace>);
+      schedule();
+      return res;
     };
-    window.addEventListener("popstate", start);
+    window.addEventListener("popstate", schedule);
 
     return () => {
       history.pushState = origPush;
       history.replaceState = origReplace;
-      window.removeEventListener("popstate", start);
+      window.removeEventListener("popstate", schedule);
       if (trickle.current) clearInterval(trickle.current);
       if (hideTimer.current) clearTimeout(hideTimer.current);
     };
