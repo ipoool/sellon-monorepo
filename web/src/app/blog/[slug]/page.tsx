@@ -95,7 +95,10 @@ export default async function BlogPostPage({ params }: { params: Params }) {
 
               {/* Article header */}
               <header className="mt-6">
-                <Badge variant="brand">{post.category}</Badge>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="brand">{post.category}</Badge>
+                  {post.plan && <PlanBadge plan={post.plan} />}
+                </div>
                 <h1 className="mt-4 font-display text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl lg:text-5xl">
                   {post.title}
                 </h1>
@@ -114,15 +117,24 @@ export default async function BlogPostPage({ params }: { params: Params }) {
                 </div>
               </header>
 
-              {/* Decorative cover */}
-              <div
-                className={`mt-8 flex h-48 items-center justify-center rounded-2xl bg-gradient-to-br sm:h-64 ${post.coverColor}`}
-                aria-hidden
-              >
-                <span className="font-display text-8xl font-bold text-white/15 select-none">
-                  {post.title.charAt(0)}
-                </span>
-              </div>
+              {/* Cover: real image for tutorials, gradient otherwise */}
+              {post.coverImage ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={post.coverImage}
+                  alt={post.title}
+                  className="mt-8 w-full rounded-2xl border border-neutral-200 shadow-card"
+                />
+              ) : (
+                <div
+                  className={`mt-8 flex h-48 items-center justify-center rounded-2xl bg-gradient-to-br sm:h-64 ${post.coverColor}`}
+                  aria-hidden
+                >
+                  <span className="font-display text-8xl font-bold text-white/15 select-none">
+                    {post.title.charAt(0)}
+                  </span>
+                </div>
+              )}
 
               {/* Article body */}
               <div className="mt-10 flex flex-col gap-8">
@@ -162,6 +174,21 @@ export default async function BlogPostPage({ params }: { params: Params }) {
                         title={s.callout.title}
                         body={s.callout.body}
                       />
+                    )}
+                    {s.image && (
+                      <figure className="flex flex-col gap-2">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={s.image.src}
+                          alt={s.image.alt}
+                          className="w-full rounded-xl border border-neutral-200 shadow-card"
+                        />
+                        {s.image.caption && (
+                          <figcaption className="text-center text-sm text-neutral-500">
+                            {s.image.caption}
+                          </figcaption>
+                        )}
+                      </figure>
                     )}
                   </section>
                 ))}
@@ -228,6 +255,23 @@ export default async function BlogPostPage({ params }: { params: Params }) {
       </main>
       <Footer />
     </>
+  );
+}
+
+function PlanBadge({ plan }: { plan: "free" | "pro" | "bisnis" }) {
+  const label =
+    plan === "free" ? "Gratis" : plan === "pro" ? "Pro" : "Bisnis";
+  const cls =
+    plan === "free"
+      ? "bg-neutral-100 text-neutral-700"
+      : "bg-brand-100 text-brand-700";
+  return (
+    <span
+      className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${cls}`}
+      title={`Fitur ini tersedia di paket ${label}`}
+    >
+      {plan === "free" ? "Semua paket" : `Paket ${label}`}
+    </span>
   );
 }
 

@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -38,6 +40,12 @@ type DineInSettings struct {
 	Enabled     bool
 	PaymentMode string // "cashier" | "online"
 	KDSEnabled  bool
+	// QR card appearance (table QR print/display).
+	QRLayout   string // template: "classic" | "tent" | "poster"
+	QRFgColor  string // card text color, hex
+	QRBgColor  string // card background color, hex
+	QRHeadline string // big headline text on the card
+	QRCaption  string // subtext under the headline
 }
 
 type TableRepo struct {
@@ -129,23 +137,56 @@ func (r *TableRepo) ResolveByToken(ctx context.Context, token string) (*TableRes
 func (r *TableRepo) GetDineInSettings(ctx context.Context, storeID uuid.UUID) (*DineInSettings, error) {
 	var s DineInSettings
 	err := r.pool.QueryRow(ctx,
-		`SELECT dinein_enabled, dinein_payment_mode, kds_enabled FROM stores WHERE id = $1`, storeID,
-	).Scan(&s.Enabled, &s.PaymentMode, &s.KDSEnabled)
+		`SELECT dinein_enabled, dinein_payment_mode, kds_enabled,
+		        qr_layout, qr_fg_color, qr_bg_color, qr_headline, qr_caption
+		 FROM stores WHERE id = $1`, storeID,
+	).Scan(&s.Enabled, &s.PaymentMode, &s.KDSEnabled,
+		&s.QRLayout, &s.QRFgColor, &s.QRBgColor, &s.QRHeadline, &s.QRCaption)
 	if err != nil {
 		return nil, err
 	}
 	return &s, nil
 }
 
+// hexColor returns c if it's a valid #RGB/#RRGGBB(/AA) hex string, else fallback.
+func hexColor(c, fallback string) string {
+	c = strings.TrimSpace(c)
+	if hexColorRe.MatchString(c) {
+		return c
+	}
+	return fallback
+}
+
+var hexColorRe = regexp.MustCompile(`^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$`)
+
 func (r *TableRepo) UpdateDineInSettings(ctx context.Context, storeID uuid.UUID, s DineInSettings) error {
 	mode := s.PaymentMode
 	if mode != "cashier" && mode != "online" {
 		mode = "cashier"
 	}
+	// Sanitize server-side (never trust client). Colors validated to hex,
+	// layout to the known set, text fields trimmed + capped.
+	layout := s.QRLayout
+	if layout != "classic" && layout != "tent" && layout != "poster" {
+		layout = "classic"
+	}
+	fg := hexColor(s.QRFgColor, "#0F172A")
+	bg := hexColor(s.QRBgColor, "#FFFFFF")
+	headline := strings.TrimSpace(s.QRHeadline)
+	if len(headline) > 60 {
+		headline = headline[:60]
+	}
+	caption := strings.TrimSpace(s.QRCaption)
+	if len(caption) > 120 {
+		caption = caption[:120]
+	}
 	_, err := r.pool.Exec(ctx, `
-		UPDATE stores SET dinein_enabled = $2, dinein_payment_mode = $3, kds_enabled = $4, updated_at = now()
+		UPDATE stores
+		SET dinein_enabled = $2, dinein_payment_mode = $3, kds_enabled = $4,
+		    qr_layout = $5, qr_fg_color = $6, qr_bg_color = $7,
+		    qr_headline = $8, qr_caption = $9, updated_at = now()
 		WHERE id = $1
-	`, storeID, s.Enabled, mode, s.KDSEnabled)
+	`, storeID, s.Enabled, mode, s.KDSEnabled, layout, fg, bg, headline, caption)
 	return err
 }
 

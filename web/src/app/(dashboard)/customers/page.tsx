@@ -5,10 +5,9 @@ import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CustomersTable } from "@/components/dashboard/customers-table";
-import { SegmentSettingsButton } from "@/components/dashboard/segment-settings-card";
 import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
-import type { Customer, Store } from "@/lib/types";
+import type { Customer } from "@/lib/types";
 
 export const metadata = { title: "Pelanggan - SellOn" };
 
@@ -18,12 +17,8 @@ export default async function PelangganPage() {
   const me = await getMe();
   if (!me) redirect("/login");
 
-  const [data, storeData] = await Promise.all([
-    serverApi<{ customers: Customer[] }>("/api/v1/customers"),
-    serverApi<{ store: Store | null }>("/api/v1/store"),
-  ]);
+  const data = await serverApi<{ customers: Customer[] }>("/api/v1/customers");
   const customers = data?.customers ?? [];
-  const store = storeData?.store;
 
   return (
     <DashboardShell
@@ -31,29 +26,19 @@ export default async function PelangganPage() {
       pageTitle="Pelanggan"
       pageSubtitle={`${customers.length} pelanggan`}
       actions={
-        <div className="flex items-center gap-2">
-          <SegmentSettingsButton
-            initialVip={store?.segment_vip_threshold ?? 10}
-            initialLoyal={store?.segment_loyal_threshold ?? 3}
-            initialBaruName={store?.segment_baru_name ?? "Baru"}
-            initialRegulerName={store?.segment_reguler_name ?? "Reguler"}
-            initialLoyalName={store?.segment_loyal_name ?? "Loyal"}
-            initialVipName={store?.segment_vip_name ?? "VIP"}
-          />
-          {customers.length > 0 && (
-            <a
-              href={`${apiBase}/api/v1/customers/export`}
-              download
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <Button size="sm" variant="outline">
-                <Download className="size-4" aria-hidden />
-                Export CSV
-              </Button>
-            </a>
-          )}
-        </div>
+        customers.length > 0 ? (
+          <a
+            href={`${apiBase}/api/v1/customers/export`}
+            download
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <Button size="sm" variant="outline">
+              <Download className="size-4" aria-hidden />
+              Export CSV
+            </Button>
+          </a>
+        ) : undefined
       }
     >
       {customers.length === 0 ? (

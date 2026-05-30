@@ -203,6 +203,17 @@ export type KitchenOrder = {
   items: { name: string; quantity: number }[];
 };
 
+// Platform-managed promo/info banner shown as a slider on the seller dashboard.
+export type PlatformBanner = {
+  id: string;
+  image_url: string;
+  title: string;
+  link_url: string;
+  is_active: boolean;
+  sort_order: number;
+  created_at: string;
+};
+
 export type RestaurantTable = {
   id: string;
   label: string;
@@ -214,6 +225,12 @@ export type DineInSettings = {
   enabled: boolean;
   payment_mode: "cashier" | "online";
   kds_enabled: boolean;
+  // Custom QR card layout/appearance (table QR print/display).
+  qr_layout: "classic" | "tent" | "poster";
+  qr_fg_color: string; // card text color
+  qr_bg_color: string; // card background color
+  qr_headline: string;
+  qr_caption: string;
 };
 
 export type AnalyticsDayPoint = {

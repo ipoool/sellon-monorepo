@@ -49,3 +49,5 @@ docker-data/
 coverage/
 *.lcov
 .gstack/
+
+marketing/.mcp.json

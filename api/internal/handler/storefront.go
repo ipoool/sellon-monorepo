@@ -177,6 +177,10 @@ type publicProductDTO struct {
 	IsFeatured  bool     `json:"is_featured"`
 	HasVariants bool     `json:"has_variants"`
 	ProductType string   `json:"product_type"` // "physical" | "digital"
+	// Variants is populated only by the list endpoint (GetStore) for products
+	// with has_variants=true, so the self-order kiosk can pick a variant inline
+	// without a per-product detail fetch. Omitted for non-variant products.
+	Variants []publicVariantDTO `json:"variants,omitempty"`
 }
 
 type publicCategoryDTO struct {
@@ -414,9 +418,30 @@ func (h *StorefrontHandler) GetStore(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+	// Batch-load variants for variant products so the self-order kiosk can
+	// pick a variant inline (no per-product detail fetch). One query, no N+1.
+	variantIDs := make([]uuid.UUID, 0, len(prods))
+	for i := range prods {
+		if prods[i].HasVariants {
+			variantIDs = append(variantIDs, prods[i].ID)
+		}
+	}
+	variantsByProduct, _ := h.variants.ListByProducts(r.Context(), variantIDs)
+
 	out := make([]publicProductDTO, 0, len(prods))
 	for i := range prods {
-		out = append(out, toPublicProduct(&prods[i]))
+		dto := toPublicProduct(&prods[i])
+		if vs := variantsByProduct[prods[i].ID]; len(vs) > 0 {
+			vOut := make([]publicVariantDTO, 0, len(vs))
+			for _, v := range vs {
+				vOut = append(vOut, publicVariantDTO{
+					ID: v.ID.String(), Name: v.Name,
+					PriceCents: v.PriceCents, Stock: v.Stock,
+				})
+			}
+			dto.Variants = vOut
+		}
+		out = append(out, dto)
 	}
 
 	cats, _ := h.categories.ListByStore(r.Context(), store.ID)
@@ -736,8 +761,11 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Dine-in self-order routing: a table QR submission routes the order into
-	// the kitchen. Cashier mode → queued immediately; online-first → kitchen
-	// stays empty until payment (handled on the payment webhook).
+	// the kitchen ONLY when the seller runs a Kitchen Display (kds_enabled).
+	// With KDS off the order is treated like any normal order — no kitchen
+	// pipeline, no queue number — and surfaces on the regular Orders page.
+	// Cashier mode → queued immediately; online-first → kitchen stays empty
+	// until payment (handled on the payment webhook).
 	var tableID *uuid.UUID
 	dineKitchen := ""
 	dineServing := ""
@@ -748,7 +776,7 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 				if req.ServingType == "dine_in" || req.ServingType == "takeaway" {
 					dineServing = req.ServingType
 				}
-				if ds.PaymentMode == "cashier" {
+				if ds.PaymentMode == "cashier" && ds.KDSEnabled {
 					dineKitchen = "queued"
 				}
 			}

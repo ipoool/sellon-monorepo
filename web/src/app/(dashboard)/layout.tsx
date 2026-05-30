@@ -4,12 +4,13 @@ import type { ReactNode } from "react";
 import { ImpersonationBanner } from "@/components/admin/impersonation-banner";
 import { BannersWrapper } from "@/components/dashboard/banners-wrapper";
 import { OrderNotifier } from "@/components/dashboard/order-notifier";
+import { KdsProvider } from "@/components/dashboard/kds-context";
 import { PlanProvider } from "@/components/dashboard/plan-context";
 import { SandboxBanner } from "@/components/dashboard/sandbox-banner";
 import { SubscriptionExpiryBanner } from "@/components/dashboard/subscription-expiry-banner";
 import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
-import type { GatewayInfo, Store, Subscription } from "@/lib/types";
+import type { DineInSettings, GatewayInfo, Store, Subscription } from "@/lib/types";
 
 // Guards all routes under (dashboard): must be authed AND have a store.
 // First-time sellers (authed but no store yet) get sent to /setup.
@@ -27,7 +28,7 @@ export default async function DashboardLayout({
 
   const isAdminMode = me.role === "admin" && !me.is_impersonated;
 
-  const [data, subData, gateway] = await Promise.all([
+  const [data, subData, gateway, dinein] = await Promise.all([
     serverApi<{ store: Store | null }>("/api/v1/store"),
     // Subscription is nullable — admins without a store get null and we
     // skip the expiry banner entirely. Errors fall through to undefined,
@@ -37,6 +38,9 @@ export default async function DashboardLayout({
     // sandbox di-render di atas dasbor. serverApi balas null kalau
     // gateway endpoint error / belum configure.
     serverApi<GatewayInfo>("/api/v1/payments/midtrans"),
+    // Dine-in/KDS settings — surfaced to the sidebar so the "Kitchen
+    // Display" link is hidden when the seller doesn't run a KDS.
+    serverApi<DineInSettings>("/api/v1/store/dinein"),
   ]);
   if (!data?.store) {
     // Admin without a store: let them through. The /dashboard seller page
@@ -83,7 +87,9 @@ export default async function DashboardLayout({
       {/* Surface the active tier to the dashboard sidebar (and any
           other client components that want to gate by plan) without
           prop-drilling through every page. */}
-      <PlanProvider value={sub?.plan ?? "free"}>{children}</PlanProvider>
+      <PlanProvider value={sub?.plan ?? "free"}>
+        <KdsProvider value={dinein?.kds_enabled ?? false}>{children}</KdsProvider>
+      </PlanProvider>
     </div>
   );
 }

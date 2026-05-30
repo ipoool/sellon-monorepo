@@ -27,6 +27,7 @@ import {
   Boxes,
   TrendingUp,
   ChefHat,
+  GalleryHorizontalEnd,
   type LucideIcon,
 } from "lucide-react";
 
@@ -34,6 +35,7 @@ import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { LogoutButton } from "@/components/auth/logout-button";
 import { usePlan } from "@/components/dashboard/plan-context";
+import { useKdsEnabled } from "@/components/dashboard/kds-context";
 import { cn } from "@/lib/utils";
 import type { Me } from "@/lib/auth-types";
 
@@ -132,6 +134,7 @@ function SidebarContent({
   onClose?: () => void;
 }) {
   const plan = usePlan();
+  const kdsEnabled = useKdsEnabled();
   const tierLabel =
     plan === "pro" ? "Pro" : plan === "bisnis" ? "Bisnis" : "Free";
   // Badge variants: paid tiers get visual emphasis ("brand" for Pro,
@@ -222,6 +225,11 @@ function SidebarContent({
                   href: "/platform/subscriptions",
                   icon: Receipt,
                 },
+                {
+                  label: "Banner",
+                  href: "/platform/banners",
+                  icon: GalleryHorizontalEnd,
+                },
               ]}
               pathname={pathname}
             />
@@ -260,7 +268,11 @@ function SidebarContent({
               labelHref="/pos"
               items={[
                 { label: "Buka Kasir", href: "/pos", icon: ShoppingCart },
-                { label: "Kitchen Display", href: "/kds", icon: ChefHat },
+                // Kitchen Display only when the seller runs a KDS — otherwise
+                // dine-in orders skip the kitchen pipeline and the board is empty.
+                ...(kdsEnabled
+                  ? [{ label: "Kitchen Display", href: "/kds", icon: ChefHat }]
+                  : []),
                 { label: "Riwayat Shift", href: "/pos/sessions", icon: Clock },
                 { label: "Laporan POS", href: "/pos/reports", icon: BarChart3 },
               ]}

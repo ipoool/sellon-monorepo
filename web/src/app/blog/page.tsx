@@ -61,15 +61,24 @@ export default async function BlogPage() {
               href={`/blog/${featured.slug}`}
               className="group grid overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-card transition-all hover:-translate-y-0.5 hover:shadow-elevated lg:grid-cols-5"
             >
-              {/* Decorative cover */}
-              <div
-                className={`flex h-48 items-center justify-center bg-gradient-to-br lg:col-span-2 lg:h-auto ${featured.coverColor}`}
-                aria-hidden
-              >
-                <span className="font-display text-6xl font-bold text-white/20 select-none">
-                  {featured.title.charAt(0)}
-                </span>
-              </div>
+              {/* Cover: image for tutorials, gradient otherwise */}
+              {featured.coverImage ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={featured.coverImage}
+                  alt={featured.title}
+                  className="h-48 w-full object-cover lg:col-span-2 lg:h-full"
+                />
+              ) : (
+                <div
+                  className={`flex h-48 items-center justify-center bg-gradient-to-br lg:col-span-2 lg:h-full ${featured.coverColor}`}
+                  aria-hidden
+                >
+                  <span className="font-display text-6xl font-bold text-white/20 select-none">
+                    {featured.title.charAt(0)}
+                  </span>
+                </div>
+              )}
 
               <div className="flex flex-col gap-4 p-7 lg:col-span-3 lg:p-10">
                 <div className="flex items-center gap-2">
@@ -120,15 +129,24 @@ export default async function BlogPage() {
                   href={`/blog/${post.slug}`}
                   className="group flex flex-col overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-card transition-all hover:-translate-y-0.5 hover:shadow-elevated"
                 >
-                  {/* Decorative cover */}
-                  <div
-                    className={`flex h-32 items-center justify-center bg-gradient-to-br ${post.coverColor}`}
-                    aria-hidden
-                  >
-                    <span className="font-display text-4xl font-bold text-white/20 select-none">
-                      {post.title.charAt(0)}
-                    </span>
-                  </div>
+                  {/* Cover: image for tutorials, gradient otherwise */}
+                  {post.coverImage ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={post.coverImage}
+                      alt={post.title}
+                      className="h-32 w-full object-cover"
+                    />
+                  ) : (
+                    <div
+                      className={`flex h-32 items-center justify-center bg-gradient-to-br ${post.coverColor}`}
+                      aria-hidden
+                    >
+                      <span className="font-display text-4xl font-bold text-white/20 select-none">
+                        {post.title.charAt(0)}
+                      </span>
+                    </div>
+                  )}
 
                   <div className="flex flex-1 flex-col gap-3 p-5">
                     <Badge variant="outline" className="w-fit">

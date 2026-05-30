@@ -106,7 +106,7 @@ func (r *BulkJobRepo) Complete(ctx context.Context, id uuid.UUID, succeeded, fai
 	_, err = r.pool.Exec(ctx, `
 		UPDATE bulk_jobs
 		SET status = 'completed',
-		    processed_rows = $2 + $3,
+		    processed_rows = $2::int + $3::int,
 		    succeeded = $2,
 		    failed = $3,
 		    errors_json = $4::jsonb,

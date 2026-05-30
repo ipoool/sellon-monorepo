@@ -19,6 +19,13 @@ type Resolution = {
   dinein_enabled: boolean;
 };
 
+type SelfOrderVariant = {
+  id: string;
+  name: string;
+  price_cents: number;
+  stock: number;
+};
+
 type SelfOrderProduct = {
   id: string;
   name: string;
@@ -27,6 +34,7 @@ type SelfOrderProduct = {
   photo_urls: string[];
   has_variants: boolean;
   product_type: string;
+  variants?: SelfOrderVariant[];
 };
 
 export default async function TableOrderPage({ params }: { params: Promise<{ token: string }> }) {
@@ -55,6 +63,7 @@ export default async function TableOrderPage({ params }: { params: Promise<{ tok
         storeName={res.store_name}
         tableId={res.table_id}
         tableLabel={res.table_label}
+        paymentMode={res.payment_mode}
         products={products.map((p) => ({
           id: p.id,
           name: p.name,
@@ -63,6 +72,7 @@ export default async function TableOrderPage({ params }: { params: Promise<{ tok
           photo_url: p.photo_urls?.[0],
           has_variants: p.has_variants,
           product_type: p.product_type,
+          variants: p.variants ?? [],
         }))}
       />
     </div>

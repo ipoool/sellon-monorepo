@@ -36,10 +36,10 @@ export const metadata: Metadata = {
   referrer: "origin-when-cross-origin",
   alternates: { canonical: SITE_URL },
   icons: {
-    // app/icon.svg auto-served oleh Next App Router di /icon.svg.
-    // SVG saja — favicon.ico lama dihapus supaya tidak ada konflik
-    // dengan browser cache.
-    icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
+    // Served from public/favicon.png. The old app/icon.svg file-convention
+    // was removed — Next auto-serves any app/icon.* and browsers prefer SVG
+    // over PNG, which would have shadowed this favicon.
+    icon: [{ url: "/favicon.png", type: "image/png" }],
     apple: [{ url: "/apple-touch-icon.png" }],
   },
   openGraph: {

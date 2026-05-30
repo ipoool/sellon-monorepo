@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 
 import { DashboardShell } from "@/components/layout/dashboard-shell";
+import { BannerSlider } from "@/components/dashboard/banner-slider";
 import { Button } from "@/components/ui/button";
 import { CopyUrlButton } from "@/components/dashboard/copy-url-button";
 import { Stat } from "@/components/ui/stat";
@@ -24,7 +25,13 @@ import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import { formatRupiah, formatDateTimeID } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { DashboardStats, Order, Store, Subscription } from "@/lib/types";
+import type {
+  DashboardStats,
+  Order,
+  PlatformBanner,
+  Store,
+  Subscription,
+} from "@/lib/types";
 
 const statusBadge: Record<
   Order["status"],
@@ -121,20 +128,22 @@ export default async function DasborPage() {
   }
 
   // (dashboard)/layout.tsx already guards: authed + has store.
-  const [statsRes, storeRes, subRes, ordersRes, reportsRes] = await Promise.all([
-    serverApi<DashboardStats>("/api/v1/dashboard/stats"),
-    serverApi<{ store: Store | null }>("/api/v1/store"),
-    serverApi<{ subscription: Subscription }>("/api/v1/subscription"),
-    serverApi<{ orders: Order[] }>("/api/v1/orders"),
-    serverApi<{
-      top_products: {
-        product_id: string;
-        product_name: string;
-        qty_sold: number;
-        revenue_cents: number;
-      }[];
-    }>("/api/v1/reports/overview?days=7"),
-  ]);
+  const [statsRes, storeRes, subRes, ordersRes, reportsRes, bannersRes] =
+    await Promise.all([
+      serverApi<DashboardStats>("/api/v1/dashboard/stats"),
+      serverApi<{ store: Store | null }>("/api/v1/store"),
+      serverApi<{ subscription: Subscription }>("/api/v1/subscription"),
+      serverApi<{ orders: Order[] }>("/api/v1/orders"),
+      serverApi<{
+        top_products: {
+          product_id: string;
+          product_name: string;
+          qty_sold: number;
+          revenue_cents: number;
+        }[];
+      }>("/api/v1/reports/overview?days=7"),
+      serverApi<{ banners: PlatformBanner[] }>("/api/v1/banners"),
+    ]);
 
   const stats = statsRes ?? {
     has_store: true,
@@ -145,6 +154,7 @@ export default async function DasborPage() {
     customers_total: 0,
   };
   const store = storeRes?.store ?? null;
+  const banners = bannersRes?.banners ?? [];
   const recentOrders = (ordersRes?.orders ?? []).slice(0, 5);
   const topProducts = (reportsRes?.top_products ?? []).slice(0, 5);
   const tipOfTheDay = pickDailyTip();
@@ -189,7 +199,12 @@ export default async function DasborPage() {
         </Link>
       }
     >
-      <div className="grid gap-5 lg:grid-cols-12">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
+        {banners.length > 0 && (
+          <div className="min-w-0 lg:col-span-12">
+            <BannerSlider banners={banners} />
+          </div>
+        )}
         {showQuotaBanner && orderQuota && (
           <section
             className={cn(

@@ -17,37 +17,14 @@ import {
   TablePagination,
 } from "@/components/dashboard/table-pagination";
 
-type Segment = "all" | "vip" | "loyal" | "reguler" | "baru" | "blacklist";
-
-type SegmentMeta = {
-  label: string;
-  variant: "default" | "brand" | "success" | "warning";
-};
-
-function classify(c: Customer): { key: Segment; meta: SegmentMeta } {
-  if (c.is_blacklisted)
-    return { key: "blacklist", meta: { label: "Blacklist", variant: "warning" } };
-  if (c.total_orders >= 10)
-    return { key: "vip", meta: { label: "VIP", variant: "brand" } };
-  if (c.total_orders >= 3)
-    return { key: "loyal", meta: { label: "Loyal", variant: "success" } };
-  if (c.total_orders >= 1)
-    return { key: "reguler", meta: { label: "Reguler", variant: "default" } };
-  return { key: "baru", meta: { label: "Baru", variant: "default" } };
-}
-
-const filterTabs: { key: Segment; label: string }[] = [
-  { key: "all", label: "Semua" },
-  { key: "vip", label: "VIP" },
-  { key: "loyal", label: "Loyal" },
-  { key: "reguler", label: "Reguler" },
-  { key: "baru", label: "Baru" },
-  { key: "blacklist", label: "Blacklist" },
-];
+// Loyalty tiers now live in Settings → Membership (based on total spend). The
+// old order-count "segment" buckets were removed; here we only keep a
+// Blacklist filter/marker, which is a real flag on the customer.
+type Filter = "all" | "blacklist";
 
 export function CustomersTable({ customers }: { customers: Customer[] }) {
   const [query, setQuery] = useState("");
-  const [segment, setSegment] = useState<Segment>("all");
+  const [filter, setFilter] = useState<Filter>("all");
   const [page, setPage] = useState(1);
   const pageSize = TABLE_PAGE_SIZE;
 
@@ -55,34 +32,22 @@ export function CustomersTable({ customers }: { customers: Customer[] }) {
   // sees an empty page after narrowing the result set.
   useEffect(() => {
     setPage(1);
-  }, [query, segment]);
+  }, [query, filter]);
 
-  const enriched = useMemo(
-    () =>
-      customers.map((c) => ({
-        ...c,
-        ...classify(c),
-      })),
+  const blacklistCount = useMemo(
+    () => customers.filter((c) => c.is_blacklisted).length,
     [customers],
   );
 
-  const counts = useMemo(() => {
-    const c: Record<Segment, number> = {
-      all: enriched.length,
-      vip: 0,
-      loyal: 0,
-      reguler: 0,
-      baru: 0,
-      blacklist: 0,
-    };
-    for (const e of enriched) c[e.key]++;
-    return c;
-  }, [enriched]);
+  const filterTabs: { key: Filter; label: string; count: number }[] = [
+    { key: "all", label: "Semua", count: customers.length },
+    { key: "blacklist", label: "Blacklist", count: blacklistCount },
+  ];
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return enriched.filter((c) => {
-      if (segment !== "all" && c.key !== segment) return false;
+    return customers.filter((c) => {
+      if (filter === "blacklist" && !c.is_blacklisted) return false;
       if (!q) return true;
       return (
         c.name.toLowerCase().includes(q) ||
@@ -91,11 +56,8 @@ export function CustomersTable({ customers }: { customers: Customer[] }) {
         (c.email ?? "").toLowerCase().includes(q)
       );
     });
-  }, [enriched, query, segment]);
+  }, [customers, query, filter]);
 
-  // Clamp page lazily so the slice stays valid if the dataset shrinks
-  // below the current page (e.g. user toggles segment after navigating
-  // to page 4).
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(page, totalPages);
   const sliceStart = (safePage - 1) * pageSize;
@@ -121,18 +83,15 @@ export function CustomersTable({ customers }: { customers: Customer[] }) {
             <button
               key={t.key}
               type="button"
-              onClick={() => setSegment(t.key)}
+              onClick={() => setFilter(t.key)}
               className={cn(
                 "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
-                segment === t.key
+                filter === t.key
                   ? "border-brand-500 bg-brand-50 text-brand-700"
                   : "border-neutral-200 text-neutral-600 hover:bg-neutral-50",
               )}
             >
-              {t.label}{" "}
-              <span className="ml-0.5 text-neutral-400">
-                {counts[t.key]}
-              </span>
+              {t.label} <span className="ml-0.5 text-neutral-400">{t.count}</span>
             </button>
           ))}
         </div>
@@ -148,7 +107,6 @@ export function CustomersTable({ customers }: { customers: Customer[] }) {
             <thead className="bg-neutral-50 text-xs font-semibold uppercase tracking-wider text-neutral-500">
               <tr>
                 <th className="px-5 py-3">Pelanggan</th>
-                <th className="px-5 py-3">Segmen</th>
                 <th className="px-5 py-3">Kota</th>
                 <th className="px-5 py-3">Order</th>
                 <th className="px-5 py-3">Total Belanja</th>
@@ -169,17 +127,17 @@ export function CustomersTable({ customers }: { customers: Customer[] }) {
                     >
                       <Avatar name={c.name} size="sm" />
                       <div>
-                        <p className="font-medium text-neutral-900 group-hover/row:text-brand-700">
+                        <p className="flex items-center gap-2 font-medium text-neutral-900 group-hover/row:text-brand-700">
                           {c.name}
+                          {c.is_blacklisted && (
+                            <Badge variant="warning">Blacklist</Badge>
+                          )}
                         </p>
                         <p className="font-mono text-xs text-neutral-500">
                           {c.whatsapp_number}
                         </p>
                       </div>
                     </Link>
-                  </td>
-                  <td className="px-5 py-3">
-                    <Badge variant={c.meta.variant}>{c.meta.label}</Badge>
                   </td>
                   <td className="px-5 py-3 text-neutral-700">{c.city || "—"}</td>
                   <td className="px-5 py-3 text-neutral-700">

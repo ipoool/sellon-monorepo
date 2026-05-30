@@ -1,12 +1,19 @@
 // Static blog content. Bahasa Indonesia, untuk audience UMKM seller online.
 // Body dipecah jadi sections (heading + paragraphs/bullets/callout) supaya
 // renderer tetap sederhana — tanpa Markdown parser.
+//
+// Tutorial/panduan produk (dengan screenshot) hidup di ./tutorial-posts.ts dan
+// digabung ke `blogPosts` di bawah, supaya renderer & route /blog/<slug> sama.
+import { tutorialPosts } from "./tutorial-posts";
 
 type BlogSection = {
   heading?: string;
   paragraphs?: string[];
   bullets?: string[];
   callout?: { kind: "tip" | "warn"; title: string; body: string };
+  // Optional screenshot/illustration rendered inside the section (used by
+  // tutorial posts). Path is served from /public (e.g. /tutorials/<slug>/01.png).
+  image?: { src: string; alt: string; caption?: string };
 };
 
 export type BlogPost = {
@@ -17,13 +24,19 @@ export type BlogPost = {
   publishedAt: string; // ISO date string
   readingTime: string;
   featured: boolean;
-  coverColor: string; // Tailwind gradient classes untuk decorative cover
+  coverColor: string; // Tailwind gradient classes untuk decorative cover (fallback)
+  // Optional real cover image (tutorial posts use a nanobanana illustration).
+  // When set, listing + detail render this instead of the gradient block.
+  coverImage?: string;
+  // Optional plan badge for tutorial posts (free/pro/bisnis).
+  plan?: "free" | "pro" | "bisnis";
   sections: BlogSection[];
 };
 
-export const blogPosts: BlogPost[] = [
+const marketingPosts: BlogPost[] = [
   {
     slug: "cara-jualan-whatsapp-tanpa-ribet",
+    coverImage: "/blog/cara-jualan-whatsapp-tanpa-ribet/cover.png",
     category: "Strategi Jualan",
     title: "5 Cara Jualan Lewat WhatsApp Tanpa Harus Balas Chat Satu per Satu",
     excerpt:
@@ -88,6 +101,7 @@ export const blogPosts: BlogPost[] = [
   },
   {
     slug: "apa-itu-qris-panduan-lengkap",
+    coverImage: "/blog/apa-itu-qris-panduan-lengkap/cover.png",
     category: "Pembayaran",
     title: "Apa Itu QRIS? Panduan Lengkap untuk Seller Online Indonesia",
     excerpt:
@@ -149,6 +163,7 @@ export const blogPosts: BlogPost[] = [
   },
   {
     slug: "foto-produk-pakai-hp",
+    coverImage: "/blog/foto-produk-pakai-hp/cover.png",
     category: "Tips Jualan",
     title: "Cara Foto Produk Pakai HP Biar Keliatan Profesional",
     excerpt:
@@ -218,6 +233,7 @@ export const blogPosts: BlogPost[] = [
   },
   {
     slug: "cara-menentukan-harga-jual-umkm",
+    coverImage: "/blog/cara-menentukan-harga-jual-umkm/cover.png",
     category: "Strategi Jualan",
     title: "Cara Menentukan Harga Jual yang Tepat untuk Produk UMKM",
     excerpt:
@@ -288,6 +304,7 @@ export const blogPosts: BlogPost[] = [
   },
   {
     slug: "toko-online-sendiri-vs-marketplace",
+    coverImage: "/blog/toko-online-sendiri-vs-marketplace/cover.png",
     category: "UMKM Digital",
     title: "Punya Toko Online Sendiri vs Jualan di Marketplace: Mana Lebih Untung?",
     excerpt:
@@ -360,6 +377,7 @@ export const blogPosts: BlogPost[] = [
   },
   {
     slug: "cara-tingkatkan-repeat-order",
+    coverImage: "/blog/cara-tingkatkan-repeat-order/cover.png",
     category: "Strategi Jualan",
     title: "7 Cara Ampuh Meningkatkan Repeat Order dari Pelanggan Lama",
     excerpt:
@@ -432,6 +450,7 @@ export const blogPosts: BlogPost[] = [
   },
   {
     slug: "strategi-ongkir-gratis-yang-tepat",
+    coverImage: "/blog/strategi-ongkir-gratis-yang-tepat/cover.png",
     category: "Tips Jualan",
     title: "Ongkir Gratis: Strategi Cerdas atau Jebakan untuk Bisnis Kamu?",
     excerpt:
@@ -497,6 +516,7 @@ export const blogPosts: BlogPost[] = [
   },
   {
     slug: "bundling-produk-naikkan-omzet",
+    coverImage: "/blog/bundling-produk-naikkan-omzet/cover.png",
     category: "Strategi Jualan",
     title: "Teknik Bundling Produk untuk Naikkan Omzet Tanpa Tambah Stok",
     excerpt:
@@ -558,6 +578,7 @@ export const blogPosts: BlogPost[] = [
   },
   {
     slug: "kelola-pesanan-online-tanpa-stres",
+    coverImage: "/blog/kelola-pesanan-online-tanpa-stres/cover.png",
     category: "Operasional",
     title: "Cara Kelola Pesanan Online Biar Tidak Ada yang Kelewatan",
     excerpt:
@@ -618,6 +639,7 @@ export const blogPosts: BlogPost[] = [
   },
   {
     slug: "testimoni-pelanggan-untuk-jualan",
+    coverImage: "/blog/testimoni-pelanggan-untuk-jualan/cover.png",
     category: "Strategi Jualan",
     title: "Cara Kumpulkan dan Manfaatkan Testimoni Pelanggan untuk Jualan",
     excerpt:
@@ -682,6 +704,9 @@ export const blogPosts: BlogPost[] = [
     ],
   },
 ];
+
+// Marketing/strategy posts first, then product tutorials (with screenshots).
+export const blogPosts: BlogPost[] = [...marketingPosts, ...tutorialPosts];
 
 export function findPost(slug: string): BlogPost | undefined {
   return blogPosts.find((p) => p.slug === slug);

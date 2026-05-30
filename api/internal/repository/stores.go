@@ -107,45 +107,6 @@ func scanStore(row pgx.Row, s *Store) error {
 	)
 }
 
-type SegmentSettings struct {
-	VipThreshold   int
-	LoyalThreshold int
-	BaruName       string
-	RegulerName    string
-	LoyalName      string
-	VipName        string
-}
-
-// UpdateSegmentSettings saves segment thresholds and display names.
-func (r *StoreRepo) UpdateSegmentSettings(ctx context.Context, storeID uuid.UUID, s SegmentSettings) error {
-	if s.VipThreshold < 1 {
-		s.VipThreshold = 1
-	}
-	if s.LoyalThreshold < 1 {
-		s.LoyalThreshold = 1
-	}
-	if s.LoyalThreshold >= s.VipThreshold {
-		s.LoyalThreshold = s.VipThreshold - 1
-		if s.LoyalThreshold < 1 {
-			s.LoyalThreshold = 1
-		}
-	}
-	_, err := r.pool.Exec(ctx, `
-		UPDATE stores
-		SET segment_vip_threshold   = $2,
-		    segment_loyal_threshold = $3,
-		    segment_baru_name       = $4,
-		    segment_reguler_name    = $5,
-		    segment_loyal_name      = $6,
-		    segment_vip_name        = $7,
-		    updated_at = now()
-		WHERE id = $1`,
-		storeID,
-		s.VipThreshold, s.LoyalThreshold,
-		s.BaruName, s.RegulerName, s.LoyalName, s.VipName,
-	)
-	return err
-}
 
 func (r *StoreRepo) FindBySlug(ctx context.Context, slug string) (*Store, error) {
 	q := `SELECT ` + storeColumns + ` FROM stores WHERE slug = $1`

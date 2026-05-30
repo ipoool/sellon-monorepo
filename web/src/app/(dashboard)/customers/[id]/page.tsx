@@ -21,7 +21,7 @@ import { CustomerProfileForm } from "@/components/dashboard/customer-profile-for
 import { MemberCard } from "@/components/dashboard/member-card";
 import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
-import { formatRupiah, formatDateID, formatDateTimeID } from "@/lib/format";
+import { formatRupiah, formatRupiahShort, formatDateID, formatDateTimeID } from "@/lib/format";
 import { waLink } from "@/lib/whatsapp";
 import type {
   Customer,
@@ -71,17 +71,6 @@ function loyaltyTxLabel(type: LoyaltyTransaction["type"]): string {
   return loyaltyTxLabels[type] ?? "Transaksi poin";
 }
 
-function classifySegment(c: Customer): {
-  label: string;
-  variant: "default" | "brand" | "success" | "warning";
-} {
-  if (c.is_blacklisted) return { label: "Blacklist", variant: "warning" };
-  if (c.total_orders >= 10) return { label: "VIP", variant: "brand" };
-  if (c.total_orders >= 3) return { label: "Loyal", variant: "success" };
-  if (c.total_orders >= 1) return { label: "Reguler", variant: "default" };
-  return { label: "Baru", variant: "default" };
-}
-
 export default async function PelangganDetailPage({
   params,
 }: {
@@ -97,7 +86,6 @@ export default async function PelangganDetailPage({
   }>(`/api/v1/customers/${id}`);
   if (!data) notFound();
   const { customer, orders } = data;
-  const seg = classifySegment(customer);
 
   // Loyalty point ledger (earn/redeem history). Best-effort: a null/empty
   // result just hides the history card.
@@ -143,7 +131,9 @@ export default async function PelangganDetailPage({
                   {customer.name}
                 </h2>
                 <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                  <Badge variant={seg.variant}>{seg.label}</Badge>
+                  {customer.is_blacklisted && (
+                    <Badge variant="warning">Blacklist</Badge>
+                  )}
                   {tier && (
                     <Badge variant="brand">
                       <Award className="mr-1 size-3" aria-hidden />
@@ -234,7 +224,7 @@ export default async function PelangganDetailPage({
                   aria-hidden
                 />
                 <p className="mt-1 font-display text-lg font-semibold text-neutral-900">
-                  {formatRupiah(customer.total_spent_cents)}
+                  {formatRupiahShort(customer.total_spent_cents)}
                 </p>
                 <p className="text-xs text-neutral-500">Belanja</p>
               </div>

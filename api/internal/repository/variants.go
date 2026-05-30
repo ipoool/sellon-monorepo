@@ -64,6 +64,37 @@ func (r *VariantRepo) AggregateByProducts(ctx context.Context, productIDs []uuid
 	return out, rows.Err()
 }
 
+// ListByProducts batch-loads variants for many products in a single query,
+// returning them grouped by product_id. Used by the storefront list endpoint
+// (e.g. the self-order kiosk) to surface variant options inline without an
+// N+1 per product. Products without variants are simply absent from the map.
+func (r *VariantRepo) ListByProducts(ctx context.Context, productIDs []uuid.UUID) (map[uuid.UUID][]Variant, error) {
+	if len(productIDs) == 0 {
+		return map[uuid.UUID][]Variant{}, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, product_id, name, sku, price_cents, stock, sort_order, created_at
+		FROM product_variants
+		WHERE product_id = ANY($1)
+		ORDER BY product_id, sort_order ASC, created_at ASC
+	`, productIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[uuid.UUID][]Variant, len(productIDs))
+	for rows.Next() {
+		var v Variant
+		if err := rows.Scan(
+			&v.ID, &v.ProductID, &v.Name, &v.SKU, &v.PriceCents, &v.Stock, &v.SortOrder, &v.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		out[v.ProductID] = append(out[v.ProductID], v)
+	}
+	return out, rows.Err()
+}
+
 func (r *VariantRepo) ListByProduct(ctx context.Context, productID uuid.UUID) ([]Variant, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, product_id, name, sku, price_cents, stock, sort_order, created_at

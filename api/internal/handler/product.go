@@ -28,10 +28,11 @@ type ProductHandler struct {
 	subs      *repository.SubscriptionRepo
 	plans     *repository.PlanRepo
 	bulkJobs  *repository.BulkJobRepo
-	discounts *repository.ProductDiscountRepo
-	modifiers *repository.ModifierRepo
-	materials *repository.MaterialRepo
-	storage   *storage.SupabaseClient
+	discounts  *repository.ProductDiscountRepo
+	modifiers  *repository.ModifierRepo
+	materials  *repository.MaterialRepo
+	categories *repository.CategoryRepo
+	storage    *storage.SupabaseClient
 	broker    *events.Broker
 	audit     *audit.Logger
 	logger    *slog.Logger
@@ -51,6 +52,7 @@ func NewProductHandler(
 	discounts *repository.ProductDiscountRepo,
 	modifiers *repository.ModifierRepo,
 	materials *repository.MaterialRepo,
+	categories *repository.CategoryRepo,
 	storageCli *storage.SupabaseClient,
 	broker *events.Broker,
 	audit *audit.Logger,
@@ -58,13 +60,14 @@ func NewProductHandler(
 ) *ProductHandler {
 	h := &ProductHandler{
 		products: products, variants: variants, stores: stores,
-		subs:      subs,
-		plans:     plans,
-		bulkJobs:  bulkJobs,
-		discounts: discounts,
-		modifiers: modifiers,
-		materials: materials,
-		storage:   storageCli,
+		subs:       subs,
+		plans:      plans,
+		bulkJobs:   bulkJobs,
+		discounts:  discounts,
+		modifiers:  modifiers,
+		materials:  materials,
+		categories: categories,
+		storage:    storageCli,
 		broker:    broker,
 		audit:     audit,
 		logger:    logger,

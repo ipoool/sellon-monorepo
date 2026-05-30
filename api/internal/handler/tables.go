@@ -170,7 +170,11 @@ func (h *TableHandler) Resolve(w http.ResponseWriter, r *http.Request) {
 func (h *TableHandler) GetDineIn(w http.ResponseWriter, r *http.Request) {
 	store, err := h.requireStore(r)
 	if err != nil {
-		response.JSON(w, http.StatusOK, map[string]any{"enabled": false, "payment_mode": "cashier", "kds_enabled": false})
+		response.JSON(w, http.StatusOK, map[string]any{
+			"enabled": false, "payment_mode": "cashier", "kds_enabled": false,
+			"qr_layout": "classic", "qr_fg_color": "#0F172A", "qr_bg_color": "#FFFFFF",
+			"qr_headline": "", "qr_caption": "Scan untuk pesan",
+		})
 		return
 	}
 	s, err := h.tables.GetDineInSettings(r.Context(), store.ID)
@@ -180,6 +184,8 @@ func (h *TableHandler) GetDineIn(w http.ResponseWriter, r *http.Request) {
 	}
 	response.JSON(w, http.StatusOK, map[string]any{
 		"enabled": s.Enabled, "payment_mode": s.PaymentMode, "kds_enabled": s.KDSEnabled,
+		"qr_layout": s.QRLayout, "qr_fg_color": s.QRFgColor, "qr_bg_color": s.QRBgColor,
+		"qr_headline": s.QRHeadline, "qr_caption": s.QRCaption,
 	})
 }
 
@@ -197,6 +203,11 @@ func (h *TableHandler) UpdateDineIn(w http.ResponseWriter, r *http.Request) {
 		Enabled     bool   `json:"enabled"`
 		PaymentMode string `json:"payment_mode"`
 		KDSEnabled  bool   `json:"kds_enabled"`
+		QRLayout    string `json:"qr_layout"`
+		QRFgColor   string `json:"qr_fg_color"`
+		QRBgColor   string `json:"qr_bg_color"`
+		QRHeadline  string `json:"qr_headline"`
+		QRCaption   string `json:"qr_caption"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		response.Error(w, http.StatusBadRequest, "invalid body")
@@ -204,6 +215,8 @@ func (h *TableHandler) UpdateDineIn(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.tables.UpdateDineInSettings(r.Context(), store.ID, repository.DineInSettings{
 		Enabled: in.Enabled, PaymentMode: in.PaymentMode, KDSEnabled: in.KDSEnabled,
+		QRLayout: in.QRLayout, QRFgColor: in.QRFgColor, QRBgColor: in.QRBgColor,
+		QRHeadline: in.QRHeadline, QRCaption: in.QRCaption,
 	}); err != nil {
 		response.Error(w, http.StatusInternalServerError, "internal error")
 		return

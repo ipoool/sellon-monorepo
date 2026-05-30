@@ -66,6 +66,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	tableRepo := repository.NewTableRepo(pool)
 	kitchenRepo := repository.NewKitchenRepo(pool)
 	modifierRepo := repository.NewModifierRepo(pool)
+	bannerRepo := repository.NewBannerRepo(pool)
 
 	googleVerifier := auth.NewGoogleVerifier(cfg.GoogleClientID)
 	jwtSvc := auth.NewJWTService(cfg.JWTSecret, cfg.JWTTTL)
@@ -88,7 +89,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 
 	authHandler := handler.NewAuthHandler(users, memberships, googleVerifier, jwtSvc, mailer, publicWebURL, logger, cfg.IsProd())
 	storeHandler := handler.NewStoreHandler(stores, subscriptions, auditLogger, logger)
-	productHandler := handler.NewProductHandler(products, variants, stores, subscriptions, planRepo, bulkJobs, productDiscounts, modifierRepo, materialRepo, storageClient, broker, auditLogger, logger)
+	productHandler := handler.NewProductHandler(products, variants, stores, subscriptions, planRepo, bulkJobs, productDiscounts, modifierRepo, materialRepo, categories, storageClient, broker, auditLogger, logger)
 	uploadHandler := handler.NewUploadHandler(stores, storageClient, logger)
 	orderHandler := handler.NewOrderHandler(orders, stores, gateways, encryptor, midtransClient, auditLogger, fulfiller, mailer, publicWebURL, logger)
 	customerHandler := handler.NewCustomerHandler(customers, orders, stores, auditLogger, logger)
@@ -98,6 +99,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	analyticsHandler := handler.NewAnalyticsHandler(analyticsRepo, cashEntryRepo, stores, subscriptions, auditLogger, logger)
 	tableHandler := handler.NewTableHandler(tableRepo, stores, subscriptions, auditLogger, logger)
 	kdsHandler := handler.NewKDSHandler(kitchenRepo, stores, broker, logger)
+	bannerHandler := handler.NewBannerHandler(bannerRepo, storageClient, logger)
 	paymentHandler := handler.NewPaymentHandler(gateways, stores, encryptor, midtransClient, auditLogger, logger, cfg.WebhookBaseURL)
 	dashHandler := handler.NewDashboardHandler(stores, products, orders, customers, logger)
 	storefrontHandler := handler.NewStorefrontHandler(
@@ -205,13 +207,16 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 
 				r.Get("/dashboard/stats", dashHandler.Stats)
 
+				// Platform promo/info banners for the dashboard slider (read-only
+				// for sellers; admins manage them under /admin/banners).
+				r.Get("/banners", bannerHandler.ListActive)
+
 				r.Route("/store", func(r chi.Router) {
 					r.Get("/", storeHandler.Get)
 					r.Post("/", storeHandler.Create)
 					r.Put("/", storeHandler.Update)
 					r.Put("/shipping", storeHandler.UpdateShipping)
 					r.Put("/storefront", storeHandler.UpdateStorefront)
-					r.Put("/segments", storeHandler.UpdateSegments)
 					r.Put("/custom-domain", domainHandler.Set)
 					r.Post("/custom-domain/verify", domainHandler.Verify)
 					r.Delete("/custom-domain", domainHandler.Delete)
@@ -450,6 +455,10 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 				r.Post("/subscriptions/invoices/{id}/activate", adminHandler.ActivateInvoice)
 				r.Post("/subscriptions/invoices/{id}/reject", adminHandler.RejectInvoice)
 				r.Post("/stores/{storeID}/subscription", adminHandler.GrantSubscription)
+				r.Get("/banners", bannerHandler.ListAdmin)
+				r.Post("/banners", bannerHandler.Create)
+				r.Put("/banners/{id}", bannerHandler.Update)
+				r.Delete("/banners/{id}", bannerHandler.Delete)
 			})
 			// Exit impersonation lives outside /admin — the caller's
 			// session is currently the impersonated USER, not the admin,

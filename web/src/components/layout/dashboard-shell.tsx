@@ -30,6 +30,11 @@ export function DashboardShell({
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
+  // Platform admins have no products/orders of their own, so the product
+  // search box and the "lihat pesanan" bell are meaningless — hide them.
+  // (During impersonation the topbar belongs to the seller, so keep them.)
+  const isAdmin = me.role === "admin" && !me.is_impersonated;
+
   // Submit topbar search → /products?q=… The product list page
   // already supports `q` server-side, so this Just Works™ without
   // having to build a separate global-search backend.
@@ -70,41 +75,45 @@ export function DashboardShell({
               )}
             </div>
 
-            <form
-              onSubmit={onSearchSubmit}
-              className="hidden md:block md:w-72"
-              role="search"
-            >
-              <label htmlFor="topbar-search" className="sr-only">
-                Cari produk
-              </label>
-              <div className="relative">
-                <span
-                  aria-hidden
-                  className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-neutral-400"
-                >
-                  <Search className="size-4" />
-                </span>
-                <input
-                  id="topbar-search"
-                  type="search"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Cari produk… (Enter)"
-                  className="h-10 w-full rounded-lg border border-neutral-200 bg-neutral-50 pl-9 pr-3 text-sm placeholder:text-neutral-400 focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/30"
-                  suppressHydrationWarning
-                />
-              </div>
-            </form>
+            {!isAdmin && (
+              <form
+                onSubmit={onSearchSubmit}
+                className="hidden md:block md:w-72"
+                role="search"
+              >
+                <label htmlFor="topbar-search" className="sr-only">
+                  Cari produk
+                </label>
+                <div className="relative">
+                  <span
+                    aria-hidden
+                    className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-neutral-400"
+                  >
+                    <Search className="size-4" />
+                  </span>
+                  <input
+                    id="topbar-search"
+                    type="search"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Cari produk… (Enter)"
+                    className="h-10 w-full rounded-lg border border-neutral-200 bg-neutral-50 pl-9 pr-3 text-sm placeholder:text-neutral-400 focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+                    suppressHydrationWarning
+                  />
+                </div>
+              </form>
+            )}
 
-            <Link
-              href="/orders"
-              className="rounded-md p-2 text-neutral-600 transition-colors hover:bg-neutral-100"
-              aria-label="Lihat pesanan"
-              title="Lihat pesanan"
-            >
-              <Bell className="size-5" aria-hidden />
-            </Link>
+            {!isAdmin && (
+              <Link
+                href="/orders"
+                className="rounded-md p-2 text-neutral-600 transition-colors hover:bg-neutral-100"
+                aria-label="Lihat pesanan"
+                title="Lihat pesanan"
+              >
+                <Bell className="size-5" aria-hidden />
+              </Link>
+            )}
 
             <div className="lg:hidden">
               <Avatar src={me.picture_url} name={me.name || me.email} />
