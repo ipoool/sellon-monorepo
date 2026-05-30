@@ -6,6 +6,7 @@ import { BannersWrapper } from "@/components/dashboard/banners-wrapper";
 import { OrderNotifier } from "@/components/dashboard/order-notifier";
 import { KdsProvider } from "@/components/dashboard/kds-context";
 import { PlanProvider } from "@/components/dashboard/plan-context";
+import { BisnisGateProvider } from "@/components/dashboard/bisnis-gate";
 import { SandboxBanner } from "@/components/dashboard/sandbox-banner";
 import { SubscriptionExpiryBanner } from "@/components/dashboard/subscription-expiry-banner";
 import { getMe } from "@/lib/server-auth";
@@ -88,7 +89,9 @@ export default async function DashboardLayout({
           other client components that want to gate by plan) without
           prop-drilling through every page. */}
       <PlanProvider value={sub?.plan ?? "free"}>
-        <KdsProvider value={dinein?.kds_enabled ?? false}>{children}</KdsProvider>
+        <BisnisGateProvider>
+          <KdsProvider value={dinein?.kds_enabled ?? false}>{children}</KdsProvider>
+        </BisnisGateProvider>
       </PlanProvider>
     </div>
   );

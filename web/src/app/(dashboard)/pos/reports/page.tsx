@@ -7,9 +7,10 @@ import { Stat } from "@/components/ui/stat";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { getMe } from "@/lib/server-auth";
+import { getMe, getPlan } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import { formatRupiah } from "@/lib/format";
+import { UpgradePrompt } from "@/components/ui/upgrade-prompt";
 import type { POSReport, POSCashier } from "@/lib/types";
 
 export const metadata = { title: "Laporan POS — SellOn" };
@@ -33,6 +34,7 @@ export default async function POSReportsPage({
 }) {
   const me = await getMe();
   if (!me) redirect("/login");
+  if ((await getPlan()) !== "bisnis") return <UpgradePrompt feature="Laporan POS" />;
 
   const sp = await searchParams;
   const from = sp.from || thirtyDaysAgoStr();

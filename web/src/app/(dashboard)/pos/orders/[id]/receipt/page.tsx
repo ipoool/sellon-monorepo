@@ -1,8 +1,9 @@
 import { redirect, notFound } from "next/navigation";
 
-import { getMe } from "@/lib/server-auth";
+import { getMe, getPlan } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import { ReceiptView } from "@/components/pos/receipt-view";
+import { UpgradePrompt } from "@/components/ui/upgrade-prompt";
 import type { OrderDetail, Store } from "@/lib/types";
 
 type PrinterConfig = {
@@ -26,6 +27,7 @@ export default async function ReceiptPage({
 }) {
   const me = await getMe();
   if (!me) redirect("/login");
+  if ((await getPlan()) !== "bisnis") return <UpgradePrompt feature="Struk Kasir" />;
 
   const { id } = await params;
   const { autoprint } = await searchParams;

@@ -1,5 +1,7 @@
 import { serverApi } from "@/lib/server-api";
+import { getPlan } from "@/lib/server-auth";
 import { PrinterSettingsForm } from "@/components/dashboard/printer-settings-form";
+import { UpgradePrompt } from "@/components/ui/upgrade-prompt";
 
 export const metadata = { title: "Pengaturan Printer — SellOn" };
 
@@ -13,6 +15,9 @@ type PrinterConfig = {
 };
 
 export default async function PrinterSettingsPage() {
+  if ((await getPlan()) !== "bisnis") {
+    return <UpgradePrompt feature="Pengaturan Printer" />;
+  }
   const res = await serverApi<{ config: PrinterConfig }>(
     "/api/v1/pos/printer/config",
   );

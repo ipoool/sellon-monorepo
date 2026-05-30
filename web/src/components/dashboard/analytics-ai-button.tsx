@@ -193,7 +193,7 @@ export function AnalyticsAiButton({ from, to, isPaid }: Props) {
       ) : (
         <Link
           href="/settings/subscription"
-          title="Fitur eksklusif paket Pro & Bisnis"
+          title="Fitur eksklusif paket Bisnis"
           className="inline-flex items-center gap-1.5 rounded-lg bg-brand-500 px-3 py-1.5 text-sm font-semibold text-white no-underline shadow-sm transition-colors hover:bg-brand-600 active:bg-brand-700"
         >
           <Crown className="size-3.5" aria-hidden />

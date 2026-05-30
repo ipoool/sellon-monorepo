@@ -22,7 +22,7 @@ export default async function POSPage() {
 
   const plan = subRes?.subscription?.plan ?? "free";
 
-  if (plan === "free") {
+  if (plan !== "bisnis") {
     return (
       <div className="flex min-h-svh flex-col items-center justify-center gap-4 p-8 text-center">
         <div className="flex size-14 items-center justify-center rounded-full bg-amber-50 text-amber-600">
@@ -30,11 +30,11 @@ export default async function POSPage() {
         </div>
         <div className="max-w-md">
           <h1 className="font-display text-2xl font-semibold text-neutral-900">
-            Kasir POS hanya untuk plan Pro & Bisnis
+            Kasir POS hanya untuk paket Bisnis
           </h1>
           <p className="mt-2 text-neutral-600">
             Modul kasir untuk toko fisik: terima walk-in customer, kelola shift, cetak struk thermal,
-            split payment, dan banyak lagi. Upgrade sekarang.
+            split payment, dan banyak lagi. Upgrade ke Bisnis untuk membukanya.
           </p>
         </div>
         <div className="flex gap-3">
@@ -43,7 +43,7 @@ export default async function POSPage() {
             className="inline-flex items-center gap-2 rounded-lg bg-brand-700 px-6 py-3 text-sm font-semibold text-white hover:bg-brand-800"
           >
             <Zap className="size-4" aria-hidden />
-            Upgrade ke Pro
+            Upgrade ke Bisnis
           </Link>
           <Link
             href="/dashboard"

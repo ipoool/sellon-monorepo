@@ -35,6 +35,7 @@ import { Badge } from "@/components/ui/badge";
 import { LogoutButton } from "@/components/auth/logout-button";
 import { usePlan } from "@/components/dashboard/plan-context";
 import { useKdsEnabled } from "@/components/dashboard/kds-context";
+import { useBisnisGate } from "@/components/dashboard/bisnis-gate";
 import { cn } from "@/lib/utils";
 import type { Me } from "@/lib/auth-types";
 
@@ -45,6 +46,7 @@ type NavItem = {
   badge?: string;
   disabled?: boolean;
   external?: boolean;
+  bisnisOnly?: boolean;
 };
 
 const primaryNav: NavItem[] = [
@@ -249,6 +251,7 @@ function SidebarContent({
               pathname={pathname}
             />
             <NavGroup
+              bisnisOnly
               label="Kasir POS"
               labelHref="/pos"
               items={[
@@ -262,6 +265,7 @@ function SidebarContent({
           <>
             <NavGroup label="Menu" items={primaryNav} pathname={pathname} />
             <NavGroup
+              bisnisOnly
               label="Kasir POS"
               labelHref="/pos"
               items={[
@@ -354,15 +358,30 @@ function NavGroup({
   labelHref,
   items,
   pathname,
+  bisnisOnly,
 }: {
   label: string;
   labelHref?: string;
   items: NavItem[];
   pathname: string;
+  // When true the whole group is a Bisnis feature: it stays visible for every
+  // tier, but non-Bisnis sellers get the upgrade dialog on click instead of
+  // navigating.
+  bisnisOnly?: boolean;
 }) {
+  const { locked, openGate } = useBisnisGate();
+  const groupLocked = !!bisnisOnly && locked;
   return (
     <div>
-      {labelHref ? (
+      {groupLocked ? (
+        <button
+          type="button"
+          onClick={() => openGate("Kasir POS")}
+          className="block w-full px-3 pb-2 text-left text-xs font-semibold uppercase tracking-wider text-neutral-500 hover:text-neutral-700"
+        >
+          {label}
+        </button>
+      ) : labelHref ? (
         <Link
           href={labelHref}
           className="block px-3 pb-2 text-xs font-semibold uppercase tracking-wider text-neutral-500 hover:text-neutral-700"
@@ -406,6 +425,24 @@ function NavGroup({
                     </span>
                   )}
                 </span>
+              </li>
+            );
+          }
+
+          // Bisnis-only items stay visible but pop the upgrade dialog on
+          // click (no navigation) for non-Bisnis sellers.
+          if (groupLocked || (!!item.bisnisOnly && locked)) {
+            return (
+              <li key={item.label}>
+                <button
+                  type="button"
+                  onClick={() => openGate(item.label)}
+                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-neutral-700 transition-colors hover:bg-neutral-100"
+                >
+                  <Icon className="size-4 shrink-0 text-neutral-500" aria-hidden />
+                  <span className="flex-1 text-left">{item.label}</span>
+                  <Crown className="size-3.5 shrink-0 text-amber-500" aria-hidden />
+                </button>
               </li>
             );
           }

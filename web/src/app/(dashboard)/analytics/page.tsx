@@ -41,9 +41,10 @@ export default async function LaporanAnalyticsPage({
   const to = sp.to || def.to;
   const qs = `from=${from}&to=${to}`;
 
-  // reports/overview is NOT plan-gated → powers the free-visible sales summary.
-  // analytics/overview + cash-entries ARE Pro/Bisnis-gated → serverApi returns
-  // null on 402, and the financial section renders a locked upsell for Free.
+  // reports/overview is NOT plan-gated → powers the sales summary visible to
+  // every tier. analytics/overview + cash-entries are BISNIS-only → serverApi
+  // returns null on 402 (Free & Pro), and the financial section + AI render a
+  // locked upsell for them.
   const [reportRes, ovRes, cashRes, subRes] = await Promise.all([
     serverApi<ReportOverview>(`/api/v1/reports/overview?${qs}`),
     serverApi<{ overview: AnalyticsOverview | null }>(
@@ -56,7 +57,8 @@ export default async function LaporanAnalyticsPage({
   const report = reportRes ?? null;
   const overview = ovRes?.overview ?? null;
   const plan = subRes?.subscription?.plan;
-  const isPaid = plan === "pro" || plan === "bisnis";
+  // Keuangan + Analisa AI are Bisnis-only; the sales summary stays open to all.
+  const isBisnis = plan === "bisnis";
 
   return (
     <DashboardShell
@@ -82,7 +84,7 @@ export default async function LaporanAnalyticsPage({
               <span className="hidden sm:inline">Export</span>
             </Button>
           </a>
-          <AnalyticsAiButton from={from} to={to} isPaid={isPaid} />
+          <AnalyticsAiButton from={from} to={to} isPaid={isBisnis} />
         </div>
       }
     >
@@ -92,7 +94,7 @@ export default async function LaporanAnalyticsPage({
         entries={cashRes?.entries ?? []}
         from={from}
         to={to}
-        isPaid={isPaid}
+        isPaid={isBisnis}
       />
     </DashboardShell>
   );
