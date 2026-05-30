@@ -66,9 +66,9 @@ export function Footer() {
               />
             </Link>
             <p className="mt-3 max-w-xs text-sm leading-relaxed text-neutral-600">
-              Toko online untuk seller WhatsApp Indonesia. Pembeli pilih
-              produk lewat link, bayar online, konfirmasi via WhatsApp -
-              tanpa potongan marketplace.
+              Platform jualan online &amp; offline all-in-one untuk UMKM
+              Indonesia. Toko online, kasir POS, QR meja &amp; dapur, stok,
+              sampai loyalitas pelanggan - tanpa potongan per transaksi.
             </p>
             <p className="mt-4 text-xs text-neutral-500">
               Pertanyaan?{" "}
