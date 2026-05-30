@@ -165,7 +165,7 @@ export default async function LaporanPage({
       ) : (
         <div className="flex flex-col gap-6">
           {/* Headline stats */}
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <Stat
               label="Revenue"
               value={formatRupiah(data.headline.revenue_cents)}

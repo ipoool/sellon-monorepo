@@ -23,7 +23,7 @@ export function Stat({ label, value, trend, sparkline, className }: StatProps) {
     >
       <p className="text-sm font-medium text-neutral-600">{label}</p>
       <div className="flex items-end justify-between gap-3">
-        <p className="font-display text-3xl font-semibold tracking-tight text-neutral-900">
+        <p className="min-w-0 break-words font-display text-3xl font-semibold tracking-tight tabular-nums text-neutral-900">
           {value}
         </p>
         {sparkline && sparkline.length >= 2 && (
