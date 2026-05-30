@@ -25,7 +25,6 @@ import {
   Clock,
   ChevronDown,
   Boxes,
-  TrendingUp,
   ChefHat,
   GalleryHorizontalEnd,
   type LucideIcon,
@@ -56,8 +55,7 @@ const primaryNav: NavItem[] = [
   { label: "Pembelian", href: "/purchase-orders", icon: Truck },
   { label: "Pelanggan", href: "/customers", icon: Users },
   { label: "Promo", href: "/promos", icon: Megaphone },
-  { label: "Laporan", href: "/reports", icon: BarChart3 },
-  { label: "Analytics", href: "/analytics", icon: TrendingUp },
+  { label: "Laporan & Analytics", href: "/analytics", icon: BarChart3 },
 ];
 
 const secondaryNav: NavItem[] = [

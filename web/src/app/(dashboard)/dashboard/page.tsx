@@ -519,7 +519,7 @@ export default async function DasborPage() {
             {topProducts.length > 0 && (
               <div className="border-t border-neutral-100 px-5 py-3 text-right">
                 <Link
-                  href="/reports"
+                  href="/analytics"
                   className="inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:text-brand-700"
                 >
                   Lihat laporan lengkap

@@ -1,16 +1,23 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { Lock, Zap } from "lucide-react";
+import { Boxes, Download } from "lucide-react";
 
 import { DashboardShell } from "@/components/layout/dashboard-shell";
-import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { AnalyticsDashboard } from "@/components/dashboard/analytics-dashboard";
+import { AnalyticsAiButton } from "@/components/dashboard/analytics-ai-button";
 import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
-import type { AnalyticsOverview, CashEntry } from "@/lib/types";
+import type {
+  AnalyticsOverview,
+  CashEntry,
+  ReportOverview,
+  Subscription,
+} from "@/lib/types";
 
-export const metadata = { title: "Analytics 360 — SellOn" };
+export const metadata = { title: "Laporan & Analytics — SellOn" };
+
+const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
 function defaultRange() {
   const now = new Date();
@@ -20,7 +27,7 @@ function defaultRange() {
   return { from: fromD.toISOString().slice(0, 10), to };
 }
 
-export default async function AnalyticsPage({
+export default async function LaporanAnalyticsPage({
   searchParams,
 }: {
   searchParams: Promise<{ from?: string; to?: string }>;
@@ -34,48 +41,59 @@ export default async function AnalyticsPage({
   const to = sp.to || def.to;
   const qs = `from=${from}&to=${to}`;
 
-  const [ovRes, cashRes] = await Promise.all([
-    serverApi<{ overview: AnalyticsOverview | null }>(`/api/v1/analytics/overview?${qs}`),
+  // reports/overview is NOT plan-gated → powers the free-visible sales summary.
+  // analytics/overview + cash-entries ARE Pro/Bisnis-gated → serverApi returns
+  // null on 402, and the financial section renders a locked upsell for Free.
+  const [reportRes, ovRes, cashRes, subRes] = await Promise.all([
+    serverApi<ReportOverview>(`/api/v1/reports/overview?${qs}`),
+    serverApi<{ overview: AnalyticsOverview | null }>(
+      `/api/v1/analytics/overview?${qs}`,
+    ),
     serverApi<{ entries: CashEntry[] }>(`/api/v1/cash-entries?${qs}`),
+    serverApi<{ subscription: Subscription }>("/api/v1/subscription"),
   ]);
 
-  // serverApi returns null on 402 (free tier) — show the upsell.
+  const report = reportRes ?? null;
   const overview = ovRes?.overview ?? null;
-  const locked = !ovRes;
+  const plan = subRes?.subscription?.plan;
+  const isPaid = plan === "pro" || plan === "bisnis";
 
   return (
     <DashboardShell
       me={me}
-      pageTitle="Analytics 360"
-      pageSubtitle="Arus kas, keuntungan, dan tren penjualan tokomu"
-    >
-      {locked ? (
-        <Card className="py-16 text-center">
-          <div className="mx-auto flex size-14 items-center justify-center rounded-full bg-amber-50 text-amber-600">
-            <Lock className="size-7" aria-hidden />
-          </div>
-          <h2 className="mt-4 font-display text-xl font-semibold text-neutral-900">
-            Analytics 360 tersedia di Pro
-          </h2>
-          <p className="mx-auto mt-2 max-w-md text-sm text-neutral-600">
-            Lihat arus kas masuk/keluar, keuntungan kotor, margin, dan chart tren
-            penjualan untuk ambil keputusan lebih cepat.
-          </p>
-          <Link href="/settings/subscription" className="mt-5 inline-block">
-            <Button size="sm">
-              <Zap className="size-4" aria-hidden />
-              Upgrade ke Pro
+      pageTitle="Laporan & Analytics"
+      pageSubtitle="Penjualan, pelanggan, keuangan, dan tren toko dalam satu halaman"
+      actions={
+        <div className="flex flex-wrap items-center gap-2">
+          <Link href="/reports/materials">
+            <Button size="sm" variant="outline">
+              <Boxes className="size-4" aria-hidden />
+              <span className="hidden sm:inline">Laporan Bahan</span>
             </Button>
           </Link>
-        </Card>
-      ) : (
-        <AnalyticsDashboard
-          overview={overview}
-          entries={cashRes?.entries ?? []}
-          from={from}
-          to={to}
-        />
-      )}
+          <a
+            href={`${apiBase}/api/v1/reports/export?${qs}`}
+            download
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <Button size="sm" variant="outline">
+              <Download className="size-4" aria-hidden />
+              <span className="hidden sm:inline">Export</span>
+            </Button>
+          </a>
+          <AnalyticsAiButton from={from} to={to} isPaid={isPaid} />
+        </div>
+      }
+    >
+      <AnalyticsDashboard
+        report={report}
+        overview={overview}
+        entries={cashRes?.entries ?? []}
+        from={from}
+        to={to}
+        isPaid={isPaid}
+      />
     </DashboardShell>
   );
 }

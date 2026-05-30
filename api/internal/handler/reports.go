@@ -93,6 +93,21 @@ func (h *ReportsHandler) Overview(w http.ResponseWriter, r *http.Request) {
 		days = 7
 	}
 
+	// Explicit date range (merged Laporan & Analytics page) overrides the
+	// view-based window. from/to are inclusive WIB dates "YYYY-MM-DD".
+	if fStr := strings.TrimSpace(r.URL.Query().Get("from")); fStr != "" {
+		if tStr := strings.TrimSpace(r.URL.Query().Get("to")); tStr != "" {
+			fT, e1 := time.ParseInLocation("2006-01-02", fStr, wib)
+			tT, e2 := time.ParseInLocation("2006-01-02", tStr, wib)
+			if e1 == nil && e2 == nil {
+				since = fT
+				until = tT.AddDate(0, 0, 1) // exclusive end
+				view = "daily"
+				days = int(tT.Sub(fT).Hours()/24) + 1
+			}
+		}
+	}
+
 	headline, err := h.reports.Headline(r.Context(), store.ID, since, until)
 	if err != nil {
 		h.logger.Error("reports headline", "err", err)
@@ -245,6 +260,19 @@ func (h *ReportsHandler) Export(w http.ResponseWriter, r *http.Request) {
 	default:
 		since = until.AddDate(0, 0, -7)
 		periodLabel = "7 Hari Terakhir"
+	}
+
+	// Explicit date range overrides the view window (merged page export).
+	if fStr := strings.TrimSpace(r.URL.Query().Get("from")); fStr != "" {
+		if tStr := strings.TrimSpace(r.URL.Query().Get("to")); tStr != "" {
+			fT, e1 := time.ParseInLocation("2006-01-02", fStr, wib)
+			tT, e2 := time.ParseInLocation("2006-01-02", tStr, wib)
+			if e1 == nil && e2 == nil {
+				since = fT
+				until = tT.AddDate(0, 0, 1)
+				periodLabel = fStr + " s/d " + tStr
+			}
+		}
 	}
 
 	headline, _ := h.reports.Headline(r.Context(), store.ID, since, until)

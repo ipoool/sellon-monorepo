@@ -32,7 +32,7 @@ type AnthropicClient struct {
 func NewAnthropicClient(apiKey string, logger *slog.Logger) *AnthropicClient {
 	return &AnthropicClient{
 		apiKey: apiKey,
-		http:   &http.Client{Timeout: 45 * time.Second},
+		http:   &http.Client{Timeout: 90 * time.Second},
 		logger: logger,
 	}
 }

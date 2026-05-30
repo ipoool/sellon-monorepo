@@ -2,9 +2,11 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -70,6 +72,45 @@ type AnalyticsRepo struct {
 }
 
 func NewAnalyticsRepo(pool *pgxpool.Pool) *AnalyticsRepo { return &AnalyticsRepo{pool: pool} }
+
+// GetCachedSummary returns a previously generated AI summary whose input data
+// fingerprint matches inputHash (i.e. the underlying data is unchanged). Found
+// is false when there's no cache hit. The newest matching row wins.
+func (r *AnalyticsRepo) GetCachedSummary(ctx context.Context, storeID uuid.UUID, inputHash string) (summary string, createdAt time.Time, found bool, err error) {
+	err = r.pool.QueryRow(ctx, `
+		SELECT summary::text, created_at
+		FROM analytics_ai_summaries
+		WHERE store_id = $1 AND input_hash = $2
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, storeID, inputHash).Scan(&summary, &createdAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", time.Time{}, false, nil
+		}
+		return "", time.Time{}, false, err
+	}
+	return summary, createdAt, true, nil
+}
+
+// SaveSummary persists a freshly generated AI summary keyed by its input hash.
+func (r *AnalyticsRepo) SaveSummary(ctx context.Context, storeID uuid.UUID, from, to, inputHash, summaryJSON string) error {
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO analytics_ai_summaries (store_id, period_from, period_to, input_hash, summary)
+		VALUES ($1, $2::date, $3::date, $4, $5::jsonb)
+	`, storeID, from, to, inputHash, summaryJSON)
+	return err
+}
+
+// HasAnySummary reports whether the store has ever generated an AI summary —
+// used to fire the one-time "first summary" email.
+func (r *AnalyticsRepo) HasAnySummary(ctx context.Context, storeID uuid.UUID) (bool, error) {
+	var exists bool
+	err := r.pool.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM analytics_ai_summaries WHERE store_id = $1)
+	`, storeID).Scan(&exists)
+	return exists, err
+}
 
 type DayPoint struct {
 	Date string `json:"date"`

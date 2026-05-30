@@ -96,7 +96,8 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	materialHandler := handler.NewMaterialHandler(materialRepo, stores, subscriptions, auditLogger, logger)
 	membershipHandler := handler.NewMembershipHandler(membershipTierRepo, stores, subscriptions, auditLogger, logger)
 	purchasingHandler := handler.NewPurchasingHandler(supplierRepo, purchaseOrderRepo, stockTakeRepo, stores, subscriptions, auditLogger, logger)
-	analyticsHandler := handler.NewAnalyticsHandler(analyticsRepo, cashEntryRepo, stores, subscriptions, auditLogger, logger)
+	anthropicClient := ai.NewAnthropicClient(cfg.AnthropicAPIKey, logger)
+	analyticsHandler := handler.NewAnalyticsHandler(analyticsRepo, cashEntryRepo, stores, subscriptions, reports, products, users, anthropicClient, mailer, publicWebURL, auditLogger, logger)
 	tableHandler := handler.NewTableHandler(tableRepo, stores, subscriptions, auditLogger, logger)
 	kdsHandler := handler.NewKDSHandler(kitchenRepo, stores, broker, logger)
 	bannerHandler := handler.NewBannerHandler(bannerRepo, storageClient, logger)
@@ -114,7 +115,6 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	bankAccountHandler := handler.NewBankAccountHandler(bankAccounts, stores, auditLogger, logger)
 	categoryHandler := handler.NewCategoryHandler(categories, stores, auditLogger, logger)
 	promoHandler := handler.NewPromoHandler(promos, stores, subscriptions, planRepo, auditLogger, logger)
-	anthropicClient := ai.NewAnthropicClient(cfg.AnthropicAPIKey, logger)
 	reportsHandler := handler.NewReportsHandler(stores, reports, orders, subscriptions, anthropicClient, logger)
 	subscriptionHandler := handler.NewSubscriptionHandler(
 		subscriptions, stores, products, orders, users, planRepo,
@@ -266,6 +266,8 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 					r.Post("/{id}/post", purchasingHandler.PostStockTake)
 				})
 				r.Get("/analytics/overview", analyticsHandler.Overview)
+				r.Post("/analytics/ai-summary", analyticsHandler.AiSummary)
+				r.Get("/analytics/ai-summary/stream", analyticsHandler.AiSummaryStream)
 				r.Route("/cash-entries", func(r chi.Router) {
 					r.Get("/", analyticsHandler.ListCashEntries)
 					r.Post("/", analyticsHandler.CreateCashEntry)

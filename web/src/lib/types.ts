@@ -290,6 +290,38 @@ export type CashEntry = {
   note: string;
 };
 
+// Sales-summary data from /api/v1/reports/overview (date-ranged). Powers the
+// free-visible part of the merged Laporan & Analytics page.
+export type ReportTopProduct = {
+  product_id: string;
+  product_name: string;
+  qty_sold: number;
+  revenue_cents: number;
+};
+
+export type ReportTopCustomer = {
+  customer_id: string;
+  name: string;
+  whatsapp_number: string;
+  orders: number;
+  total_spent_cents: number;
+};
+
+export type ReportOverview = {
+  has_store: boolean;
+  headline: {
+    orders_total: number;
+    orders_cancelled: number;
+    revenue_cents: number;
+    paid_orders: number;
+    aov_cents: number;
+  };
+  top_products: ReportTopProduct[];
+  top_customers: ReportTopCustomer[];
+  status_breakdown: Record<string, number>;
+  payment_breakdown: Record<string, number>;
+};
+
 export type StockTake = {
   id: string;
   status: "draft" | "posted";
