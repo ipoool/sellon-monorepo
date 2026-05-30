@@ -2,6 +2,7 @@ import type { MetadataRoute } from "next";
 import { SITE_URL } from "@/lib/seo";
 import { helpArticles } from "@/lib/help-articles";
 import { articles as guideArticles } from "@/lib/guides-articles";
+import { blogPosts } from "@/lib/blog-posts";
 
 const lastModified = new Date();
 
@@ -27,6 +28,16 @@ export default function sitemap(): MetadataRoute.Sitemap {
       url: `${SITE_URL}/guides`,
       changeFrequency: "weekly" as const,
       priority: 0.8,
+    },
+    {
+      url: `${SITE_URL}/blog`,
+      changeFrequency: "weekly" as const,
+      priority: 0.8,
+    },
+    {
+      url: `${SITE_URL}/status`,
+      changeFrequency: "daily" as const,
+      priority: 0.4,
     },
     {
       url: `${SITE_URL}/terms`,
@@ -59,5 +70,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
     priority: 0.6,
   }));
 
-  return [...staticRoutes, ...helpRoutes, ...guideRoutes];
+  const blogRoutes: MetadataRoute.Sitemap = blogPosts.map((p) => ({
+    url: `${SITE_URL}/blog/${p.slug}`,
+    lastModified: new Date(p.publishedAt),
+    changeFrequency: "monthly",
+    priority: 0.6,
+  }));
+
+  return [...staticRoutes, ...helpRoutes, ...guideRoutes, ...blogRoutes];
 }
