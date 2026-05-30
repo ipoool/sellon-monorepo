@@ -106,6 +106,10 @@ type CreateOrderInput struct {
 	TableID       *uuid.UUID
 	ServingType   string // "dine_in" | "takeaway" | ""
 	KitchenStatus string // "queued" to route into the kitchen now; "" otherwise
+	// CustomFields is a JSON array snapshot [{key,label,value}] of the
+	// seller-configured custom checkout fields the buyer filled in. nil/empty
+	// stores an empty array.
+	CustomFields []byte
 }
 
 type OrderRepo struct {
@@ -263,6 +267,15 @@ func (r *OrderRepo) SetPaymentProof(ctx context.Context, orderID uuid.UUID, proo
 }
 
 // FindByID returns full order with all fields. Tenant-isolated by storeID.
+// GetCustomFields returns the raw JSON snapshot of custom checkout fields for
+// an order (caller is responsible for having validated access to the order).
+func (r *OrderRepo) GetCustomFields(ctx context.Context, orderID uuid.UUID) ([]byte, error) {
+	var cf []byte
+	err := r.pool.QueryRow(ctx,
+		`SELECT custom_fields FROM orders WHERE id = $1`, orderID).Scan(&cf)
+	return cf, err
+}
+
 func (r *OrderRepo) FindByID(ctx context.Context, storeID, id uuid.UUID) (*Order, error) {
 	const q = `
 		SELECT id, store_id, order_number, status, payment_status, payment_method, source,
@@ -794,6 +807,11 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 		servingType = ""
 	}
 
+	customFields := in.CustomFields
+	if len(customFields) == 0 {
+		customFields = []byte("[]")
+	}
+
 	var o Order
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO orders (store_id, customer_id, order_number, status, payment_status,
@@ -801,9 +819,10 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 		                   promo_code, promo_id, total_cents,
 		                   courier, customer_name, customer_whatsapp, customer_email,
 		                   customer_address, customer_city,
-		                   notes, table_id, serving_type, kitchen_status, queue_number, queue_date)
+		                   notes, table_id, serving_type, kitchen_status, queue_number, queue_date,
+		                   custom_fields)
 		VALUES ($1, $2, $3, 'pending', 'unpaid', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
-		        $18, $19, $20, $21, $22::date)
+		        $18, $19, $20, $21, $22::date, $23::jsonb)
 		RETURNING id, store_id, order_number, status, payment_status, payment_method,
 		          subtotal_cents, shipping_cents, discount_cents, promo_code, total_cents, courier,
 		          customer_name, customer_whatsapp, customer_email, customer_city, created_at,
@@ -815,6 +834,7 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 		in.Courier, in.CustomerName, in.CustomerWA, in.CustomerEmail,
 		in.CustomerAddress, in.CustomerCity, in.Notes,
 		in.TableID, servingType, kitchenStatus, queueNum, queueDate,
+		string(customFields),
 	).Scan(
 		&o.ID, &o.StoreID, &o.OrderNumber, &o.Status, &o.PaymentStatus, &o.PaymentMethod,
 		&o.SubtotalCents, &o.ShippingCents, &o.DiscountCents, &o.PromoCode, &o.TotalCents, &o.Courier,

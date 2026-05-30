@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -163,6 +164,7 @@ type publicStoreDTO struct {
 	AcceptingOrders       bool            `json:"accepting_orders"`
 	AcceptingOrdersReason string          `json:"accepting_orders_reason"`
 	LayoutConfig          json.RawMessage `json:"layout_config,omitempty"`
+	CheckoutConfig        json.RawMessage `json:"checkout_config,omitempty"`
 }
 
 type publicProductDTO struct {
@@ -216,6 +218,7 @@ func toPublicStore(s *repository.Store) publicStoreDTO {
 		AcceptingOrders:       s.IsOpen,
 		AcceptingOrdersReason: "",
 		LayoutConfig:          json.RawMessage(s.LayoutConfig),
+		CheckoutConfig:        json.RawMessage(s.CheckoutConfig),
 	}
 }
 
@@ -556,6 +559,62 @@ type createOrderReq struct {
 	ShippingCents   int64          `json:"shipping_cents"`
 	PromoCode       string         `json:"promo_code"`
 	Items           []orderItemReq `json:"items"`
+	// CustomFields: seller-configured field values keyed by field key.
+	CustomFields map[string]any `json:"custom_fields"`
+}
+
+// checkoutConfig mirrors stores.checkout_config for server-side validation.
+type checkoutCfg struct {
+	EmailMode string `json:"email_mode"`
+	Fields    []struct {
+		Key      string `json:"key"`
+		Label    string `json:"label"`
+		Type     string `json:"type"`
+		Step     string `json:"step"`
+		Required bool   `json:"required"`
+	} `json:"fields"`
+}
+
+// resolveCustomFields validates the buyer's submitted custom-field values
+// against the store's checkout config and returns a snapshot array
+// [{key,label,value}] ready to persist on the order. Returns a user-facing
+// error string when a required field is missing.
+func resolveCustomFields(raw []byte, submitted map[string]any) ([]byte, string) {
+	if len(raw) == 0 {
+		return []byte("[]"), ""
+	}
+	var cfg checkoutCfg
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return []byte("[]"), ""
+	}
+	snap := make([]map[string]any, 0, len(cfg.Fields))
+	for _, f := range cfg.Fields {
+		v, ok := submitted[f.Key]
+		valStr := ""
+		switch t := v.(type) {
+		case string:
+			valStr = strings.TrimSpace(t)
+		case bool:
+			if t {
+				valStr = "Ya"
+			}
+		case float64:
+			valStr = strings.TrimRight(strings.TrimRight(fmt.Sprintf("%f", t), "0"), ".")
+		case nil:
+			valStr = ""
+		default:
+			valStr = strings.TrimSpace(fmt.Sprintf("%v", t))
+		}
+		if f.Required && valStr == "" {
+			return nil, "isian \"" + f.Label + "\" wajib diisi"
+		}
+		if !ok || valStr == "" {
+			continue // skip empty optional fields
+		}
+		snap = append(snap, map[string]any{"key": f.Key, "label": f.Label, "value": valStr})
+	}
+	out, _ := json.Marshal(snap)
+	return out, ""
 }
 
 // POST /api/v1/storefront/{slug}/orders
@@ -760,6 +819,20 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Seller-configured checkout fields: enforce email mode + required custom
+	// fields, then snapshot the submitted values onto the order.
+	var checkoutCfgParsed checkoutCfg
+	_ = json.Unmarshal(store.CheckoutConfig, &checkoutCfgParsed)
+	if checkoutCfgParsed.EmailMode == "required" && strings.TrimSpace(req.CustomerEmail) == "" {
+		response.Error(w, http.StatusBadRequest, "email wajib diisi")
+		return
+	}
+	customFieldsJSON, cfErr := resolveCustomFields(store.CheckoutConfig, req.CustomFields)
+	if cfErr != "" {
+		response.Error(w, http.StatusBadRequest, cfErr)
+		return
+	}
+
 	// Dine-in self-order routing: a table QR submission routes the order into
 	// the kitchen ONLY when the seller runs a Kitchen Display (kds_enabled).
 	// With KDS off the order is treated like any normal order — no kitchen
@@ -801,6 +874,7 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 		TableID:         tableID,
 		ServingType:     dineServing,
 		KitchenStatus:   dineKitchen,
+		CustomFields:    customFieldsJSON,
 	})
 	if err != nil {
 		// Concurrency: another buyer just bought the last unit between our

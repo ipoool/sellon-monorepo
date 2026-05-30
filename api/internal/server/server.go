@@ -217,6 +217,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 					r.Put("/", storeHandler.Update)
 					r.Put("/shipping", storeHandler.UpdateShipping)
 					r.Put("/storefront", storeHandler.UpdateStorefront)
+					r.Put("/checkout-config", storeHandler.UpdateCheckoutConfig)
 					r.Put("/custom-domain", domainHandler.Set)
 					r.Post("/custom-domain/verify", domainHandler.Verify)
 					r.Delete("/custom-domain", domainHandler.Delete)

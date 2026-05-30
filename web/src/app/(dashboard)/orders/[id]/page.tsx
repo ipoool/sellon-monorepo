@@ -275,6 +275,16 @@ export default async function OrderDetailPage({
                   </dd>
                 </div>
               )}
+              {(order.custom_fields ?? []).map((f) => (
+                <div key={f.key} className="sm:col-span-2">
+                  <dt className="text-xs font-medium uppercase tracking-wider text-neutral-500">
+                    {f.label}
+                  </dt>
+                  <dd className="mt-0.5 whitespace-pre-line text-neutral-700">
+                    {f.value}
+                  </dd>
+                </div>
+              ))}
             </dl>
           </Card>
 

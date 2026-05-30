@@ -6,6 +6,7 @@ import { ArrowLeft } from "lucide-react";
 import { Container } from "@/components/layout/container";
 import { CheckoutWizard } from "@/components/storefront/checkout-wizard";
 import { themeStyleForHue } from "@/lib/storefront-theme";
+import type { CheckoutConfig } from "@/lib/types";
 
 const apiBase =
   process.env.API_INTERNAL_URL ||
@@ -21,6 +22,7 @@ type StoreSummary = {
   accepting_orders?: boolean;
   accepting_orders_reason?: "" | "store_closed" | "order_limit";
   theme_hue: number;
+  checkout_config?: CheckoutConfig;
 };
 
 type StorefrontPayment = {
@@ -101,6 +103,7 @@ export default async function CheckoutPage({ params }: { params: Params }) {
               acceptingOrders={store.accepting_orders ?? store.is_open}
               acceptingOrdersReason={store.accepting_orders_reason ?? ""}
               payment={payment}
+              checkoutConfig={store.checkout_config}
             />
           </div>
         </Container>

@@ -58,6 +58,7 @@ export type Store = {
   domain_status?: "none" | "pending" | "active" | "failed";
   domain_verified_at?: string | null;
   layout_config?: LayoutConfig;
+  checkout_config?: CheckoutConfig;
 };
 
 export type BankAccount = {
@@ -201,6 +202,30 @@ export type KitchenOrder = {
   customer_name: string;
   created_at: string;
   items: { name: string; quantity: number }[];
+};
+
+// Seller-configurable checkout fields.
+export type CheckoutFieldType =
+  | "text"
+  | "textarea"
+  | "select"
+  | "number"
+  | "date"
+  | "checkbox";
+
+export type CheckoutField = {
+  key: string;
+  label: string;
+  type: CheckoutFieldType;
+  step: "identity" | "shipping";
+  required: boolean;
+  placeholder: string;
+  options: string[];
+};
+
+export type CheckoutConfig = {
+  email_mode: "optional" | "required" | "hidden";
+  fields: CheckoutField[];
 };
 
 // Platform-managed promo/info banner shown as a slider on the seller dashboard.
@@ -409,6 +434,7 @@ export type OrderDetail = {
   created_at: string;
   updated_at: string;
   items: OrderItem[];
+  custom_fields?: { key: string; label: string; value: string }[];
 };
 
 export type PaymentGatewayStatus = {

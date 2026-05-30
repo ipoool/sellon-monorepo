@@ -17,6 +17,7 @@ import {
   Award,
   Printer,
   QrCode,
+  ClipboardList,
   ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -31,6 +32,7 @@ const tabs = [
   { label: "Meja & QR", href: "/settings/tables", icon: QrCode },
   { label: "Kategori", href: "/settings/categories", icon: Tag },
   { label: "Pengiriman", href: "/settings/shipping", icon: Truck },
+  { label: "Field Checkout", href: "/settings/checkout", icon: ClipboardList },
   { label: "Printer", href: "/settings/printer", icon: Printer },
   { label: "WhatsApp", href: "/settings/whatsapp", icon: MessageCircle },
   { label: "Tim", href: "/settings/team", icon: Users },

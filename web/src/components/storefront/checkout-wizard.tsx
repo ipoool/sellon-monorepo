@@ -30,6 +30,7 @@ import { CityPicker } from "@/components/dashboard/city-picker";
 import { formatRupiah } from "@/lib/format";
 import { fillTemplate, waLink } from "@/lib/whatsapp";
 import { cn } from "@/lib/utils";
+import type { CheckoutConfig, CheckoutField } from "@/lib/types";
 import { useCart, cartItemKey } from "./cart-context";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -119,6 +120,7 @@ type Props = {
   acceptingOrders: boolean;
   acceptingOrdersReason: "" | "store_closed" | "order_limit";
   payment: StorefrontPayment;
+  checkoutConfig?: CheckoutConfig;
 };
 
 type Step = 1 | 2 | 3 | 4;
@@ -131,6 +133,7 @@ export function CheckoutWizard({
   acceptingOrders,
   acceptingOrdersReason,
   payment,
+  checkoutConfig,
 }: Props) {
   const { push, replace } = useRouter();
   const { items, subtotal, isAllDigital, hasDigital, isHydrated, clear } = useCart();
@@ -174,6 +177,105 @@ export function CheckoutWizard({
   const [submitting, setSubmitting] = useState(false);
 
   const skipShippingStep = isAllDigital;
+
+  // Seller-configured checkout fields.
+  const emailMode = checkoutConfig?.email_mode ?? "optional";
+  const showEmail = emailMode !== "hidden" || hasDigital; // digital always needs email
+  const customFields = checkoutConfig?.fields ?? [];
+  const identityFields = customFields.filter((f) => f.step === "identity");
+  const shippingFields = customFields.filter((f) => f.step === "shipping");
+  const [customValues, setCustomValues] = useState<Record<string, string | boolean>>({});
+  const setCustomValue = (key: string, val: string | boolean) =>
+    setCustomValues((v) => ({ ...v, [key]: val }));
+
+  const missingRequiredCustom = (fields: CheckoutField[]): string | null => {
+    for (const f of fields) {
+      if (!f.required) continue;
+      const v = customValues[f.key];
+      const empty =
+        f.type === "checkbox" ? v !== true : !String(v ?? "").trim();
+      if (empty) return `${f.label} wajib diisi`;
+    }
+    return null;
+  };
+
+  const renderCustomFields = (fields: CheckoutField[]): ReactNode => {
+    if (fields.length === 0) return null;
+    return (
+      <div className="flex flex-col gap-4">
+        {fields.map((f) => {
+          const v = customValues[f.key];
+          const labelEl = (
+            <Label htmlFor={`cf-${f.key}`}>
+              {f.label}
+              {f.required && <span className="text-danger"> *</span>}
+            </Label>
+          );
+          if (f.type === "checkbox") {
+            return (
+              <label key={f.key} className="flex items-center gap-2.5 text-sm text-neutral-700">
+                <input
+                  id={`cf-${f.key}`}
+                  type="checkbox"
+                  checked={v === true}
+                  onChange={(e) => setCustomValue(f.key, e.target.checked)}
+                  className="size-4 rounded border-neutral-300 text-brand-600 focus:ring-brand-500"
+                />
+                {f.label}
+                {f.required && <span className="text-danger">*</span>}
+              </label>
+            );
+          }
+          if (f.type === "textarea") {
+            return (
+              <div key={f.key} className="flex flex-col gap-1.5">
+                {labelEl}
+                <textarea
+                  id={`cf-${f.key}`}
+                  value={String(v ?? "")}
+                  onChange={(e) => setCustomValue(f.key, e.target.value)}
+                  placeholder={f.placeholder}
+                  rows={3}
+                  className="w-full resize-y rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+                />
+              </div>
+            );
+          }
+          if (f.type === "select") {
+            return (
+              <div key={f.key} className="flex flex-col gap-1.5">
+                {labelEl}
+                <Select
+                  id={`cf-${f.key}`}
+                  value={String(v ?? "")}
+                  onChange={(e) => setCustomValue(f.key, e.target.value)}
+                >
+                  <option value="">{f.placeholder || "Pilih…"}</option>
+                  {f.options.map((o) => (
+                    <option key={o} value={o}>
+                      {o}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            );
+          }
+          return (
+            <div key={f.key} className="flex flex-col gap-1.5">
+              {labelEl}
+              <Input
+                id={`cf-${f.key}`}
+                type={f.type === "number" ? "number" : f.type === "date" ? "date" : "text"}
+                value={String(v ?? "")}
+                onChange={(e) => setCustomValue(f.key, e.target.value)}
+                placeholder={f.placeholder}
+              />
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
 
   // Fetch shipping options whenever cart + city change. Quote endpoint
   // takes the items array verbatim so multi-product carts get a real
@@ -311,16 +413,22 @@ export function CheckoutWizard({
       if (!customerWA.trim()) return "Nomor WhatsApp wajib diisi";
       if (!isValidWA(customerWA))
         return "Nomor WhatsApp tidak valid (mis. 0812-3456-7890 atau +62 812 3456 7890)";
-      if (hasDigital && !customerEmail.trim())
-        return "Email wajib diisi untuk produk digital";
+      if ((hasDigital || emailMode === "required") && !customerEmail.trim())
+        return hasDigital
+          ? "Email wajib diisi untuk produk digital"
+          : "Email wajib diisi";
       // Email is optional for non-digital orders, but if the buyer typed
       // anything it should still be a valid address.
       if (customerEmail.trim() && !isValidEmail(customerEmail))
         return "Format email tidak valid";
+      const idMiss = missingRequiredCustom(identityFields);
+      if (idMiss) return idMiss;
     }
     if (forStep >= 2 && !skipShippingStep) {
       if (!customerAddress.trim()) return "Alamat pengiriman wajib diisi";
       if (!city.trim()) return "Kota tujuan wajib diisi";
+      const shipMiss = missingRequiredCustom(shippingFields);
+      if (shipMiss) return shipMiss;
     }
     return null;
   }
@@ -391,6 +499,7 @@ export function CheckoutWizard({
               (o) => o.option_id,
             ),
           })),
+          custom_fields: customValues,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -535,9 +644,10 @@ export function CheckoutWizard({
                 </p>
               )}
             </div>
+            {showEmail && (
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="cw_email">
-                Email{hasDigital ? " *" : " (opsional)"}
+                Email{hasDigital || emailMode === "required" ? " *" : " (opsional)"}
               </Label>
               <Input
                 id="cw_email"
@@ -569,6 +679,8 @@ export function CheckoutWizard({
                 </p>
               ) : null}
             </div>
+            )}
+            {renderCustomFields(identityFields)}
           </div>
         </StepCard>
       )}
@@ -659,6 +771,7 @@ export function CheckoutWizard({
                 </ul>
               )}
             </div>
+            {renderCustomFields(shippingFields)}
           </div>
         </StepCard>
       )}

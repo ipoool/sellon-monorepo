@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -62,6 +63,7 @@ type storeDTO struct {
 	DomainStatus               string          `json:"domain_status"`
 	DomainVerifiedAt           *string         `json:"domain_verified_at"`
 	LayoutConfig               json.RawMessage `json:"layout_config,omitempty"`
+	CheckoutConfig             json.RawMessage `json:"checkout_config,omitempty"`
 }
 
 func toStoreDTO(s *repository.Store) storeDTO {
@@ -101,6 +103,7 @@ func toStoreDTO(s *repository.Store) storeDTO {
 		DomainStatus:     s.DomainStatus,
 		DomainVerifiedAt: formatTimePtr(s.DomainVerifiedAt),
 		LayoutConfig:     json.RawMessage(s.LayoutConfig),
+		CheckoutConfig:   json.RawMessage(s.CheckoutConfig),
 	}
 }
 
@@ -110,6 +113,115 @@ func formatTimePtr(t *time.Time) *string {
 	}
 	v := t.Format(time.RFC3339)
 	return &v
+}
+
+type checkoutFieldReq struct {
+	Key         string   `json:"key"`
+	Label       string   `json:"label"`
+	Type        string   `json:"type"`
+	Step        string   `json:"step"`
+	Required    bool     `json:"required"`
+	Placeholder string   `json:"placeholder"`
+	Options     []string `json:"options"`
+}
+
+var checkoutFieldTypes = map[string]bool{
+	"text": true, "textarea": true, "select": true,
+	"number": true, "date": true, "checkbox": true,
+}
+
+func slugifyKey(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		} else if r == ' ' || r == '-' || r == '_' {
+			b.WriteByte('_')
+		}
+	}
+	return strings.Trim(b.String(), "_")
+}
+
+// PUT /api/v1/store/checkout-config — set the seller's custom checkout fields.
+func (h *StoreHandler) UpdateCheckoutConfig(w http.ResponseWriter, r *http.Request) {
+	uid, _ := auth.UserIDFromContext(r.Context())
+	store, err := h.stores.FindByOwnerID(r.Context(), uid)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "toko belum dibuat")
+		return
+	}
+	var req struct {
+		EmailMode string             `json:"email_mode"`
+		Fields    []checkoutFieldReq `json:"fields"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+
+	emailMode := req.EmailMode
+	if emailMode != "optional" && emailMode != "required" && emailMode != "hidden" {
+		emailMode = "optional"
+	}
+
+	out := make([]map[string]any, 0, len(req.Fields))
+	seen := map[string]bool{}
+	for i, f := range req.Fields {
+		label := strings.TrimSpace(f.Label)
+		if label == "" {
+			continue // a field without a label is meaningless
+		}
+		ft := strings.ToLower(strings.TrimSpace(f.Type))
+		if !checkoutFieldTypes[ft] {
+			ft = "text"
+		}
+		step := strings.ToLower(strings.TrimSpace(f.Step))
+		if step != "identity" && step != "shipping" {
+			step = "identity"
+		}
+		key := slugifyKey(f.Key)
+		if key == "" {
+			key = slugifyKey(label)
+		}
+		if key == "" {
+			key = "field"
+		}
+		// Ensure key uniqueness.
+		base := key
+		for n := 2; seen[key]; n++ {
+			key = fmt.Sprintf("%s_%d", base, n)
+		}
+		seen[key] = true
+
+		opts := []string{}
+		if ft == "select" {
+			for _, o := range f.Options {
+				if t := strings.TrimSpace(o); t != "" {
+					opts = append(opts, t)
+				}
+			}
+		}
+		out = append(out, map[string]any{
+			"key":         key,
+			"label":       label,
+			"type":        ft,
+			"step":        step,
+			"required":    f.Required,
+			"placeholder": strings.TrimSpace(f.Placeholder),
+			"options":     opts,
+			"sort_order":  i,
+		})
+	}
+
+	cfg, _ := json.Marshal(map[string]any{"email_mode": emailMode, "fields": out})
+	if err := h.stores.UpdateCheckoutConfig(r.Context(), store.ID, cfg); err != nil {
+		h.logger.Error("update checkout config", "err", err)
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	updated, _ := h.stores.FindByOwnerID(r.Context(), uid)
+	response.JSON(w, http.StatusOK, map[string]any{"store": toStoreDTO(updated)})
 }
 
 // GET /api/v1/store

@@ -48,6 +48,7 @@ type Store struct {
 	DomainStatus               string     // none|pending|active|failed
 	DomainVerifiedAt           *time.Time // nullable
 	LayoutConfig               []byte     // raw JSONB per-layout config
+	CheckoutConfig             []byte     // raw JSONB checkout fields config
 	CreatedAt                  time.Time
 	UpdatedAt                  time.Time
 }
@@ -73,7 +74,7 @@ const storeColumns = `id, owner_id, slug, name, description, logo_url, banner_ur
 	segment_vip_threshold, segment_loyal_threshold,
 	segment_baru_name, segment_reguler_name, segment_loyal_name, segment_vip_name,
 	custom_domain, domain_status, domain_verified_at,
-	layout_config,
+	layout_config, checkout_config,
 	created_at, updated_at`
 
 // Same column list but qualified with the `s.` alias, used in joins.
@@ -86,7 +87,7 @@ const qualifiedStoreColumns = `s.id, s.owner_id, s.slug, s.name, s.description,
 	s.segment_vip_threshold, s.segment_loyal_threshold,
 	s.segment_baru_name, s.segment_reguler_name, s.segment_loyal_name, s.segment_vip_name,
 	s.custom_domain, s.domain_status, s.domain_verified_at,
-	s.layout_config,
+	s.layout_config, s.checkout_config,
 	s.created_at, s.updated_at`
 
 func scanStore(row pgx.Row, s *Store) error {
@@ -102,11 +103,22 @@ func scanStore(row pgx.Row, s *Store) error {
 		&s.SegmentVipThreshold, &s.SegmentLoyalThreshold,
 		&s.SegmentBaruName, &s.SegmentRegulerName, &s.SegmentLoyalName, &s.SegmentVipName,
 		&s.CustomDomain, &s.DomainStatus, &s.DomainVerifiedAt,
-		&s.LayoutConfig,
+		&s.LayoutConfig, &s.CheckoutConfig,
 		&s.CreatedAt, &s.UpdatedAt,
 	)
 }
 
+
+// UpdateCheckoutConfig replaces the store's checkout fields config (raw JSONB).
+func (r *StoreRepo) UpdateCheckoutConfig(ctx context.Context, storeID uuid.UUID, cfg []byte) error {
+	if len(cfg) == 0 {
+		cfg = []byte(`{"email_mode":"optional","fields":[]}`)
+	}
+	_, err := r.pool.Exec(ctx,
+		`UPDATE stores SET checkout_config = $2::jsonb, updated_at = now() WHERE id = $1`,
+		storeID, string(cfg))
+	return err
+}
 
 func (r *StoreRepo) FindBySlug(ctx context.Context, slug string) (*Store, error) {
 	q := `SELECT ` + storeColumns + ` FROM stores WHERE slug = $1`

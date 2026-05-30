@@ -134,9 +134,10 @@ type orderDetailDTO struct {
 	PaymentProofURL    string         `json:"payment_proof_url"`
 	PaymentProofNote   string         `json:"payment_proof_note"`
 	PaymentProofAt     *string        `json:"payment_proof_at"`
-	CreatedAt          string         `json:"created_at"`
-	UpdatedAt          string         `json:"updated_at"`
-	Items              []orderItemDTO `json:"items"`
+	CreatedAt          string          `json:"created_at"`
+	UpdatedAt          string          `json:"updated_at"`
+	Items              []orderItemDTO  `json:"items"`
+	CustomFields       json.RawMessage `json:"custom_fields,omitempty"`
 }
 
 func formatTime(t interface{ Format(string) string }) string {
@@ -274,7 +275,11 @@ func (h *OrderHandler) Get(w http.ResponseWriter, r *http.Request) {
 		}
 		itemsDTO = append(itemsDTO, dto)
 	}
-	response.JSON(w, http.StatusOK, map[string]any{"order": orderDetailToDTO(o, itemsDTO)})
+	orderDTO := orderDetailToDTO(o, itemsDTO)
+	if cf, cfErr := h.orders.GetCustomFields(r.Context(), o.ID); cfErr == nil && len(cf) > 2 {
+		orderDTO.CustomFields = cf
+	}
+	response.JSON(w, http.StatusOK, map[string]any{"order": orderDTO})
 }
 
 func orderDetailToDTO(o *repository.Order, items []orderItemDTO) orderDetailDTO {
@@ -507,7 +512,11 @@ func (h *OrderHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 		go h.fulfiller.OnPaymentPaid(context.Background(), store.ID, o.ID)
 	}
 
-	response.JSON(w, http.StatusOK, map[string]any{"order": orderDetailToDTO(o, itemsDTO)})
+	orderDTO := orderDetailToDTO(o, itemsDTO)
+	if cf, cfErr := h.orders.GetCustomFields(r.Context(), o.ID); cfErr == nil && len(cf) > 2 {
+		orderDTO.CustomFields = cf
+	}
+	response.JSON(w, http.StatusOK, map[string]any{"order": orderDTO})
 }
 
 // statusVerbBahasa maps the wire action verb to a human Bahasa phrase
