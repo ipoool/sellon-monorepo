@@ -67,6 +67,8 @@ export default async function BlogPage() {
                 <img
                   src={featured.coverImage}
                   alt={featured.title}
+                  loading="lazy"
+                  decoding="async"
                   className="h-48 w-full object-cover lg:col-span-2 lg:h-full"
                 />
               ) : (
@@ -135,6 +137,8 @@ export default async function BlogPage() {
                     <img
                       src={post.coverImage}
                       alt={post.title}
+                      loading="lazy"
+                      decoding="async"
                       className="h-32 w-full object-cover"
                     />
                   ) : (

@@ -123,6 +123,8 @@ export default async function BlogPostPage({ params }: { params: Params }) {
                 <img
                   src={post.coverImage}
                   alt={post.title}
+                  loading="lazy"
+                  decoding="async"
                   className="mt-8 w-full rounded-2xl border border-neutral-200 shadow-card"
                 />
               ) : (
@@ -181,6 +183,8 @@ export default async function BlogPostPage({ params }: { params: Params }) {
                         <img
                           src={s.image.src}
                           alt={s.image.alt}
+                          loading="lazy"
+                          decoding="async"
                           className="w-full rounded-xl border border-neutral-200 shadow-card"
                         />
                         {s.image.caption && (

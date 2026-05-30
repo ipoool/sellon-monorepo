@@ -14,6 +14,10 @@ import {
   Sparkles,
   Palette,
   UserCog,
+  ShoppingCart,
+  Utensils,
+  Award,
+  Boxes,
   ChevronLeft,
   ChevronRight,
   Check,
@@ -65,6 +69,28 @@ const features: Feature[] = [
     ],
   },
   {
+    icon: ShoppingCart,
+    title: "Kasir POS (offline & online)",
+    tagline:
+      "Jualan langsung di toko fisik — kasir cepat dengan struk, sementara stok tetap sinkron dengan toko online-mu.",
+    bullets: [
+      "Keranjang cepat + hitung kembalian otomatis",
+      "Cetak struk (Bluetooth thermal atau browser)",
+      "Shift kasir + laporan penjualan POS",
+    ],
+  },
+  {
+    icon: Utensils,
+    title: "Pesan via QR meja & Kitchen Display",
+    tagline:
+      "Untuk kafe & resto: pelanggan scan QR di meja, pesan sendiri dari HP, dan pesanan langsung tampil di layar dapur.",
+    bullets: [
+      "Pelanggan pilih dine-in/take away & pesan sendiri",
+      "Kitchen Display (KDS) + nomor antrian otomatis",
+      "Kartu QR meja bisa dikustom: warna, teks, layout",
+    ],
+  },
+  {
     icon: Upload,
     title: "Produk & bulk upload",
     tagline:
@@ -73,6 +99,17 @@ const features: Feature[] = [
       "Foto produk langsung dari HP",
       "Satu produk bisa banyak ukuran atau warna",
       "Notifikasi otomatis kalau stok mau habis",
+    ],
+  },
+  {
+    icon: Boxes,
+    title: "Bahan baku, stok & pembelian",
+    tagline:
+      "Pantau stok sampai level bahan baku — tahu kapan harus restock sebelum kehabisan saat ramai order.",
+    bullets: [
+      "Stok bahan berkurang otomatis tiap produk terjual (resep)",
+      "Catat pembelian (PO) ke supplier & terima barang",
+      "Stok opname (hitung fisik) + peringatan stok menipis",
     ],
   },
   {
@@ -101,11 +138,22 @@ const features: Feature[] = [
     icon: Users,
     title: "Database pelanggan",
     tagline:
-      "Setiap pembeli langsung masuk daftar tanpa input manual. Tahu mana langganan setia, mana yang baru.",
+      "Setiap pembeli langsung masuk daftar tanpa input manual, lengkap dengan riwayat order & total belanjanya.",
     bullets: [
-      "Segmentasi otomatis: Baru, Reguler, Loyal, VIP",
-      "Tulis catatan kecil di tiap pelanggan",
+      "Riwayat order & total belanja ter-rekam otomatis",
+      "Tulis catatan kecil & tandai pelanggan blacklist",
       "Chat ulang pelanggan langsung dari dasbor",
+    ],
+  },
+  {
+    icon: Award,
+    title: "Membership & poin loyalty",
+    tagline:
+      "Bikin pelanggan balik lagi: tier naik otomatis berdasarkan total belanja, lengkap dengan bonus poin & diskon member.",
+    bullets: [
+      "Tier membership (mis. Silver/Gold/Platinum) otomatis",
+      "Bonus poin & diskon member langsung berlaku di kasir",
+      "Kartu member ber-QR untuk identifikasi cepat",
     ],
   },
   {
