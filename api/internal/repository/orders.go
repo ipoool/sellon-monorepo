@@ -122,9 +122,10 @@ func NewOrderRepo(pool *pgxpool.Pool) *OrderRepo {
 
 type ListOrdersFilter struct {
 	StoreID       uuid.UUID
-	Search        string // matches order_number or customer_name
-	Status        string // "" = all
-	PaymentStatus string // "" = all
+	Search        string   // matches order_number or customer_name
+	Status        string   // "" = all (single-value, legacy callers)
+	Statuses      []string // non-empty = filter to this set (status = ANY); takes precedence over Status
+	PaymentStatus string   // "" = all
 	Limit         int
 	Offset        int
 }
@@ -149,7 +150,11 @@ func (r *OrderRepo) List(ctx context.Context, f ListOrdersFilter) ([]Order, int,
 		args = append(args, "%"+f.Search+"%")
 		where += " AND (order_number ILIKE $2 OR customer_name ILIKE $2)"
 	}
-	if f.Status != "" {
+	if len(f.Statuses) > 0 {
+		// Tab-style grouping (e.g. "Perlu Diproses" = pending+confirmed+processing).
+		args = append(args, f.Statuses)
+		where += " AND status = ANY($" + itoa(len(args)) + ")"
+	} else if f.Status != "" {
 		args = append(args, f.Status)
 		where += " AND status = $" + itoa(len(args))
 	}
@@ -239,6 +244,28 @@ func (r *OrderRepo) StatsForStore(ctx context.Context, storeID uuid.UUID) (today
 		FROM orders WHERE store_id = $1
 	`, storeID).Scan(&todayCount, &monthRevenueCents)
 	return
+}
+
+// CountsByStatus returns a map of status → row count across the whole store
+// (no date/search filter), used to render the order-tab badge counts.
+func (r *OrderRepo) CountsByStatus(ctx context.Context, storeID uuid.UUID) (map[string]int, error) {
+	rows, err := r.pool.Query(ctx,
+		"SELECT status, COUNT(*) FROM orders WHERE store_id = $1 GROUP BY status",
+		storeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]int)
+	for rows.Next() {
+		var status string
+		var n int
+		if err := rows.Scan(&status, &n); err != nil {
+			return nil, err
+		}
+		out[status] = n
+	}
+	return out, rows.Err()
 }
 
 var ErrOrderNotFound = errors.New("order not found")

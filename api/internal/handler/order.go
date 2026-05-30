@@ -164,10 +164,20 @@ func (h *OrderHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	offset, _ := strconv.Atoi(q.Get("offset"))
 
+	// `status` accepts a comma-separated list so the orders page can group
+	// statuses into tabs (e.g. "pending,confirmed,processing" = Perlu Diproses).
+	// A single value still works for any legacy caller.
+	var statuses []string
+	for _, s := range strings.Split(q.Get("status"), ",") {
+		if s = strings.TrimSpace(s); s != "" {
+			statuses = append(statuses, s)
+		}
+	}
+
 	rows, total, err := h.orders.List(r.Context(), repository.ListOrdersFilter{
 		StoreID:       store.ID,
 		Search:        strings.TrimSpace(q.Get("q")),
-		Status:        q.Get("status"),
+		Statuses:      statuses,
 		PaymentStatus: q.Get("payment_status"),
 		Limit:         limit,
 		Offset:        offset,
@@ -189,7 +199,12 @@ func (h *OrderHandler) List(w http.ResponseWriter, r *http.Request) {
 			CreatedAt: o.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		})
 	}
-	response.JSON(w, http.StatusOK, map[string]any{"orders": out, "total": total})
+	// Store-wide per-status counts for the tab badges (independent of the
+	// active tab / search / payment filter). Best-effort: tabs still work
+	// without counts.
+	counts, _ := h.orders.CountsByStatus(r.Context(), store.ID)
+
+	response.JSON(w, http.StatusOK, map[string]any{"orders": out, "total": total, "status_counts": counts})
 }
 
 // GET /api/v1/orders/export — CSV download (uses same filter params)

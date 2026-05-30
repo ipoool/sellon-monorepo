@@ -19,12 +19,27 @@ const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
 const PAGE_SIZE = 25;
 
+// Status tabs — one click triage instead of a dropdown. Each tab maps to a
+// group of order statuses sent to the API as a comma-separated `status` param.
+const TABS = [
+  {
+    key: "perlu",
+    label: "Perlu Diproses",
+    statuses: ["pending", "confirmed", "processing"],
+  },
+  { key: "dikirim", label: "Dikirim", statuses: ["shipped"] },
+  { key: "selesai", label: "Selesai", statuses: ["completed"] },
+  { key: "dibatalkan", label: "Dibatalkan", statuses: ["cancelled"] },
+] as const;
+
+const DEFAULT_TAB = TABS[0];
+
 export default async function PesananPage({
   searchParams,
 }: {
   searchParams: Promise<{
     q?: string;
-    status?: string;
+    tab?: string;
     payment_status?: string;
     page?: string;
   }>;
@@ -33,50 +48,64 @@ export default async function PesananPage({
   if (!me) redirect("/login");
   const sp = await searchParams;
   const q = sp.q ?? "";
-  const status = sp.status ?? "";
   const paymentStatus = sp.payment_status ?? "";
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
 
-  const params = new URLSearchParams();
-  if (q) params.set("q", q);
-  if (status) params.set("status", status);
-  if (paymentStatus) params.set("payment_status", paymentStatus);
-  // Filters-only QS for the export link (server export ignores paging).
-  const qs = params.toString() ? `?${params.toString()}` : "";
+  const activeTab = TABS.find((t) => t.key === sp.tab) ?? DEFAULT_TAB;
 
-  const apiParams = new URLSearchParams(params);
+  // Shared query string for export + tab links: search + payment filter
+  // (the status group comes from the active tab).
+  const baseParams = new URLSearchParams();
+  if (q) baseParams.set("q", q);
+  if (paymentStatus) baseParams.set("payment_status", paymentStatus);
+
+  // Filters-only QS for the export link (server export ignores paging),
+  // including the active tab's status group.
+  const exportParams = new URLSearchParams(baseParams);
+  exportParams.set("status", activeTab.statuses.join(","));
+  const exportHref = `${apiBase}/api/v1/orders/export?${exportParams.toString()}`;
+
+  const apiParams = new URLSearchParams(baseParams);
+  apiParams.set("status", activeTab.statuses.join(","));
   apiParams.set("limit", String(PAGE_SIZE));
   apiParams.set("offset", String((page - 1) * PAGE_SIZE));
 
   const [data, subRes] = await Promise.all([
-    serverApi<{ orders: Order[]; total: number }>(
-      `/api/v1/orders?${apiParams.toString()}`,
-    ),
+    serverApi<{
+      orders: Order[];
+      total: number;
+      status_counts?: Record<string, number>;
+    }>(`/api/v1/orders?${apiParams.toString()}`),
     serverApi<{ subscription: Subscription }>("/api/v1/subscription"),
   ]);
   const orders = data?.orders ?? [];
   const total = data?.total ?? orders.length;
-  const isFiltered = Boolean(q || status || paymentStatus);
+  const counts = data?.status_counts ?? {};
+  const isFiltered = Boolean(q || paymentStatus);
   const sub = subRes?.subscription;
   const orderQuota = sub?.quotas?.orders;
   const isOrderCapped = !!orderQuota && orderQuota.limit > 0;
   const tierLabel =
     sub?.plan === "pro" ? "Pro" : sub?.plan === "bisnis" ? "Bisnis" : "Gratis";
 
-  const exportHref = `${apiBase}/api/v1/orders/export${qs}`;
+  // Count per tab = sum of its statuses' store-wide counts.
+  const tabCount = (statuses: readonly string[]) =>
+    statuses.reduce((sum, s) => sum + (counts[s] ?? 0), 0);
+
+  // Build a tab link that preserves the search + payment filter (drops page).
+  const tabHref = (key: string) => {
+    const p = new URLSearchParams(baseParams);
+    p.set("tab", key);
+    return `/orders?${p.toString()}`;
+  };
 
   return (
     <DashboardShell
       me={me}
       pageTitle="Pesanan"
-      pageSubtitle={`${total} pesanan${isFiltered ? " (terfilter)" : ""}`}
+      pageSubtitle={`${total} pesanan · ${activeTab.label}${isFiltered ? " (terfilter)" : ""}`}
       actions={
-        <a
-          href={exportHref}
-          download
-          target="_blank"
-          rel="noopener noreferrer"
-        >
+        <a href={exportHref} download target="_blank" rel="noopener noreferrer">
           <Button size="sm" variant="outline">
             <Download className="size-4" aria-hidden />
             Export CSV
@@ -95,10 +124,50 @@ export default async function PesananPage({
         />
       )}
 
+      {/* Status tabs */}
+      <div className="mb-4 -mx-1 overflow-x-auto px-1">
+        <div
+          role="tablist"
+          aria-label="Filter status pesanan"
+          className="inline-flex min-w-full gap-1 rounded-xl bg-neutral-100 p-1"
+        >
+          {TABS.map((t) => {
+            const isActive = t.key === activeTab.key;
+            const n = tabCount(t.statuses);
+            return (
+              <Link
+                key={t.key}
+                href={tabHref(t.key)}
+                role="tab"
+                aria-selected={isActive}
+                className={`inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+                  isActive
+                    ? "bg-white text-brand-700 shadow-sm"
+                    : "text-neutral-500 hover:text-neutral-800"
+                }`}
+              >
+                {t.label}
+                <span
+                  className={`inline-flex min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-semibold ${
+                    isActive
+                      ? "bg-brand-100 text-brand-700"
+                      : "bg-neutral-200 text-neutral-500"
+                  }`}
+                >
+                  {n}
+                </span>
+              </Link>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Search + payment filter (status comes from the tabs above) */}
       <form
         method="GET"
         className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center"
       >
+        <input type="hidden" name="tab" value={activeTab.key} />
         <div className="flex-1">
           <Input
             name="q"
@@ -107,17 +176,6 @@ export default async function PesananPage({
           />
         </div>
         <div className="grid grid-cols-2 gap-2 sm:flex sm:gap-2">
-          <div className="sm:w-44">
-            <Select name="status" defaultValue={status}>
-              <option value="">Semua status</option>
-              <option value="pending">Menunggu</option>
-              <option value="confirmed">Dikonfirmasi</option>
-              <option value="processing">Diproses</option>
-              <option value="shipped">Dikirim</option>
-              <option value="completed">Selesai</option>
-              <option value="cancelled">Dibatalkan</option>
-            </Select>
-          </div>
           <div className="sm:w-44">
             <Select name="payment_status" defaultValue={paymentStatus}>
               <option value="">Semua pembayaran</option>
@@ -132,7 +190,7 @@ export default async function PesananPage({
             Filter
           </Button>
           {isFiltered && (
-            <Link href="/orders">
+            <Link href={tabHref(activeTab.key)}>
               <Button type="button" size="md" variant="ghost">
                 Reset
               </Button>
@@ -147,12 +205,14 @@ export default async function PesananPage({
             <Inbox className="size-7" aria-hidden />
           </div>
           <h2 className="mt-4 font-display text-xl font-semibold text-neutral-900">
-            {isFiltered ? "Tidak ada pesanan yang cocok" : "Belum ada pesanan"}
+            {isFiltered
+              ? "Tidak ada pesanan yang cocok"
+              : `Tidak ada pesanan di "${activeTab.label}"`}
           </h2>
           <p className="mx-auto mt-2 max-w-md text-sm text-neutral-600">
             {isFiltered
               ? "Coba ubah kata kunci atau reset filter."
-              : "Bagikan link katalog ke WhatsApp grup pelanggan-mu — saat ada yang order, akan muncul di sini."}
+              : "Pesanan akan muncul di tab ini sesuai statusnya. Cek tab lain atau bagikan link katalog ke pelangganmu."}
           </p>
           {!isFiltered && (
             <div className="mt-6">
