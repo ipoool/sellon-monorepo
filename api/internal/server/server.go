@@ -14,6 +14,7 @@ import (
 	"github.com/sellon/sellon/api/internal/audit"
 	"github.com/sellon/sellon/api/internal/auth"
 	"github.com/sellon/sellon/api/internal/config"
+	"github.com/sellon/sellon/api/internal/domain/feature"
 	"github.com/sellon/sellon/api/internal/email"
 	"github.com/sellon/sellon/api/internal/events"
 	"github.com/sellon/sellon/api/internal/fulfillment"
@@ -205,6 +206,11 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 			r.Group(func(r chi.Router) {
 				r.Use(middleware.RequireSeller(users))
 
+				// feat gates a route (group) behind a Bisnis-tier feature.
+				feat := func(f feature.Feature) func(http.Handler) http.Handler {
+					return middleware.RequireFeature(f, stores, subscriptions)
+				}
+
 				r.Get("/dashboard/stats", dashHandler.Stats)
 
 				// Platform promo/info banners for the dashboard slider (read-only
@@ -217,12 +223,12 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 					r.Put("/", storeHandler.Update)
 					r.Put("/shipping", storeHandler.UpdateShipping)
 					r.Put("/storefront", storeHandler.UpdateStorefront)
-					r.Put("/checkout-config", storeHandler.UpdateCheckoutConfig)
+					r.With(feat(feature.CheckoutFields)).Put("/checkout-config", storeHandler.UpdateCheckoutConfig)
 					r.Put("/custom-domain", domainHandler.Set)
 					r.Post("/custom-domain/verify", domainHandler.Verify)
 					r.Delete("/custom-domain", domainHandler.Delete)
-					r.Get("/dinein", tableHandler.GetDineIn)
-					r.Put("/dinein", tableHandler.UpdateDineIn)
+					r.Get("/dinein", tableHandler.GetDineIn) // read-only: open so the dashboard can read kds_enabled
+					r.With(feat(feature.TableQR)).Put("/dinein", tableHandler.UpdateDineIn)
 				})
 
 				r.Route("/products", func(r chi.Router) {
@@ -243,6 +249,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 				})
 
 				r.Route("/membership", func(r chi.Router) {
+					r.Use(feat(feature.Membership))
 					r.Get("/tiers", membershipHandler.ListTiers)
 					r.Put("/tiers", membershipHandler.ReplaceTiers)
 				})
@@ -265,21 +272,26 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 					r.Get("/{id}", purchasingHandler.GetStockTake)
 					r.Post("/{id}/post", purchasingHandler.PostStockTake)
 				})
-				r.Get("/analytics/overview", analyticsHandler.Overview)
-				r.Post("/analytics/ai-summary", analyticsHandler.AiSummary)
-				r.Get("/analytics/ai-summary/stream", analyticsHandler.AiSummaryStream)
+				// Financial analytics + AI summary are Bisnis-only. The sales
+				// summary (reports/overview) stays open to all tiers.
+				r.With(feat(feature.AIAnalytics)).Get("/analytics/overview", analyticsHandler.Overview)
+				r.With(feat(feature.AIAnalytics)).Post("/analytics/ai-summary", analyticsHandler.AiSummary)
+				r.With(feat(feature.AIAnalytics)).Get("/analytics/ai-summary/stream", analyticsHandler.AiSummaryStream)
 				r.Route("/cash-entries", func(r chi.Router) {
+					r.Use(feat(feature.AIAnalytics))
 					r.Get("/", analyticsHandler.ListCashEntries)
 					r.Post("/", analyticsHandler.CreateCashEntry)
 					r.Delete("/{id}", analyticsHandler.DeleteCashEntry)
 				})
 				r.Route("/tables", func(r chi.Router) {
+					r.Use(feat(feature.TableQR))
 					r.Get("/", tableHandler.List)
 					r.Post("/", tableHandler.Create)
 					r.Put("/{id}", tableHandler.Update)
 					r.Delete("/{id}", tableHandler.Delete)
 				})
 				r.Route("/kds", func(r chi.Router) {
+					r.Use(feat(feature.TableQR))
 					r.Get("/orders", kdsHandler.List)
 					r.Post("/orders/{id}/bump", kdsHandler.Bump)
 					r.Get("/stream", kdsHandler.Stream)
@@ -316,7 +328,8 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 					r.Get("/export", customerHandler.ExportCSV)
 					r.Get("/{id}", customerHandler.Get)
 					r.Put("/{id}", customerHandler.Update)
-					r.Post("/{id}/member-code", customerHandler.GenerateMemberCode)
+					// Member codes are part of the membership program (Bisnis-only).
+					r.With(feat(feature.Membership)).Post("/{id}/member-code", customerHandler.GenerateMemberCode)
 				})
 
 				r.Route("/payments/midtrans", func(r chi.Router) {
@@ -402,6 +415,9 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 				})
 
 				r.Route("/pos", func(r chi.Router) {
+					// Whole POS suite (incl. printer + loyalty config under /pos)
+					// is Bisnis-only.
+					r.Use(feat(feature.POS))
 					// Sessions
 					r.Post("/sessions", posHandler.OpenSession)
 					r.Get("/sessions", posHandler.ListSessions)

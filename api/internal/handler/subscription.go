@@ -11,6 +11,7 @@ import (
 
 	"github.com/sellon/sellon/api/internal/audit"
 	"github.com/sellon/sellon/api/internal/auth"
+	"github.com/sellon/sellon/api/internal/domain/feature"
 	"github.com/sellon/sellon/api/internal/payments"
 	"github.com/sellon/sellon/api/internal/pkg/response"
 	"github.com/sellon/sellon/api/internal/repository"
@@ -78,6 +79,7 @@ type subscriptionDTO struct {
 	ProPriceCents      int64                 `json:"pro_price_cents"`
 	BisnisPriceCents   int64                 `json:"bisnis_price_cents"`
 	Quotas             map[string]quotaUsage `json:"quotas"`
+	Features           []string              `json:"features"` // gated features this plan unlocks
 }
 
 type invoiceDTO struct {
@@ -100,6 +102,7 @@ func toSubDTO(s *repository.Subscription, proCents, bisnisCents int64) subscript
 		Plan: s.Plan, Status: s.Status,
 		ProPriceCents:    proCents,
 		BisnisPriceCents: bisnisCents,
+		Features:         feature.ForPlan(s.Plan),
 	}
 	formatPtr := func(t *time.Time) *string {
 		if t == nil {
@@ -157,6 +160,7 @@ func (h *SubscriptionHandler) Get(w http.ResponseWriter, r *http.Request) {
 				Plan: "free", Status: "active",
 				ProPriceCents:    proCents,
 				BisnisPriceCents: bisnisCents,
+				Features:         feature.ForPlan("free"),
 			},
 			"invoices": []invoiceDTO{},
 		})
