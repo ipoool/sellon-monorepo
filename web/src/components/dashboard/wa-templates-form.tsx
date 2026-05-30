@@ -139,12 +139,19 @@ export function WhatsAppTemplatesForm({
   // the upgrade CTA, so we don't duplicate it here — just visual locks.
   const locked = plan !== "pro" && plan !== "bisnis";
 
+  // new_order_alert is sent via the WhatsApp Business API (Twilio) — a
+  // business-initiated message that, in production, requires a Meta-approved
+  // template. So it's NOT editable here; it uses the platform default. The
+  // rest (order confirmation / payment link / shipping update) fire via
+  // manual wa.me links, which are freeform and stay fully customizable.
+  const editable = templates.filter((t) => t.key !== "new_order_alert");
+
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setPending(true);
     const fd = new FormData(e.currentTarget);
     const body: Record<string, string> = {};
-    for (const t of templates) {
+    for (const t of editable) {
       // Disabled textareas don't appear in FormData; skipping them
       // entirely also means the locked-tier seller can't accidentally
       // clobber a stored value with empty string. (Save button itself
@@ -178,25 +185,26 @@ export function WhatsAppTemplatesForm({
           <Info className="size-4 shrink-0 text-brand-600" aria-hidden />
           <div>
             <p>
-              <strong>Cara kerja:</strong> Template di bawah dipakai dua tempat
-              — auto-alert ke owner (otomatis terkirim oleh sistem), dan
+              <strong>Cara kerja:</strong> Template di bawah dipakai untuk
               tombol &ldquo;Kirim WhatsApp&rdquo; di halaman detail pesanan
               (manual, seller klik). Placeholder seperti{" "}
               <code className="rounded bg-neutral-100 px-1 py-0.5 text-xs">
                 &#123;nama_pembeli&#125;
               </code>{" "}
-              atau{" "}
-              <code className="rounded bg-neutral-100 px-1 py-0.5 text-xs">
-                &#123;&#123;order_number&#125;&#125;
-              </code>{" "}
               akan diganti dengan data pesanan asli. Kosongkan body untuk pakai
               template default.
+              <br />
+              <span className="mt-1 inline-block text-neutral-500">
+                Template <strong>Alert Pesanan Baru</strong> (notifikasi otomatis ke
+                owner) sementara memakai format default platform &amp; belum bisa
+                diubah — menunggu integrasi WhatsApp resmi (template approved Meta).
+              </span>
             </p>
           </div>
         </div>
       </Card>
 
-      {templates.map((t) => (
+      {editable.map((t) => (
         <Card key={t.key}>
           <header className="mb-4">
             <h2
