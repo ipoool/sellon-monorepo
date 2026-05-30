@@ -18,9 +18,9 @@ import type { PublicPlan } from "@/lib/types";
 import { faqJsonLd, pageMetadata } from "@/lib/seo";
 
 export const metadata = pageMetadata({
-  title: "Toko Online untuk Seller WhatsApp — Tanpa Potongan Marketplace",
+  title: "Platform Jualan Online & Offline All-in-One untuk UMKM",
   description:
-    "Bikin katalog online dalam menit. Pembeli pilih produk lewat link, bayar QRIS, dan konfirmasi via WhatsApp - tanpa potongan transaksi. Gratis untuk UMKM Indonesia.",
+    "Satu aplikasi untuk seluruh tokomu: jualan online (link katalog + checkout), kasir POS, QR meja & dapur (KDS), stok & bahan baku, membership pelanggan, sampai pembayaran QRIS/Midtrans — tanpa potongan per transaksi. Gratis untuk UMKM Indonesia.",
   path: "/",
 });
 
