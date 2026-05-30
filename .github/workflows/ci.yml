@@ -1,0 +1,94 @@
+name: CI
+
+# Verify on every branch push + PRs into main. Monorepo-aware: the two apps
+# live in separate dirs and are checked by separate jobs that only run when
+# THAT app changed —
+#   api/  → backend (Go)   : go build ./... + go vet ./...
+#   web/  → frontend (Next): tsc --noEmit + eslint
+# Tags don't trigger CI — they go through release.yml (which builds the prod
+# Docker images anyway).
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs on the same ref (rapid pushes / PR updates).
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Decide which app(s) changed. A change to the workflow itself runs both.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.filter.outputs.api }}
+      web: ${{ steps.filter.outputs.web }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            api:
+              - 'api/**'
+              - '.github/workflows/ci.yml'
+            web:
+              - 'web/**'
+              - '.github/workflows/ci.yml'
+
+  api:
+    name: API (Go build + vet)
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: api/go.mod
+          cache-dependency-path: api/go.sum
+      - run: go build ./...
+      - run: go vet ./...
+
+  web:
+    name: Web (type-check + lint)
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsc --noEmit
+      - run: pnpm run lint
+
+  # Single stable status check to require in branch protection. Passes when
+  # neither app job FAILED (skipped = no relevant changes = OK).
+  ci-pass:
+    name: CI passed
+    needs: [api, web]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any app check failed
+        run: |
+          if [ "${{ needs.api.result }}" = "failure" ] || [ "${{ needs.web.result }}" = "failure" ]; then
+            echo "::error::An app check failed (api=${{ needs.api.result }}, web=${{ needs.web.result }})"
+            exit 1
+          fi
+          echo "OK (api=${{ needs.api.result }}, web=${{ needs.web.result }})"

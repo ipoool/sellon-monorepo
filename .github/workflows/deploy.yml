@@ -1,72 +1,81 @@
-name: Build & Deploy
+name: Release & Deploy
 
+# Production deploy is triggered ONLY by pushing a semantic-version tag
+# (v1.2.3, also accepts prerelease like v1.2.3-rc.1), and ONLY if that tag
+# points at a commit that lives on `main` (guard job below). This makes
+# production releases deliberate + traceable to a version, instead of
+# auto-deploying every push.
+#
+#   git tag v1.4.0 && git push origin v1.4.0
+#
+# workflow_dispatch is kept as a manual escape hatch (e.g. re-deploy current
+# images) — it skips the on-main guard since the operator picks the ref.
 on:
   push:
-    branches: [main]
-    paths:
-      - "api/**"
-      - "web/**"
-      - "docker-compose.yml"
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
   workflow_dispatch:
 
-# GITHUB_TOKEN perlu write ke packages supaya bisa push ke GHCR.
+# GITHUB_TOKEN needs write to packages to push to GHCR.
 permissions:
   contents: read
   packages: write
 
 jobs:
-  # Deteksi mana yang berubah supaya tidak build dua-duanya kalau cuma
-  # satu app yang kena commit. workflow_dispatch selalu build keduanya.
-  detect:
+  # ── Gate: the tagged commit must be on main, else refuse to deploy ──────
+  guard:
+    name: Guard — tag must be on main
     runs-on: ubuntu-latest
-    outputs:
-      api: ${{ steps.filter.outputs.api }}
-      web: ${{ steps.filter.outputs.web }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
-        id: filter
         with:
-          filters: |
-            api: ["api/**"]
-            web: ["web/**"]
+          fetch-depth: 0 # full history so we can test ancestry vs main
+      - name: Ensure tagged commit is on main
+        if: github.event_name == 'push'
+        run: |
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main; then
+            echo "✓ ${GITHUB_REF_NAME} ($GITHUB_SHA) is on main — proceeding."
+          else
+            echo "::error::Tag ${GITHUB_REF_NAME} is not on main. Production deploy refused."
+            exit 1
+          fi
 
   build-api:
-    needs: detect
-    if: needs.detect.outputs.api == 'true' || github.event_name == 'workflow_dispatch'
+    name: Build & push API image
+    needs: guard
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
       - uses: docker/build-push-action@v6
         with:
           context: ./api
           target: prod
           push: true
+          # Tag with the version (ref_name), the commit SHA (immutable, for
+          # rollback), and latest.
           tags: |
-            ghcr.io/${{ github.repository_owner }}/sellon-api:latest
+            ghcr.io/${{ github.repository_owner }}/sellon-api:${{ github.ref_name }}
             ghcr.io/${{ github.repository_owner }}/sellon-api:${{ github.sha }}
-          # Registry cache — drastis kurangi waktu build ulang kalau
-          # layer deps tidak berubah (go mod download, dsb).
+            ghcr.io/${{ github.repository_owner }}/sellon-api:latest
           cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/sellon-api:buildcache
           cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/sellon-api:buildcache,mode=max
 
   build-web:
-    needs: detect
-    if: needs.detect.outputs.web == 'true' || github.event_name == 'workflow_dispatch'
+    name: Build & push Web image
+    needs: guard
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # .env.production wajib ada di build context — Next.js bake nilai
-      # NEXT_PUBLIC_* ke dalam bundle saat pnpm build. Simpan seluruh isi
-      # file sebagai secret WEB_ENV_PRODUCTION di GitHub repo settings.
+      # Next.js bakes NEXT_PUBLIC_* into the bundle at build time. Store the
+      # full web/.env.production contents as repo secret WEB_ENV_PRODUCTION.
       - name: Write web/.env.production
         run: printf '%s' "$WEB_ENV" > web/.env.production
         env:
@@ -77,34 +86,33 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
       - uses: docker/build-push-action@v6
         with:
           context: ./web
           target: prod
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/sellon-web:latest
+            ghcr.io/${{ github.repository_owner }}/sellon-web:${{ github.ref_name }}
             ghcr.io/${{ github.repository_owner }}/sellon-web:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/sellon-web:latest
           cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/sellon-web:buildcache
           cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/sellon-web:buildcache,mode=max
 
   deploy:
+    name: Deploy to production
     needs: [build-api, build-web]
-    # Jalan kalau:
-    #   - tidak di-cancel
-    #   - masing-masing build sukses ATAU di-skip (tidak ada perubahan)
-    #   - minimal satu build benar-benar sukses (ada image baru)
-    if: |
-      !cancelled() &&
-      (needs.build-api.result == 'success' || needs.build-api.result == 'skipped') &&
-      (needs.build-web.result == 'success' || needs.build-web.result == 'skipped') &&
-      (needs.build-api.result == 'success' || needs.build-web.result == 'success')
     runs-on: ubuntu-latest
+    environment: production # GitHub Environment — optional manual-approval gate
     steps:
-      - uses: appleboy/ssh-action@v1.2.0
+      - name: SSH deploy
+        uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: root
           key: ${{ secrets.SERVER_SSH_KEY }}
-          script: cd /var/www/app && ./deploy.sh
+          envs: IMAGE_TAG
+          # Pin the deploy to the released version so rollback = re-run an
+          # older tag. deploy.sh on the server pulls IMAGE_TAG and recreates.
+          script: cd /var/www/app && IMAGE_TAG="$IMAGE_TAG" ./deploy.sh
+        env:
+          IMAGE_TAG: ${{ github.ref_name }}
