@@ -35,28 +35,28 @@ type Props = {
   templates: Record<string, string>;
 };
 
-const fallbackOrderConfirmation = `Hai {nama_pembeli}! 👋
+const fallbackOrderConfirmation = `Hai {{nama_pembeli}}! 👋
 
 Pesananmu sudah masuk:
 
-📦 Pesanan: {nomor_pesanan}
-{ringkasan_produk}
+📦 Pesanan: {{nomor_pesanan}}
+{{ringkasan_produk}}
 
-💰 Total: {total}
-🚚 Kurir: {kurir}
+💰 Total: {{total}}
+🚚 Kurir: {{kurir}}
 
-Terima kasih sudah pesan di {nama_toko}.`;
+Terima kasih sudah pesan di {{nama_toko}}.`;
 
-const fallbackPaymentLink = `Halo {nama_pembeli}, ini link pembayaran untuk pesanan {nomor_pesanan}:
+const fallbackPaymentLink = `Halo {{nama_pembeli}}, ini link pembayaran untuk pesanan {{nomor_pesanan}}:
 
-{link_pembayaran}
+{{link_pembayaran}}
 
-Total: {total}`;
+Total: {{total}}`;
 
-const fallbackShippingUpdate = `Halo {nama_pembeli}! Pesananmu {nomor_pesanan} sudah saya kirim. 📦
+const fallbackShippingUpdate = `Halo {{nama_pembeli}}! Pesananmu {{nomor_pesanan}} sudah saya kirim. 📦
 
-🚚 Kurir: {kurir}
-📋 Nomor Resi: {nomor_resi}
+🚚 Kurir: {{kurir}}
+📋 Nomor Resi: {{nomor_resi}}
 
 Estimasi sampai 2-4 hari. Makasih! 🙏`;
 

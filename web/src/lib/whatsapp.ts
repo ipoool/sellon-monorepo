@@ -14,13 +14,16 @@ export function waLink(phone: string, message: string): string {
   return `https://wa.me/${num}?text=${encodeURIComponent(message)}`;
 }
 
-// Replace simple {placeholders} with values. Unknown keys left as-is.
+// Replace {{placeholders}} (with optional inner spaces) with values. Also
+// still handles legacy single-brace {placeholder} for templates saved before
+// the switch to double braces. Unknown keys are left as-is.
 export function fillTemplate(
   template: string,
   vars: Record<string, string | number>,
 ): string {
-  return template.replace(/\{(\w+)\}/g, (m, key) => {
-    if (key in vars) return String(vars[key]);
-    return m;
-  });
+  const sub = (m: string, key: string) =>
+    key in vars ? String(vars[key]) : m;
+  return template
+    .replace(/\{\{\s*(\w+)\s*\}\}/g, sub) // {{ var }}
+    .replace(/\{(\w+)\}/g, sub); // legacy {var}
 }

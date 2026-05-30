@@ -60,17 +60,17 @@ Lihat detail: {{order_link}}`,
     title: "Konfirmasi Pesanan (buyer)",
     description:
       "Dipakai saat seller klik \"Konfirmasi Pesanan\" di halaman detail pesanan. WhatsApp terbuka dengan pesan sudah terisi, tinggal kirim.",
-    defaultBody: `Hai {nama_pembeli}! 👋
+    defaultBody: `Hai {{nama_pembeli}}! 👋
 
 Pesananmu sudah masuk:
 
-📦 Pesanan: {nomor_pesanan}
-{ringkasan_produk}
+📦 Pesanan: {{nomor_pesanan}}
+{{ringkasan_produk}}
 
-💰 Total: {total}
-🚚 Kurir: {kurir}
+💰 Total: {{total}}
+🚚 Kurir: {{kurir}}
 
-Terima kasih sudah pesan di {nama_toko}.`,
+Terima kasih sudah pesan di {{nama_toko}}.`,
     placeholders: [
       "nama_pembeli",
       "nama_toko",
@@ -86,11 +86,11 @@ Terima kasih sudah pesan di {nama_toko}.`,
     title: "Kirim Link Pembayaran (buyer)",
     description:
       "Dipakai saat seller klik \"Kirim Link Pembayaran\" di halaman detail pesanan.",
-    defaultBody: `Halo {nama_pembeli}, ini link pembayaran untuk pesanan {nomor_pesanan}:
+    defaultBody: `Halo {{nama_pembeli}}, ini link pembayaran untuk pesanan {{nomor_pesanan}}:
 
-{link_pembayaran}
+{{link_pembayaran}}
 
-Total: {total}`,
+Total: {{total}}`,
     placeholders: [
       "nama_pembeli",
       "nomor_pesanan",
@@ -104,10 +104,10 @@ Total: {total}`,
     title: "Update Resi (buyer)",
     description:
       "Dipakai saat seller klik \"Kirim Update Resi\" di halaman detail pesanan setelah input nomor resi.",
-    defaultBody: `Halo {nama_pembeli}! Pesananmu {nomor_pesanan} sudah saya kirim. 📦
+    defaultBody: `Halo {{nama_pembeli}}! Pesananmu {{nomor_pesanan}} sudah saya kirim. 📦
 
-🚚 Kurir: {kurir}
-📋 Nomor Resi: {nomor_resi}
+🚚 Kurir: {{kurir}}
+📋 Nomor Resi: {{nomor_resi}}
 
 Estimasi sampai 2-4 hari. Makasih! 🙏`,
     placeholders: [
@@ -204,17 +204,37 @@ export function WhatsAppTemplatesForm({
         </div>
       </Card>
 
-      {editable.map((t) => (
+      {templates.map((t) => {
+        // The order-alert template is shown for reference but not editable —
+        // it goes via the WhatsApp Business API and needs a Meta-approved
+        // template in production.
+        const isAlert = t.key === "new_order_alert";
+        const fieldLocked = locked || isAlert;
+        return (
         <Card key={t.key}>
           <header className="mb-4">
-            <h2
-              id={`${t.key}-title`}
-              className="font-semibold text-neutral-900 no-underline"
-            >
-              {t.title}
-            </h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2
+                id={`${t.key}-title`}
+                className="font-semibold text-neutral-900 no-underline"
+              >
+                {t.title}
+              </h2>
+              {isAlert && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] font-medium text-neutral-500">
+                  <Lock className="size-3" aria-hidden />
+                  Belum bisa diubah
+                </span>
+              )}
+            </div>
             <p className="mt-1 text-sm leading-relaxed text-neutral-600 no-underline">
               {t.description}
+              {isAlert && (
+                <span className="mt-1 block text-neutral-400">
+                  Notifikasi otomatis ke owner — sementara memakai format default
+                  platform; menunggu integrasi WhatsApp resmi (template approved Meta).
+                </span>
+              )}
             </p>
           </header>
 
@@ -228,10 +248,8 @@ export function WhatsAppTemplatesForm({
                 variant="outline"
                 className="font-mono text-xs"
               >
-                {/* Placeholder syntax matches how the consumer reads
-                    it: paid auto-templates use {{double}}, free buyer
-                    templates use {single}. */}
-                {t.tier === "paid" ? `{{${p}}}` : `{${p}}`}
+                {/* Unified placeholder syntax: double braces everywhere. */}
+                {`{{${p}}}`}
               </Badge>
             ))}
           </div>
@@ -242,11 +260,12 @@ export function WhatsAppTemplatesForm({
             rows={9}
             defaultValue={initial[t.key] ?? t.defaultBody}
             aria-labelledby={`${t.key}-title`}
-            disabled={locked}
+            disabled={fieldLocked}
             className="w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 font-mono text-xs leading-relaxed text-neutral-900 placeholder:text-neutral-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 disabled:cursor-not-allowed disabled:bg-neutral-50 disabled:text-neutral-500"
           />
         </Card>
-      ))}
+        );
+      })}
 
       {/* One global Save bar. Locked for Free — feature is Pro/Bisnis. */}
       <div className="flex items-center justify-between gap-3">
