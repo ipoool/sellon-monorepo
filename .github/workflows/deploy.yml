@@ -46,6 +46,9 @@ jobs:
     name: Build & push API image
     needs: guard
     runs-on: ubuntu-latest
+    # Run in the production environment so GHCR_TOKEN (an environment secret)
+    # is available to the GHCR login.
+    environment: production
     steps:
       - uses: actions/checkout@v4
       # Registry cache export (cache-to) needs the docker-container driver.
@@ -73,6 +76,9 @@ jobs:
     name: Build & push Web image
     needs: guard
     runs-on: ubuntu-latest
+    # Same environment so GHCR_TOKEN + WEB_ENV_PRODUCTION (environment secrets)
+    # are readable for the GHCR login and the build-time .env.production.
+    environment: production
     steps:
       - uses: actions/checkout@v4
 
