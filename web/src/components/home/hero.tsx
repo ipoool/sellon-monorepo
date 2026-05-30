@@ -25,9 +25,9 @@ import { Container } from "@/components/layout/container";
 import { BrowserMockup } from "@/components/marketing/browser-mockup";
 
 const heroPoints = [
-  "Gratis selamanya untuk toko kecil",
+  "Online, kasir & dine-in dalam satu sistem",
   "Uang masuk langsung ke rekening kamu",
-  "Setup 5 menit, tanpa kartu kredit",
+  "Mulai gratis, tanpa kartu kredit",
 ];
 
 type PresetProduct = {
@@ -274,14 +274,14 @@ export function Hero() {
       <Container>
         <div className="grid items-center gap-12 lg:grid-cols-12 lg:gap-16">
           <div className="lg:col-span-6">
-            <Badge variant="brand">Untuk seller WhatsApp Indonesia</Badge>
+            <Badge variant="brand">Platform jualan online &amp; offline untuk UMKM</Badge>
             <h1 className="mt-5 font-display text-4xl font-semibold tracking-tight text-neutral-900 sm:text-5xl lg:text-6xl">
-              Jualan WhatsApp,{" "}
-              <span className="text-gradient-brand">tanpa balas chat</span>.
+              Satu aplikasi untuk{" "}
+              <span className="text-gradient-brand">seluruh tokomu</span>.
             </h1>
             <p className="mt-6 max-w-xl text-lg leading-relaxed text-neutral-600">
-              Pembeli pilih dan bayar sendiri dari link katalog-mu. <br />
-              Setup 5 menit, tanpa potongan marketplace.
+              Jualan online, kasir POS, dapur, stok, sampai pelanggan setia —
+              semua jadi satu. Tanpa potongan per transaksi.
             </p>
 
             <div className="mt-8 flex flex-col items-start gap-3 sm:flex-row sm:items-center">

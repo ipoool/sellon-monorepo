@@ -19,7 +19,7 @@ const plusJakarta = Plus_Jakarta_Sans({
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: "SellOn — Toko Online untuk Seller WhatsApp, Tanpa Potongan Marketplace",
+    default: "SellOn — Platform Jualan Online & Offline All-in-One untuk UMKM",
     template: "%s — SellOn",
   },
   description: BRAND.description,
@@ -49,7 +49,7 @@ export const metadata: Metadata = {
     url: SITE_URL,
     siteName: BRAND.name,
     locale: BRAND.locale,
-    title: "SellOn — Toko Online untuk Seller WhatsApp, Tanpa Potongan Marketplace",
+    title: "SellOn — Platform Jualan Online & Offline All-in-One untuk UMKM",
     description: BRAND.description,
     images: [
       {
@@ -64,7 +64,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     site: BRAND.twitter,
     creator: BRAND.twitter,
-    title: "SellOn — Toko Online untuk Seller WhatsApp, Tanpa Potongan Marketplace",
+    title: "SellOn — Platform Jualan Online & Offline All-in-One untuk UMKM",
     description: BRAND.description,
     images: ["/og-default.png"],
   },

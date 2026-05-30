@@ -14,7 +14,7 @@ export const BRAND = {
   twitter: "@sellon_id",
   locale: "id_ID",
   description:
-    "Toko online untuk seller WhatsApp Indonesia. Bikin katalog, terima order lewat link, pembayaran QRIS/Midtrans, dan konfirmasi via WhatsApp - tanpa potongan marketplace.",
+    "Platform jualan online & offline all-in-one untuk UMKM Indonesia: toko online + link katalog, kasir POS, QR meja & dapur (KDS), stok & bahan baku, membership pelanggan, sampai pembayaran QRIS/Midtrans — semua jadi satu, tanpa potongan per transaksi.",
 } as const;
 
 // Builds a canonical URL for a path (must start with "/"). Idempotent —

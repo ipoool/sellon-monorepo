@@ -17,7 +17,7 @@ const steps = [
     icon: ImagePlus,
     title: "Bikin katalog",
     description:
-      "Tambah foto produk, atur harga, dapat link katalog yang siap kamu bagi di WhatsApp.",
+      "Tambah foto produk, atur harga, dapat link katalog yang siap kamu bagikan ke mana saja — WA, Instagram, atau bio.",
     duration: "~3 menit",
     highlight: "sellon.id/toko-mu",
   },

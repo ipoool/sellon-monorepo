@@ -19,11 +19,11 @@ export function CtaBanner() {
           />
           <div className="relative mx-auto max-w-3xl">
             <h2 className="font-display text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-              5 menit untuk berhenti balas &ldquo;ready kak?&rdquo;.
+              Kelola seluruh tokomu dari satu aplikasi.
             </h2>
             <p className="mt-4 text-lg text-white/90">
-              Login Google, foto produk, share link ke grup WA.
-              Gratis selamanya untuk toko kecil.
+              Toko online, kasir, dapur, &amp; stok — mulai gratis, naik kelas
+              saat tokomu tumbuh. Tanpa potongan per transaksi.
             </p>
             <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <Link href="/login">

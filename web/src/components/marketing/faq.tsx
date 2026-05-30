@@ -17,7 +17,7 @@ const faqs = [
   },
   {
     q: "Bisa buat toko offline dan online sekaligus?",
-    a: "Bisa. SellOn cocok untuk toko fisik yang ingin terima pesanan WhatsApp dari pelanggan luar kota - tanpa harus standby balas WA seharian. Pesanan masuk pas kamu sempat, kamu balas pas kamu siap.",
+    a: "Bisa, dan ini salah satu kekuatan SellOn. Toko online (link katalog + checkout), kasir POS untuk jualan di tempat, sampai pesan-via-QR di meja + layar dapur (KDS) untuk kafe/resto - semuanya satu sistem. Stok dan data pelanggan otomatis sinkron antara online dan offline, jadi tidak perlu hitung-hitung manual dua kali.",
   },
   {
     q: "Bisa jual produk digital (ebook, kursus, voucher)?",
