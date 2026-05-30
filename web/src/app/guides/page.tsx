@@ -20,7 +20,7 @@ import { Footer } from "@/components/layout/footer";
 import { Section } from "@/components/layout/section";
 import { Badge } from "@/components/ui/badge";
 import { getMe } from "@/lib/server-auth";
-import { articles } from "@/lib/guides-articles";
+import { articles, categorySlug } from "@/lib/guides-articles";
 import { pageMetadata } from "@/lib/seo";
 
 export const metadata = pageMetadata({
@@ -180,25 +180,42 @@ export default async function PanduanPage() {
             </div>
 
             <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {categories.map(({ icon: Icon, title, description, count }) => (
-                <div
-                  key={title}
-                  className="flex flex-col gap-4 rounded-xl border border-neutral-200 bg-white p-6 shadow-card"
-                >
-                  <div className="flex size-10 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
-                    <Icon className="size-5" strokeWidth={2} aria-hidden />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-neutral-900">{title}</h3>
-                    <p className="mt-2 text-sm leading-relaxed text-neutral-600">
-                      {description}
+              {categories.map(({ icon: Icon, title, description, count }) => {
+                const inner = (
+                  <>
+                    <div className="flex size-10 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
+                      <Icon className="size-5" strokeWidth={2} aria-hidden />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-neutral-900 group-hover:text-brand-700">
+                        {title}
+                      </h3>
+                      <p className="mt-2 text-sm leading-relaxed text-neutral-600">
+                        {description}
+                      </p>
+                    </div>
+                    <p className="mt-auto text-xs font-medium text-neutral-500">
+                      {count} artikel{count === 0 ? " (segera hadir)" : ""}
                     </p>
+                  </>
+                );
+                return count > 0 ? (
+                  <Link
+                    key={title}
+                    href={`/guides/topik/${categorySlug(title)}`}
+                    className="group flex flex-col gap-4 rounded-xl border border-neutral-200 bg-white p-6 shadow-card transition-all hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-elevated"
+                  >
+                    {inner}
+                  </Link>
+                ) : (
+                  <div
+                    key={title}
+                    className="flex flex-col gap-4 rounded-xl border border-neutral-200 bg-white p-6 opacity-70 shadow-card"
+                  >
+                    {inner}
                   </div>
-                  <p className="mt-auto text-xs font-medium text-neutral-500">
-                    {count} artikel{count === 0 ? " (segera hadir)" : ""}
-                  </p>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </Container>
         </Section>

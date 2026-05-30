@@ -1,7 +1,7 @@
 import type { MetadataRoute } from "next";
 import { SITE_URL } from "@/lib/seo";
 import { helpArticles } from "@/lib/help-articles";
-import { articles as guideArticles } from "@/lib/guides-articles";
+import { articles as guideArticles, categorySlug } from "@/lib/guides-articles";
 import { blogPosts } from "@/lib/blog-posts";
 
 const lastModified = new Date();
@@ -70,6 +70,15 @@ export default function sitemap(): MetadataRoute.Sitemap {
     priority: 0.6,
   }));
 
+  const guideTopicRoutes: MetadataRoute.Sitemap = [
+    ...new Set(guideArticles.map((a) => categorySlug(a.category))),
+  ].map((slug) => ({
+    url: `${SITE_URL}/guides/topik/${slug}`,
+    lastModified,
+    changeFrequency: "monthly",
+    priority: 0.5,
+  }));
+
   const blogRoutes: MetadataRoute.Sitemap = blogPosts.map((p) => ({
     url: `${SITE_URL}/blog/${p.slug}`,
     lastModified: new Date(p.publishedAt),
@@ -77,5 +86,11 @@ export default function sitemap(): MetadataRoute.Sitemap {
     priority: 0.6,
   }));
 
-  return [...staticRoutes, ...helpRoutes, ...guideRoutes, ...blogRoutes];
+  return [
+    ...staticRoutes,
+    ...helpRoutes,
+    ...guideRoutes,
+    ...guideTopicRoutes,
+    ...blogRoutes,
+  ];
 }

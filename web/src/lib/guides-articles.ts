@@ -499,3 +499,23 @@ export const articles: Article[] = [
 export function findArticle(slug: string): Article | undefined {
   return articles.find((a) => a.slug === slug);
 }
+
+// URL-safe slug for a category name, e.g. "F&B / Kuliner" → "f-b-kuliner".
+export function categorySlug(category: string): string {
+  return category
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+// Articles in a category, resolved by its slug. Returns the canonical
+// category name + its articles, or null if the slug matches nothing.
+export function articlesByCategorySlug(
+  slug: string,
+): { category: string; items: Article[] } | null {
+  const items = articles.filter((a) => categorySlug(a.category) === slug);
+  if (items.length === 0) return null;
+  return { category: items[0].category, items };
+}
+
+export type { Article };
