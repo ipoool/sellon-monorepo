@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Save, GripVertical, ArrowUp, ArrowDown, Mail, ListPlus } from "lucide-react";
+import { Plus, Trash2, Save, GripVertical, ArrowUp, ArrowDown, Mail, ListPlus, User, Phone } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -124,25 +124,66 @@ export function CheckoutFieldsManager({ initial }: { initial: CheckoutConfig }) 
       <Card>
         <h2 className="font-semibold text-neutral-900">Field bawaan (Identitas)</h2>
         <p className="mt-1 text-sm text-neutral-500">
-          Nama & Nomor WhatsApp selalu wajib (dipakai untuk konfirmasi pesanan).
-          Atur perilaku Email di bawah.
+          Field ini selalu tampil di checkout. Nama & Nomor WhatsApp wajib dan
+          tidak bisa dihapus (dipakai untuk konfirmasi pesanan). Email bisa kamu
+          atur atau sembunyikan.
         </p>
-        <label className="mt-4 flex max-w-sm flex-col gap-1">
-          <span className="flex items-center gap-1.5 text-xs font-medium text-neutral-600">
-            <Mail className="size-3.5" aria-hidden /> Email pembeli
-          </span>
-          <Select
-            value={emailMode}
-            onChange={(e) => setEmailMode(e.target.value as CheckoutConfig["email_mode"])}
-          >
-            <option value="optional">Opsional (tampil, tidak wajib)</option>
-            <option value="required">Wajib diisi</option>
-            <option value="hidden">Sembunyikan</option>
-          </Select>
-          <span className="text-xs text-neutral-400">
-            Catatan: produk digital tetap butuh email untuk kirim link download.
-          </span>
-        </label>
+
+        <div className="mt-4 flex flex-col gap-2">
+          {/* Nama — required, locked */}
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2.5">
+            <div className="flex items-center gap-2.5">
+              <User className="size-4 text-neutral-400" aria-hidden />
+              <div>
+                <p className="text-sm font-medium text-neutral-900">Nama Lengkap</p>
+                <p className="text-xs text-neutral-500">Teks singkat</p>
+              </div>
+            </div>
+            <span className="rounded-full bg-neutral-200/70 px-2 py-0.5 text-[11px] font-medium text-neutral-600">
+              Wajib
+            </span>
+          </div>
+
+          {/* Nomor WhatsApp — required, locked */}
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2.5">
+            <div className="flex items-center gap-2.5">
+              <Phone className="size-4 text-neutral-400" aria-hidden />
+              <div>
+                <p className="text-sm font-medium text-neutral-900">Nomor WhatsApp</p>
+                <p className="text-xs text-neutral-500">Telepon</p>
+              </div>
+            </div>
+            <span className="rounded-full bg-neutral-200/70 px-2 py-0.5 text-[11px] font-medium text-neutral-600">
+              Wajib
+            </span>
+          </div>
+
+          {/* Email — configurable */}
+          <div className="flex flex-col gap-2 rounded-lg border border-neutral-200 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-2.5">
+              <Mail className="size-4 text-neutral-400" aria-hidden />
+              <div>
+                <p className="text-sm font-medium text-neutral-900">Email pembeli</p>
+                <p className="text-xs text-neutral-500">
+                  Untuk kirim info & link produk digital
+                </p>
+              </div>
+            </div>
+            <Select
+              value={emailMode}
+              onChange={(e) => setEmailMode(e.target.value as CheckoutConfig["email_mode"])}
+              className="sm:w-52"
+            >
+              <option value="optional">Opsional</option>
+              <option value="required">Wajib</option>
+              <option value="hidden">Sembunyikan</option>
+            </Select>
+          </div>
+        </div>
+
+        <p className="mt-3 text-xs text-neutral-400">
+          Catatan: produk digital tetap butuh email untuk kirim link download.
+        </p>
       </Card>
 
       {/* Custom fields */}
