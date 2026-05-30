@@ -1,9 +1,11 @@
 import type { Metadata, Viewport } from "next";
+import { Suspense } from "react";
 import { Plus_Jakarta_Sans } from "next/font/google";
 import { Toaster } from "sonner";
 import "./globals.css";
 import { BRAND, SITE_URL, organizationJsonLd, websiteJsonLd } from "@/lib/seo";
 import { GoogleAnalytics } from "@/components/analytics/google-analytics";
+import { TopProgressBar } from "@/components/layout/top-progress-bar";
 
 const plusJakarta = Plus_Jakarta_Sans({
   subsets: ["latin"],
@@ -121,6 +123,9 @@ export default function RootLayout({
           etc.). Mismatches on these attributes are harmless — without
           this, every dev session sees a noisy hydration warning. */}
       <body suppressHydrationWarning>
+        <Suspense fallback={null}>
+          <TopProgressBar />
+        </Suspense>
         <GoogleAnalytics />
         {children}
         {/* Global toast container — semua showError/showSuccess dari
