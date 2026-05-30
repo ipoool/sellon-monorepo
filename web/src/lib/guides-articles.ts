@@ -20,6 +20,138 @@ type Article = {
 
 export const articles: Article[] = [
   {
+    slug: "jualan-online-dan-toko-fisik-tanpa-stok-kacau",
+    category: "Operasional",
+    title: "Jualan online + toko fisik tanpa stok kacau",
+    excerpt:
+      "Punya toko online dan jualan offline sekaligus? Ini cara menjaga stok, harga, dan pelanggan tetap sinkron — tanpa hitung-hitung manual dua kali.",
+    readingTime: "6 menit",
+    sections: [
+      {
+        paragraphs: [
+          "Begitu kamu jualan di dua tempat — link katalog online dan kasir di toko — masalah klasik muncul: barang sudah laku di toko tapi di online masih kelihatan ready, lalu ada yang pesan padahal stok habis. Solusinya bukan kerja lebih keras, tapi satu sistem yang dipakai dua-duanya.",
+        ],
+      },
+      {
+        heading: "1. Satu sumber stok untuk semua kanal",
+        paragraphs: [
+          "Kunci omnichannel adalah satu angka stok yang dipakai bersama. Tiap penjualan — entah dari checkout online atau kasir di toko — mengurangi stok yang sama secara otomatis. Tidak ada lagi spreadsheet terpisah yang harus kamu samakan tiap malam.",
+        ],
+        callout: {
+          kind: "tip",
+          title: "Cek cepat",
+          body: "Kalau kamu masih menyamakan stok online dan offline secara manual, itu sinyal sistemmu belum benar-benar satu. Di SellOn, stok berkurang otomatis dari kedua sisi.",
+        },
+      },
+      {
+        heading: "2. Kasir (POS) dan toko online berbagi data",
+        paragraphs: [
+          "Pakai kasir POS untuk transaksi di tempat — cetak struk, hitung kembalian — sementara produk, harga, dan pelanggannya sama persis dengan toko online-mu. Update harga sekali, berlaku di mana-mana.",
+        ],
+      },
+      {
+        heading: "3. Kalau jual makanan, catat sampai bahan baku",
+        paragraphs: [
+          "Untuk F&B atau produk olahan, stok produk jadi saja tidak cukup. Pakai resep (BOM): tiap kopi yang terjual otomatis mengurangi stok biji, susu, dan gelas. Jadi kamu tahu kapan harus restock bahan sebelum kehabisan saat ramai.",
+        ],
+      },
+      {
+        heading: "4. Stok opname rutin, bukan pas kaget",
+        paragraphs: [
+          "Sebagus apa pun sistemnya, selisih fisik tetap terjadi (rusak, hilang, salah catat). Jadwalkan hitung fisik (stok opname) rutin — mingguan untuk barang cepat, bulanan untuk yang lambat — supaya angka di sistem selalu bisa dipercaya.",
+        ],
+      },
+    ],
+  },
+  {
+    slug: "kelola-kafe-resto-pesanan-rapi",
+    category: "F&B / Kuliner",
+    title: "Kelola kafe & resto: pesanan rapi dari meja sampai dapur",
+    excerpt:
+      "Antrean numpuk, pesanan ketuker, dapur bingung. Ini alur sederhana biar pelanggan pesan sendiri dan dapur tahu persis apa yang harus dibuat.",
+    readingTime: "6 menit",
+    sections: [
+      {
+        paragraphs: [
+          "Di kafe atau resto yang ramai, titik kacau hampir selalu sama: pelanggan nunggu dicatat, pesanan diteriakkan ke dapur, lalu lupa siapa pesan apa. Alurnya bisa dibikin jauh lebih rapi tanpa nambah pegawai.",
+        ],
+      },
+      {
+        heading: "1. Biarkan pelanggan pesan sendiri dari meja",
+        paragraphs: [
+          "Pasang QR di tiap meja. Pelanggan scan, pilih dine-in atau bawa pulang, dan pesan sendiri dari HP — tanpa harus dicatat manual. Pelayanmu fokus mengantar, bukan jadi mesin pencatat.",
+        ],
+        callout: {
+          kind: "tip",
+          title: "Kartu QR meja",
+          body: "Cetak kartu QR yang rapi (warna brand + 'Scan untuk pesan') dan taruh di tiap meja. Makin jelas, makin banyak yang pesan sendiri.",
+        },
+      },
+      {
+        heading: "2. Pesanan langsung tampil di layar dapur (KDS)",
+        paragraphs: [
+          "Begitu pelanggan submit, pesanan muncul di Kitchen Display — layar/tablet di dapur — lengkap dengan nomor antrian. Tidak ada kertas hilang, tidak ada salah dengar. Dapur tinggal kerjakan urut, geser status saat siap.",
+        ],
+      },
+      {
+        heading: "3. Bayar di kasir, pelanggan pantau antrian",
+        paragraphs: [
+          "Mode 'bayar di kasir' cocok untuk kebanyakan kafe: pelanggan pesan dulu, bayar di kasir. Nomor antrian bisa ditampilkan di layar dekat counter biar pelanggan tahu kapan pesanannya siap diambil.",
+        ],
+      },
+      {
+        heading: "4. Resep & stok bahan ikut otomatis",
+        paragraphs: [
+          "Hubungkan tiap menu dengan resepnya. Tiap porsi terjual mengurangi stok bahan otomatis — jadi kamu tahu kapan kopi atau susu mau habis sebelum kejadian, bukan setelah pelanggan kecewa.",
+        ],
+      },
+    ],
+  },
+  {
+    slug: "bikin-pelanggan-balik-lagi-membership-poin",
+    category: "Loyalitas Pelanggan",
+    title: "Bikin pelanggan balik lagi: membership & poin",
+    excerpt:
+      "Cari pelanggan baru itu mahal. Jauh lebih murah bikin yang sudah pernah beli untuk balik lagi — pakai tier membership dan poin yang gampang dimengerti.",
+    readingTime: "5 menit",
+    sections: [
+      {
+        paragraphs: [
+          "Banyak UMKM habis energi (dan budget) terus mencari pelanggan baru, padahal yang sudah pernah beli jauh lebih mungkin beli lagi — kalau diberi alasan. Loyalitas tidak harus ribet; cukup yang jelas dan terasa adil.",
+        ],
+      },
+      {
+        heading: "1. Tier membership yang naik otomatis",
+        paragraphs: [
+          "Atur tingkatan berdasarkan total belanja — misalnya Silver, Gold, Platinum. Pelanggan naik tier otomatis seiring belanja, dapat bonus poin lebih besar dan diskon member. Mereka punya alasan konkret untuk belanja lebih banyak di kamu, bukan di sebelah.",
+        ],
+        callout: {
+          kind: "tip",
+          title: "Jaga sederhana",
+          body: "Mulai dari 2–3 tier saja dengan syarat yang gampang dijelaskan dalam satu kalimat. Terlalu banyak aturan malah bikin pelanggan tidak peduli.",
+        },
+      },
+      {
+        heading: "2. Poin yang gampang ditukar",
+        paragraphs: [
+          "Poin baru terasa bernilai kalau gampang dimengerti dan ditukar. Buat aturan sederhana (mis. tiap Rp10.000 = 1 poin, poin bisa dipotong di transaksi berikutnya), dan biarkan kasir menukarnya langsung saat bayar — bukan proses ribet yang bikin pelanggan malas.",
+        ],
+      },
+      {
+        heading: "3. Diskon member otomatis di kasir",
+        paragraphs: [
+          "Saat pelanggan member transaksi, diskon dan bonus poinnya berlaku otomatis — kasir tidak perlu hitung manual atau ingat-ingat. Pakai kartu member ber-QR supaya identifikasi cepat, antrian tetap jalan.",
+        ],
+      },
+      {
+        heading: "4. Pakai data pelanggan untuk follow-up",
+        paragraphs: [
+          "Tiap pembeli otomatis masuk database dengan riwayat belanjanya. Manfaatkan: sapa pelanggan yang lama tidak belanja, kabari promo ke yang paling sering beli. Personal sedikit, dampaknya besar.",
+        ],
+      },
+    ],
+  },
+  {
     slug: "mulai-jualan-online-tanpa-modal-besar",
     category: "Pemula",
     title: "Cara mulai jualan online tanpa modal besar",

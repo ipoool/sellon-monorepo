@@ -6,6 +6,9 @@ import {
   MessagesSquare,
   Truck,
   HeartHandshake,
+  Store,
+  Utensils,
+  Award,
   Clock,
   ArrowRight,
   type LucideIcon,
@@ -23,7 +26,7 @@ import { pageMetadata } from "@/lib/seo";
 export const metadata = pageMetadata({
   title: "Panduan UMKM",
   description:
-    "Panduan praktis untuk UMKM Indonesia: dari foto produk, penetapan harga HPP, sampai pemasaran via WhatsApp dan strategi gratis ongkir.",
+    "Panduan praktis untuk UMKM Indonesia: dari foto produk & penetapan harga HPP, sampai kelola toko online + offline, operasional kafe (QR meja & dapur), dan loyalitas pelanggan.",
   path: "/guides",
 });
 
@@ -37,6 +40,21 @@ type Category = {
 // derived live from the data array so adding a new article auto-updates
 // the index.
 const categoryConfig: Record<string, Category> = {
+  Operasional: {
+    icon: Store,
+    title: "Operasional",
+    description: "Sinkron stok online & offline, kasir POS, dan bahan baku.",
+  },
+  "F&B / Kuliner": {
+    icon: Utensils,
+    title: "F&B / Kuliner",
+    description: "QR meja, layar dapur (KDS), resep, dan antrian pesanan.",
+  },
+  "Loyalitas Pelanggan": {
+    icon: Award,
+    title: "Loyalitas Pelanggan",
+    description: "Membership, poin, dan strategi bikin pelanggan balik lagi.",
+  },
   Pemula: {
     icon: GraduationCap,
     title: "Pemula",
