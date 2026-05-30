@@ -70,7 +70,7 @@ export function MembershipSettingsForm({ initial }: { initial: MembershipTier[] 
         }),
       });
       if (res.status === 402) {
-        showError("Fitur Membership hanya untuk plan Pro dan Bisnis");
+        showError("Fitur Membership hanya untuk paket Bisnis");
         return;
       }
       if (!res.ok) {

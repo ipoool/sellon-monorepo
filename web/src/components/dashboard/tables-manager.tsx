@@ -140,7 +140,7 @@ export function TablesManager({
         }),
       });
       if (res.status === 402) {
-        showError("Fitur dine-in hanya untuk plan Pro/Bisnis");
+        showError("Fitur dine-in hanya untuk paket Bisnis");
         return;
       }
       if (!res.ok) {
@@ -168,7 +168,7 @@ export function TablesManager({
         body: JSON.stringify({ label: newLabel.trim(), area: newArea.trim() }),
       });
       if (res.status === 402) {
-        showError("Fitur dine-in hanya untuk plan Pro/Bisnis");
+        showError("Fitur dine-in hanya untuk paket Bisnis");
         return;
       }
       if (!res.ok) {

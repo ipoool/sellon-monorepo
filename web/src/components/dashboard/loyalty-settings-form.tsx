@@ -41,7 +41,7 @@ export function LoyaltySettingsForm({ initial }: { initial: Config }) {
         }),
       });
       if (res.status === 402) {
-        showError("Fitur Loyalty hanya untuk plan Pro dan Bisnis");
+        showError("Fitur Loyalty hanya untuk paket Bisnis");
         return;
       }
       if (!res.ok) {

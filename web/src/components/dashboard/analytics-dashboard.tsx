@@ -374,7 +374,7 @@ export function AnalyticsDashboard({
         </Card>
       </div>
 
-      {/* ── Financial section (Pro/Bisnis) ─────────────────────────────────── */}
+      {/* ── Financial section (Bisnis-only) ────────────────────────────────── */}
       {isPaid && ov ? (
         <>
           <div className="flex items-center gap-2 pt-2">

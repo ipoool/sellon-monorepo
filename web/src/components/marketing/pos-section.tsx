@@ -90,7 +90,7 @@ export function PosSection() {
                 </Button>
               </Link>
               <p className="text-xs text-neutral-500">
-                Tersedia di plan Pro & Bisnis · Setup &lt;5 menit
+                Tersedia di plan Bisnis · Setup &lt;5 menit
               </p>
             </div>
           </div>

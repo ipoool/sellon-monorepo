@@ -104,7 +104,7 @@ export function CheckoutFieldsManager({ initial }: { initial: CheckoutConfig }) 
         }),
       });
       if (res.status === 402) {
-        showError("Fitur ini untuk plan Pro/Bisnis");
+        showError("Fitur ini hanya untuk paket Bisnis");
         return;
       }
       if (!res.ok) {
