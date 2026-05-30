@@ -75,6 +75,8 @@ export function AnalyticsAiButton({ from, to, isPaid }: Props) {
   // inside a breakpoint-`display:none` container. A native <dialog> nested in a
   // hidden ancestor won't render, so we portal it to <body> instead.
   const [mounted, setMounted] = useState(false);
+  // Standard SSR-safe portal mount guard — intentional one-shot setState.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => setMounted(true), []);
   const [state, setState] = useState<State>({ kind: "idle" });
   const [loadingIdx, setLoadingIdx] = useState(0);
@@ -82,8 +84,6 @@ export function AnalyticsAiButton({ from, to, isPaid }: Props) {
 
   useEffect(() => {
     if (state.kind !== "loading") return;
-    setLoadingIdx(0);
-    setFade(true);
     const interval = setInterval(() => {
       setFade(false);
       setTimeout(() => {
@@ -116,12 +116,13 @@ export function AnalyticsAiButton({ from, to, isPaid }: Props) {
     return () => {
       d.removeEventListener("cancel", onCancel);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function analyze() {
     // Close any prior stream before starting a new one.
     esRef.current?.close();
+    setLoadingIdx(0);
+    setFade(true);
     setState({ kind: "loading" });
 
     const params = new URLSearchParams({ from, to });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -93,12 +93,15 @@ export function AnalyticsDashboard({
   const router = useRouter();
   const [f, setF] = useState(from);
   const [t, setT] = useState(to);
-  // Keep the date inputs in sync when the applied range changes via a preset
-  // or navigation (props update without remount).
-  useEffect(() => {
+  // Sync the date inputs when the applied range changes (preset / navigation,
+  // props update without remount). Adjust-during-render pattern (React docs) —
+  // no effect, so no cascading-render lint warning.
+  const [appliedRange, setAppliedRange] = useState(`${from}|${to}`);
+  if (appliedRange !== `${from}|${to}`) {
+    setAppliedRange(`${from}|${to}`);
     setF(from);
     setT(to);
-  }, [from, to]);
+  }
   const [busy, setBusy] = useState(false);
   // New cash entry form.
   const [dir, setDir] = useState<"in" | "out">("out");
