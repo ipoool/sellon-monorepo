@@ -9,7 +9,7 @@ import { Footer } from "@/components/layout/footer";
 import { Badge } from "@/components/ui/badge";
 import { getMe } from "@/lib/server-auth";
 import { blogPosts, findPost, relatedPosts } from "@/lib/blog-posts";
-import { articleJsonLd, breadcrumbJsonLd, pageMetadata } from "@/lib/seo";
+import { articleJsonLd, breadcrumbJsonLd, canonical, pageMetadata } from "@/lib/seo";
 
 type Params = Promise<{ slug: string }>;
 
@@ -31,6 +31,7 @@ export async function generateMetadata({
     path: `/blog/${post.slug}`,
     ogType: "article",
     publishedTime: post.publishedAt,
+    image: post.coverImage ? canonical(post.coverImage) : undefined,
   });
 }
 
@@ -62,6 +63,7 @@ export default async function BlogPostPage({ params }: { params: Params }) {
               description: post.excerpt,
               path: `/blog/${post.slug}`,
               datePublished: post.publishedAt,
+              image: post.coverImage ? canonical(post.coverImage) : undefined,
             }),
           ),
         }}

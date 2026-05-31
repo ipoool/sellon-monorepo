@@ -7,6 +7,14 @@ import { Badge } from "@/components/ui/badge";
 import { GoogleSignInButton } from "@/components/auth/google-sign-in-button";
 import { MasukTestimonial } from "@/components/auth/login-testimonial";
 import { getMe } from "@/lib/server-auth";
+import { pageMetadata } from "@/lib/seo";
+
+export const metadata = pageMetadata({
+  title: "Masuk ke SellOn",
+  description: "Login ke dasbor SellOn untuk kelola toko online & offline kamu.",
+  path: "/login",
+  noindex: true,
+});
 
 const benefits = [
   {

@@ -17,6 +17,7 @@ import { StorefrontCatalog } from "@/components/storefront/storefront-catalog";
 import { StoreHoursPopup } from "@/components/storefront/store-hours-popup";
 import { waLink } from "@/lib/whatsapp";
 import { themeStyleForHue } from "@/lib/storefront-theme";
+import { pageMetadata } from "@/lib/seo";
 import type { OpenHours, DayOfWeek, LayoutConfig } from "@/lib/types";
 
 const apiBase =
@@ -122,11 +123,14 @@ export async function generateMetadata({
   const { slug } = await params;
   const data = await fetchStorefront(slug);
   if (!data) return { title: "Toko tidak ditemukan — SellOn" };
-  return {
+  return pageMetadata({
     title: `${data.store.name} — SellOn`,
     description:
-      data.store.description || `Katalog ${data.store.name} di SellOn.`,
-  };
+      data.store.description ||
+      `Belanja produk ${data.store.name}${data.store.city ? ` di ${data.store.city}` : ""} — katalog & checkout via SellOn.`,
+    path: `/${slug}`,
+    image: data.store.banner_url || data.store.logo_url || undefined,
+  });
 }
 
 export default async function StorefrontPage({

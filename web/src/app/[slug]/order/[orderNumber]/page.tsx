@@ -76,7 +76,10 @@ export async function generateMetadata({
   params: Promise<{ slug: string; orderNumber: string }>;
 }): Promise<Metadata> {
   const { orderNumber } = await params;
-  return { title: `Pesanan ${orderNumber} — SellOn` };
+  return {
+    title: `Pesanan ${orderNumber} — SellOn`,
+    robots: { index: false, follow: false },
+  };
 }
 
 const statusBadge: Record<string, { variant: "success" | "warning" | "default" | "brand"; label: string }> = {

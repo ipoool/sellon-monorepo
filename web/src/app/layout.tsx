@@ -42,7 +42,7 @@ export const metadata: Metadata = {
     // was removed — Next auto-serves any app/icon.* and browsers prefer SVG
     // over PNG, which would have shadowed this favicon.
     icon: [{ url: "/favicon.png", type: "image/png" }],
-    apple: [{ url: "/apple-touch-icon.png" }],
+    apple: [{ url: "/favicon.png" }],
   },
   openGraph: {
     type: "website",

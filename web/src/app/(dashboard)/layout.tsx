@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
+import type { Metadata } from "next";
 
 import { ImpersonationBanner } from "@/components/admin/impersonation-banner";
 import { BannersWrapper } from "@/components/dashboard/banners-wrapper";
@@ -12,6 +13,12 @@ import { SubscriptionExpiryBanner } from "@/components/dashboard/subscription-ex
 import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import type { DineInSettings, GatewayInfo, Store, Subscription } from "@/lib/types";
+
+// Seller dashboard is private — never index any /(dashboard) route (in
+// addition to the robots.txt disallow).
+export const metadata: Metadata = {
+  robots: { index: false, follow: false },
+};
 
 // Guards all routes under (dashboard): must be authed AND have a store.
 // First-time sellers (authed but no store yet) get sent to /setup.

@@ -10,7 +10,7 @@ export const SITE_URL =
 export const BRAND = {
   name: "SellOn",
   legalName: "SellOn Indonesia",
-  logo: `${SITE_URL}/logo.png`,
+  logo: `${SITE_URL}/sellon-logo.png`,
   twitter: "@sellon_id",
   locale: "id_ID",
   description:

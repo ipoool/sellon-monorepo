@@ -1,13 +1,18 @@
 import { redirect } from "next/navigation";
-import type { Metadata } from "next";
 
 import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import type { Store } from "@/lib/types";
 import { SetupWizard } from "@/components/onboarding/setup-wizard";
 import { ImpersonationBanner } from "@/components/admin/impersonation-banner";
+import { pageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = { title: "Setup Toko — SellOn" };
+export const metadata = pageMetadata({
+  title: "Setup Toko",
+  description: "Buat toko online kamu di SellOn dalam beberapa langkah sederhana.",
+  path: "/setup",
+  noindex: true,
+});
 
 export default async function SetupPage() {
   const me = await getMe();

@@ -63,6 +63,7 @@ export async function generateMetadata({
   const data = await fetchStorefront(slug);
   return {
     title: data ? `Checkout — ${data.store.name}` : "Checkout",
+    robots: { index: false, follow: false },
   };
 }
 

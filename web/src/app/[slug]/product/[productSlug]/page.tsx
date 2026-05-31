@@ -11,6 +11,7 @@ import { BuyerShareButton } from "@/components/storefront/buyer-share-button";
 import { ProductPhotoGallery } from "@/components/storefront/product-photo-gallery";
 import { formatRupiah } from "@/lib/format";
 import { themeStyleForHue } from "@/lib/storefront-theme";
+import { pageMetadata } from "@/lib/seo";
 import type { ModifierGroup } from "@/lib/types";
 
 const apiBase =
@@ -109,10 +110,15 @@ export async function generateMetadata({
   const { slug, productSlug } = await params;
   const data = await fetchProduct(slug, productSlug);
   if (!data) return { title: "Produk tidak ditemukan" };
-  return {
+  const desc =
+    (data.product.description || "").trim().slice(0, 160) ||
+    `${data.product.name} — beli di ${data.store.name} via SellOn.`;
+  return pageMetadata({
     title: `${data.product.name} — ${data.store.name}`,
-    description: data.product.description.slice(0, 160),
-  };
+    description: desc,
+    path: `/${slug}/product/${productSlug}`,
+    image: data.product.photo_urls?.[0] || undefined,
+  });
 }
 
 export default async function ProductDetailPage({

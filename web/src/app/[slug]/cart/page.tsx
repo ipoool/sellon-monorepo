@@ -47,6 +47,7 @@ export async function generateMetadata({
   const store = await fetchStore(slug);
   return {
     title: store ? `Keranjang — ${store.name}` : "Keranjang",
+    robots: { index: false, follow: false },
   };
 }
 
