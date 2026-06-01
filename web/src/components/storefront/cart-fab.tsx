@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { ShoppingCart } from "lucide-react";
 
 import { useCart } from "./cart-context";
+import { useKioskActive } from "./kiosk/kiosk-mode";
 
 type Props = {
   storeSlug: string;
@@ -12,10 +13,12 @@ type Props = {
 
 // Floating action button — fixed bottom-right of the viewport on storefront
 // catalog and product pages. Hidden on cart, checkout, and order pages where
-// it would be redundant or confusing.
+// it would be redundant or confusing — and on kiosk-layout storefronts where
+// the kiosk fast-checkout owns the bottom bar instead.
 export function CartFab({ storeSlug }: Props) {
   const { count } = useCart();
   const pathname = usePathname();
+  const kioskActive = useKioskActive();
 
   // Hide after the buyer moves past the catalog/product stage.
   const hidden =
@@ -23,7 +26,7 @@ export function CartFab({ storeSlug }: Props) {
     pathname.startsWith(`/${storeSlug}/checkout`) ||
     pathname.startsWith(`/${storeSlug}/order`);
 
-  if (count === 0 || hidden) return null;
+  if (count === 0 || hidden || kioskActive) return null;
 
   return (
     <Link

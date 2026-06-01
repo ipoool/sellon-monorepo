@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react";
 import { Utensils, ShoppingBag, Plus, Minus, Package, CheckCircle2, ArrowLeft, X } from "lucide-react";
 import { formatRupiah } from "@/lib/format";
+import { BannerCarousel } from "@/components/storefront/banner-carousel";
+import type { PublicBanner } from "@/lib/types";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
@@ -31,6 +33,7 @@ type Props = {
   tableLabel: string;
   paymentMode?: "cashier" | "online";
   products: Product[];
+  banners?: PublicBanner[];
 };
 
 type Step = "choose" | "menu" | "identity" | "done";
@@ -48,7 +51,7 @@ type CartLine = {
 const lineKey = (productId: string, variantId?: string) =>
   variantId ? `v:${variantId}` : `p:${productId}`;
 
-export function SelfOrderFlow({ slug, storeName, tableId, tableLabel, paymentMode = "cashier", products }: Props) {
+export function SelfOrderFlow({ slug, storeName, tableId, tableLabel, paymentMode = "cashier", products, banners = [] }: Props) {
   const [step, setStep] = useState<Step>("choose");
   const [serving, setServing] = useState<"dine_in" | "takeaway">("dine_in");
   const [cart, setCart] = useState<Record<string, CartLine>>({});
@@ -194,6 +197,9 @@ export function SelfOrderFlow({ slug, storeName, tableId, tableLabel, paymentMod
       {step === "menu" ? (
         <>
           <div className="flex-1 space-y-2 p-3 pb-28">
+            {banners.length > 0 && (
+              <BannerCarousel banners={banners} className="mb-3" />
+            )}
             {products.map((p) => {
               const variants = p.variants ?? [];
               // A variant product with no loaded variants can't be self-ordered.

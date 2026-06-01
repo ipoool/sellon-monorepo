@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 
 import { SelfOrderFlow } from "@/components/storefront/self-order-flow";
 import { themeStyleForHue } from "@/lib/storefront-theme";
+import type { PublicBanner } from "@/lib/types";
 
 export const metadata = { title: "Pesan — SellOn" };
 
@@ -51,10 +52,16 @@ export default async function TableOrderPage({ params }: { params: Promise<{ tok
     );
   }
 
-  const sfRes = await fetch(`${apiBase}/api/v1/storefront/${res.store_slug}`, { cache: "no-store" });
+  const [sfRes, bannersRes] = await Promise.all([
+    fetch(`${apiBase}/api/v1/storefront/${res.store_slug}`, { cache: "no-store" }),
+    fetch(`${apiBase}/api/v1/storefront/${res.store_slug}/banners`, { cache: "no-store" }),
+  ]);
   const sf = sfRes.ok ? await sfRes.json() : { store: {}, products: [] };
   const products: SelfOrderProduct[] = sf.products ?? [];
   const hue: number | undefined = sf.store?.theme_hue;
+  const tableBanners: PublicBanner[] = bannersRes.ok
+    ? (await bannersRes.json()).table_order ?? []
+    : [];
 
   return (
     <div style={hue != null ? themeStyleForHue(hue) : undefined}>
@@ -64,6 +71,7 @@ export default async function TableOrderPage({ params }: { params: Promise<{ tok
         tableId={res.table_id}
         tableLabel={res.table_label}
         paymentMode={res.payment_mode}
+        banners={tableBanners}
         products={products.map((p) => ({
           id: p.id,
           name: p.name,

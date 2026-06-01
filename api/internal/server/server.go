@@ -68,6 +68,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	kitchenRepo := repository.NewKitchenRepo(pool)
 	modifierRepo := repository.NewModifierRepo(pool)
 	bannerRepo := repository.NewBannerRepo(pool)
+	sellerBannerRepo := repository.NewSellerBannerRepo(pool)
 
 	googleVerifier := auth.NewGoogleVerifier(cfg.GoogleClientID)
 	jwtSvc := auth.NewJWTService(cfg.JWTSecret, cfg.JWTTTL)
@@ -102,10 +103,12 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	tableHandler := handler.NewTableHandler(tableRepo, stores, subscriptions, auditLogger, logger)
 	kdsHandler := handler.NewKDSHandler(kitchenRepo, stores, broker, logger)
 	bannerHandler := handler.NewBannerHandler(bannerRepo, storageClient, logger)
+	sellerBannerHandler := handler.NewSellerBannerHandler(sellerBannerRepo, stores, subscriptions, storageClient, logger)
 	paymentHandler := handler.NewPaymentHandler(gateways, stores, encryptor, midtransClient, auditLogger, logger, cfg.WebhookBaseURL)
 	dashHandler := handler.NewDashboardHandler(stores, products, orders, customers, logger)
 	storefrontHandler := handler.NewStorefrontHandler(
 		stores, products, variants, orders, bankAccounts, categories, promos, gateways,
+		encryptor, midtransClient,
 		subscriptions, planRepo, users, waTemplates, modifierRepo, tableRepo, broker, rajaOngkir, mailer, twilioClient,
 		storageClient, auditLogger, publicWebURL, logger,
 	)
@@ -177,9 +180,11 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 		// Public storefront (no auth)
 		r.Route("/storefront/{slug}", func(r chi.Router) {
 			r.Get("/", storefrontHandler.GetStore)
+			r.Get("/banners", sellerBannerHandler.PublicList)
 			r.Get("/products/{productSlug}", storefrontHandler.GetProduct)
 			r.Post("/orders", storefrontHandler.CreateOrder)
 			r.Get("/orders/{number}", storefrontHandler.GetOrder)
+			r.Post("/orders/{number}/payment-link", storefrontHandler.GeneratePaymentLink)
 			r.Post("/orders/{number}/mark-paid", storefrontHandler.MarkPaymentPending)
 			r.Post("/orders/{number}/payment-proof", storefrontHandler.UploadPaymentProof)
 			r.Post("/shipping/quote", storefrontHandler.ShippingQuote)
@@ -229,6 +234,14 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 					r.Delete("/custom-domain", domainHandler.Delete)
 					r.Get("/dinein", tableHandler.GetDineIn) // read-only: open so the dashboard can read kds_enabled
 					r.With(feat(feature.TableQR)).Put("/dinein", tableHandler.UpdateDineIn)
+
+					// Seller-owned promo banners (storefront / table_order / queue).
+					r.Route("/banners", func(r chi.Router) {
+						r.Get("/", sellerBannerHandler.List)
+						r.Post("/", sellerBannerHandler.Create)
+						r.Put("/{id}", sellerBannerHandler.Update)
+						r.Delete("/{id}", sellerBannerHandler.Delete)
+					})
 				})
 
 				r.Route("/products", func(r chi.Router) {

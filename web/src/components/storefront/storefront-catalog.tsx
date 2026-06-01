@@ -7,8 +7,10 @@ import { Search, Package, Star, Sparkles, RotateCcw, ShoppingBag, ShoppingCart, 
 
 import { formatRupiah } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { useOptionalCart } from "@/components/storefront/cart-context";
+import { useOptionalCart, cartItemKey } from "@/components/storefront/cart-context";
 import { KioskSplash } from "@/components/storefront/kiosk-splash";
+import { KioskCheckout, useKioskCheckout } from "@/components/storefront/kiosk/kiosk-checkout";
+import type { KioskModifierGroup, KioskVariant, PublicPayment } from "@/components/storefront/kiosk/types";
 import type { LayoutConfig } from "@/lib/types";
 
 type StorefrontProduct = {
@@ -22,6 +24,10 @@ type StorefrontProduct = {
   photo_urls: string[];
   is_featured: boolean;
   product_type?: "physical" | "digital";
+  // Populated by GetStore for the kiosk fast-checkout option sheet.
+  has_variants?: boolean;
+  variants?: KioskVariant[];
+  modifiers?: KioskModifierGroup[];
 };
 
 // Stock numbers are hidden for digital products (no real inventory) and
@@ -64,18 +70,36 @@ type Props = {
   // manual ke kolom-kolom yang masuk akal untuk layar HP.
   forceMobile?: boolean;
   layoutConfig?: LayoutConfig;
+  // Kiosk fast-checkout context (real storefront only — omitted in preview).
+  storeName?: string;
+  payment?: PublicPayment;
+  acceptingOrders?: boolean;
+  acceptingOrdersReason?: string;
 };
 
 export function StorefrontCatalog({
   storeSlug,
-  products,
+  products: allProducts,
   categories,
   layout = "grid",
   forceMobile = false,
   layoutConfig,
+  storeName,
+  payment,
+  acceptingOrders = true,
+  acceptingOrdersReason = "",
 }: Props) {
   const [query, setQuery] = useState("");
   const [activeCategoryId, setActiveCategoryId] = useState<string>("");
+
+  // Real kiosk storefront (not the dashboard layout preview) gets the in-page
+  // fast-checkout. Digital products are hidden from the kiosk — an anonymous
+  // in-store buyer has no email to receive a digital-delivery link.
+  const kioskMode = layout === "kiosk" && !forceMobile;
+  const products = useMemo(
+    () => (kioskMode ? allProducts.filter((p) => p.product_type !== "digital") : allProducts),
+    [allProducts, kioskMode],
+  );
 
   const kioskConfig = layoutConfig?.kiosk;
   const showSplash =
@@ -92,6 +116,11 @@ export function StorefrontCatalog({
     if (!showSplash) return;
     const dismissed =
       sessionStorage.getItem(`${storeSlug}:kiosk-splash-dismissed`) === "1";
+    // Post-hydration sync from sessionStorage: initial state is `true` on both
+    // server and client (to avoid a product-flash before the splash), then we
+    // clear it here if already dismissed. This intentional setState is why the
+    // rule is disabled.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (dismissed) setSplashActive(false);
   // showSplash and storeSlug are stable across renders; run once on mount.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -133,7 +162,7 @@ export function StorefrontCatalog({
     ? filtered.filter((p) => !p.is_featured)
     : filtered;
 
-  return (
+  const body = (
     <>
       {showSplash && splashActive && (
         <KioskSplash
@@ -334,11 +363,21 @@ export function StorefrontCatalog({
                   Produk Unggulan
                 </h3>
               </div>
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {featured.map((p) => (
-                  <ProductCard key={p.id} p={p} storeSlug={storeSlug} featured />
-                ))}
-              </div>
+              {layout === "kiosk" ? (
+                // In kiosk mode featured tiles must behave like the rest of the
+                // grid (inline add / option sheet), not link to a detail page.
+                <div className={cn("grid gap-3", forceMobile ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-2 lg:grid-cols-3")}>
+                  {featured.map((p) => (
+                    <ProductKioskCard key={p.id} p={p} storeSlug={storeSlug} />
+                  ))}
+                </div>
+              ) : (
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  {featured.map((p) => (
+                    <ProductCard key={p.id} p={p} storeSlug={storeSlug} featured />
+                  ))}
+                </div>
+              )}
             </section>
           )}
 
@@ -355,6 +394,21 @@ export function StorefrontCatalog({
       </>)}
     </>
   );
+
+  if (kioskMode) {
+    return (
+      <KioskCheckout
+        slug={storeSlug}
+        storeName={storeName}
+        payment={payment}
+        acceptingOrders={acceptingOrders}
+        acceptingOrdersReason={acceptingOrdersReason}
+      >
+        {body}
+      </KioskCheckout>
+    );
+  }
+  return body;
 }
 
 function ProductCard({
@@ -986,15 +1040,30 @@ function ProductFeedCard({
 // Berbeda dari layout lain — punya inline add-to-cart stepper tanpa pindah halaman.
 function ProductKioskCard({ p, storeSlug }: { p: StorefrontProduct; storeSlug: string }) {
   const cart = useOptionalCart();
+  const kiosk = useKioskCheckout();
+  // Variant/add-on products open the option sheet instead of adding directly.
+  const hasOptions =
+    (!!p.has_variants && (p.variants?.length ?? 0) > 0) ||
+    (p.modifiers?.length ?? 0) > 0;
 
-  const cartKey = `${p.id}:`;
-  const cartItem = cart?.items.find((x) => `${x.product_id}:${x.variant_id ?? ""}` === cartKey);
-  const qty = cartItem?.qty ?? 0;
+  // The composite cart key for this product's plain (no variant/option) line.
+  // Must match cart-context's itemKey exactly, else +/- silently no-op.
+  const simpleKey = cartItemKey({ product_id: p.id });
+  // For option products, the qty badge aggregates across all variant/add-on
+  // lines of this product; simple products track their single line.
+  const qty = hasOptions
+    ? (cart?.items.filter((x) => x.product_id === p.id).reduce((s, x) => s + x.qty, 0) ?? 0)
+    : (cart?.items.find((x) => cartItemKey(x) === simpleKey)?.qty ?? 0);
   const outOfStock = !shouldHideStock(p) && p.stock === 0;
   const atStockLimit = !shouldHideStock(p) && qty >= p.stock;
 
   function handleAdd() {
-    if (outOfStock || !cart) return;
+    if (outOfStock) return;
+    if (hasOptions) {
+      kiosk?.openOptions(p);
+      return;
+    }
+    if (!cart) return;
     cart.addItem({
       product_id: p.id,
       product_slug: p.slug,
@@ -1009,48 +1078,71 @@ function ProductKioskCard({ p, storeSlug }: { p: StorefrontProduct; storeSlug: s
 
   function handleDecrement() {
     if (!cart) return;
-    if (qty <= 1) cart.removeItem(cartKey);
-    else cart.setQty(cartKey, qty - 1);
+    if (qty <= 1) cart.removeItem(simpleKey);
+    else cart.setQty(simpleKey, qty - 1);
   }
 
   function handleIncrement() {
     if (!cart || atStockLimit) return;
-    cart.setQty(cartKey, qty + 1);
+    cart.setQty(simpleKey, qty + 1);
   }
+
+  const imageInner = (
+    <>
+      {p.photo_urls[0] ? (
+        <Image
+          src={p.photo_urls[0]}
+          alt={p.name}
+          fill
+          sizes="(max-width: 640px) 50vw, 33vw"
+          className="object-cover transition-transform group-hover:scale-105"
+        />
+      ) : (
+        <div className="flex size-full items-center justify-center">
+          <Package className="size-12 text-neutral-300" aria-hidden />
+        </div>
+      )}
+      {outOfStock && (
+        <div className="absolute inset-0 flex items-center justify-center bg-neutral-900/50">
+          <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-neutral-700">
+            Habis
+          </span>
+        </div>
+      )}
+      {qty > 0 && (
+        <span className="absolute right-2 top-2 flex size-5 items-center justify-center rounded-full bg-brand-600 text-[10px] font-bold text-white">
+          {qty}
+        </span>
+      )}
+    </>
+  );
+  const imageClass =
+    "group relative block aspect-square w-full overflow-hidden bg-neutral-100";
 
   return (
     <div className="flex flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-card transition-colors hover:border-brand-300">
-      {/* Foto — tap buka detail produk */}
-      <Link
-        href={`/${storeSlug}/product/${p.slug}`}
-        className="group relative block aspect-square overflow-hidden bg-neutral-100"
-      >
-        {p.photo_urls[0] ? (
-          <Image
-            src={p.photo_urls[0]}
-            alt={p.name}
-            fill
-            sizes="(max-width: 640px) 50vw, 33vw"
-            className="object-cover transition-transform group-hover:scale-105"
-          />
+      {/* Foto — di kiosk, hanya produk bervarian/ber-add-on yang bisa di-tap
+          (buka bottom-sheet opsi); produk tanpa opsi cukup lewat tombol CTA, jadi
+          fotonya non-interaktif. Di preview dashboard tetap link ke detail. */}
+      {kiosk ? (
+        hasOptions ? (
+          <button
+            type="button"
+            onClick={() => kiosk.openOptions(p)}
+            disabled={outOfStock}
+            aria-label={`Pilih opsi ${p.name}`}
+            className={cn(imageClass, "text-left disabled:cursor-not-allowed")}
+          >
+            {imageInner}
+          </button>
         ) : (
-          <div className="flex size-full items-center justify-center">
-            <Package className="size-12 text-neutral-300" aria-hidden />
-          </div>
-        )}
-        {outOfStock && (
-          <div className="absolute inset-0 flex items-center justify-center bg-neutral-900/50">
-            <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-neutral-700">
-              Habis
-            </span>
-          </div>
-        )}
-        {qty > 0 && (
-          <span className="absolute right-2 top-2 flex size-5 items-center justify-center rounded-full bg-brand-600 text-[10px] font-bold text-white">
-            {qty}
-          </span>
-        )}
-      </Link>
+          <div className={imageClass}>{imageInner}</div>
+        )
+      ) : (
+        <Link href={`/${storeSlug}/product/${p.slug}`} className={imageClass}>
+          {imageInner}
+        </Link>
+      )}
 
       {/* Info + cart control */}
       <div className="flex flex-1 flex-col gap-2 p-3">
@@ -1063,7 +1155,17 @@ function ProductKioskCard({ p, storeSlug }: { p: StorefrontProduct; storeSlug: s
           </p>
         </div>
 
-        {qty === 0 ? (
+        {hasOptions ? (
+          <button
+            type="button"
+            onClick={handleAdd}
+            disabled={outOfStock}
+            className="mt-auto flex h-9 w-full items-center justify-center gap-1.5 rounded-xl bg-brand-600 text-sm font-semibold text-white transition-colors hover:bg-brand-700 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Plus className="size-4" aria-hidden />
+            {qty > 0 ? "Tambah lagi" : "Pilih opsi"}
+          </button>
+        ) : qty === 0 ? (
           <button
             type="button"
             onClick={handleAdd}

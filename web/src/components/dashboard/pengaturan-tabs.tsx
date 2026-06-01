@@ -18,6 +18,7 @@ import {
   Printer,
   QrCode,
   ClipboardList,
+  ImageIcon,
   ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -28,6 +29,7 @@ import { useBisnisGate } from "@/components/dashboard/bisnis-gate";
 const tabs = [
   { label: "Profil Toko", href: "/settings/store", icon: Store },
   { label: "Storefront", href: "/settings/storefront", icon: Palette },
+  { label: "Banner", href: "/settings/banners", icon: ImageIcon },
   { label: "Domain", href: "/settings/domain", icon: Globe },
   { label: "Pembayaran", href: "/settings/payment", icon: CreditCard },
   { label: "Loyalty", href: "/settings/loyalty", icon: Sparkles, bisnisOnly: true },

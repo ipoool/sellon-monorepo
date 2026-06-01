@@ -64,6 +64,7 @@ func (r *KitchenRepo) ListActive(ctx context.Context, storeID uuid.UUID) ([]Kitc
 		FROM orders o
 		LEFT JOIN restaurant_tables t ON t.id = o.table_id
 		WHERE o.store_id = $1 AND o.kitchen_status IN ('queued','preparing','ready')
+		  AND o.status NOT IN ('cancelled','completed')
 		ORDER BY o.created_at ASC
 		LIMIT 100
 	`, storeID)
@@ -157,15 +158,26 @@ func (r *KitchenRepo) Bump(ctx context.Context, storeID, orderID uuid.UUID) (str
 	return next, nil
 }
 
-// ListQueue returns today's preparing + ready orders for the public queue board.
+// ListQueue returns today's orders for the public queue board. Includes
+// preparing + ready (the KDS-driven dine-in flow) AND freshly-created kiosk
+// orders still at 'queued' — so a kiosk pickup number appears on the board the
+// instant it's ordered, even for stores that don't run a KDS (the kiosk layout
+// is Pro-tier; the KDS bump is Bisnis-tier). Completed/cancelled orders are
+// excluded so the seller can clear a kiosk number from the board by marking the
+// order done on the regular Orders page (available to every tier).
 func (r *KitchenRepo) ListQueue(ctx context.Context, storeID uuid.UUID) ([]KitchenOrder, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT o.id, o.order_number, o.queue_number, o.kitchen_status, o.serving_type,
 		       COALESCE(t.label, ''), '', o.created_at
 		FROM orders o
 		LEFT JOIN restaurant_tables t ON t.id = o.table_id
-		WHERE o.store_id = $1 AND o.kitchen_status IN ('preparing','ready')
+		WHERE o.store_id = $1
 		  AND o.queue_date = (now() AT TIME ZONE 'Asia/Jakarta')::date
+		  AND o.status NOT IN ('cancelled','completed')
+		  AND (
+		        o.kitchen_status IN ('preparing','ready')
+		        OR (o.kitchen_status = 'queued' AND o.source = 'kiosk')
+		      )
 		ORDER BY o.queue_number ASC
 		LIMIT 100
 	`, storeID)

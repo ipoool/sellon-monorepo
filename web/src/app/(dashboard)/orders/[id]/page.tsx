@@ -26,6 +26,7 @@ import { OrderSellerNotes } from "@/components/dashboard/order-seller-notes";
 import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import { formatRupiah, formatDateTimeID } from "@/lib/format";
+import { paymentMethodLabel } from "@/lib/payment";
 import type { OrderDetail, PaymentGatewayStatus, Store } from "@/lib/types";
 
 export const metadata = { title: "Detail Pesanan — SellOn" };
@@ -326,7 +327,7 @@ export default async function OrderDetailPage({
                   Metode
                 </dt>
                 <dd className="mt-0.5 text-neutral-900">
-                  {order.payment_method || "—"}
+                  {paymentMethodLabel(order.payment_method)}
                 </dd>
               </div>
               <div>

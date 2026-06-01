@@ -16,9 +16,11 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/sellon/sellon/api/internal/audit"
+	"github.com/sellon/sellon/api/internal/auth"
 	"github.com/sellon/sellon/api/internal/email"
 	"github.com/sellon/sellon/api/internal/events"
 	"github.com/sellon/sellon/api/internal/notify"
+	"github.com/sellon/sellon/api/internal/payments"
 	"github.com/sellon/sellon/api/internal/pkg/response"
 	"github.com/sellon/sellon/api/internal/repository"
 	"github.com/sellon/sellon/api/internal/shipping"
@@ -35,6 +37,8 @@ type StorefrontHandler struct {
 	categories  *repository.CategoryRepo
 	promos      *repository.PromoRepo
 	gateways    *repository.PaymentRepo
+	encryptor   *auth.AESEncryptor
+	midtrans    *payments.MidtransClient
 	subs        *repository.SubscriptionRepo
 	plans       *repository.PlanRepo
 	users       *repository.UserRepo
@@ -55,6 +59,7 @@ func NewStorefrontHandler(
 	s *repository.StoreRepo, p *repository.ProductRepo, v *repository.VariantRepo,
 	o *repository.OrderRepo, b *repository.BankAccountRepo, c *repository.CategoryRepo,
 	pr *repository.PromoRepo, gw *repository.PaymentRepo,
+	enc *auth.AESEncryptor, mt *payments.MidtransClient,
 	subs *repository.SubscriptionRepo,
 	plans *repository.PlanRepo,
 	users *repository.UserRepo,
@@ -72,7 +77,8 @@ func NewStorefrontHandler(
 ) *StorefrontHandler {
 	return &StorefrontHandler{
 		stores: s, products: p, variants: v, orders: o, banks: b,
-		categories:  c, promos: pr, gateways: gw, subs: subs,
+		categories: c, promos: pr, gateways: gw,
+		encryptor: enc, midtrans: mt, subs: subs,
 		plans:       plans,
 		users:       users,
 		waTemplates: waTemplates,
@@ -183,6 +189,24 @@ type publicProductDTO struct {
 	// with has_variants=true, so the self-order kiosk can pick a variant inline
 	// without a per-product detail fetch. Omitted for non-variant products.
 	Variants []publicVariantDTO `json:"variants,omitempty"`
+	// Modifiers is populated by the list endpoint (GetStore) so the kiosk fast
+	// checkout can offer add-ons/toppings inline without a detail fetch.
+	// Omitted for products with no modifier groups.
+	Modifiers []publicModifierGroupDTO `json:"modifiers,omitempty"`
+}
+
+type publicModifierOptionDTO struct {
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	PriceDeltaCents int64  `json:"price_delta_cents"`
+}
+
+type publicModifierGroupDTO struct {
+	ID         string                    `json:"id"`
+	Name       string                    `json:"name"`
+	Selection  string                    `json:"selection"` // "single" | "multi"
+	IsRequired bool                      `json:"is_required"`
+	Options    []publicModifierOptionDTO `json:"options"`
 }
 
 type publicCategoryDTO struct {
@@ -374,6 +398,8 @@ func paymentMethodLabel(code string) string {
 		return "Transfer manual"
 	case "qris":
 		return "QRIS"
+	case "cashier", "on_cashier":
+		return "Bayar di kasir"
 	case "cod":
 		return "Bayar di tempat (COD)"
 	case "":
@@ -431,6 +457,14 @@ func (h *StorefrontHandler) GetStore(w http.ResponseWriter, r *http.Request) {
 	}
 	variantsByProduct, _ := h.variants.ListByProducts(r.Context(), variantIDs)
 
+	// Batch-load modifier groups for all products so the kiosk fast checkout
+	// can offer add-ons inline. One query, no N+1.
+	allProductIDs := make([]uuid.UUID, 0, len(prods))
+	for i := range prods {
+		allProductIDs = append(allProductIDs, prods[i].ID)
+	}
+	modifiersByProduct, _ := h.modifiers.GetForProducts(r.Context(), allProductIDs)
+
 	out := make([]publicProductDTO, 0, len(prods))
 	for i := range prods {
 		dto := toPublicProduct(&prods[i])
@@ -443,6 +477,22 @@ func (h *StorefrontHandler) GetStore(w http.ResponseWriter, r *http.Request) {
 				})
 			}
 			dto.Variants = vOut
+		}
+		if groups := modifiersByProduct[prods[i].ID]; len(groups) > 0 {
+			mOut := make([]publicModifierGroupDTO, 0, len(groups))
+			for _, g := range groups {
+				opts := make([]publicModifierOptionDTO, 0, len(g.Options))
+				for _, o := range g.Options {
+					opts = append(opts, publicModifierOptionDTO{
+						ID: o.ID.String(), Name: o.Name, PriceDeltaCents: o.PriceDeltaCents,
+					})
+				}
+				mOut = append(mOut, publicModifierGroupDTO{
+					ID: g.ID.String(), Name: g.Name, Selection: g.Selection,
+					IsRequired: g.IsRequired, Options: opts,
+				})
+			}
+			dto.Modifiers = mOut
 		}
 		out = append(out, dto)
 	}
@@ -558,7 +608,11 @@ type createOrderReq struct {
 	ServingType     string         `json:"serving_type"`
 	ShippingCents   int64          `json:"shipping_cents"`
 	PromoCode       string         `json:"promo_code"`
-	Items           []orderItemReq `json:"items"`
+	// Source marks the order channel. "kiosk" enables the anonymous in-store
+	// flow (no name/WA required, always gets a pickup number). Empty/other
+	// values are treated as the normal "storefront" channel.
+	Source string         `json:"source"`
+	Items  []orderItemReq `json:"items"`
 	// CustomFields: seller-configured field values keyed by field key.
 	CustomFields map[string]any `json:"custom_fields"`
 }
@@ -654,7 +708,16 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 	}
 	req.CustomerName = strings.TrimSpace(req.CustomerName)
 	req.CustomerWA = strings.TrimSpace(req.CustomerWA)
-	if req.CustomerName == "" || req.CustomerWA == "" {
+	isKiosk := strings.EqualFold(strings.TrimSpace(req.Source), "kiosk")
+	if isKiosk {
+		// Anonymous in-store kiosk order: no identity collected. Label the
+		// order and drop the WA so the repo skips the customer upsert
+		// (customer_id = NULL — no junk shared customer row).
+		if req.CustomerName == "" {
+			req.CustomerName = "Pelanggan Kiosk"
+		}
+		req.CustomerWA = ""
+	} else if req.CustomerName == "" || req.CustomerWA == "" {
 		response.Error(w, http.StatusBadRequest, "nama dan nomor WhatsApp wajib")
 		return
 	}
@@ -856,6 +919,14 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	// Kiosk orders always get a pickup number and surface on the public queue
+	// board, independent of table / KDS configuration.
+	orderSource := "storefront"
+	if isKiosk {
+		orderSource = "kiosk"
+		dineKitchen = "queued"
+	}
+
 	order, err := h.orders.Create(r.Context(), repository.CreateOrderInput{
 		StoreID:         store.ID,
 		CustomerName:    req.CustomerName,
@@ -875,6 +946,7 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 		ServingType:     dineServing,
 		KitchenStatus:   dineKitchen,
 		CustomFields:    customFieldsJSON,
+		Source:          orderSource,
 	})
 	if err != nil {
 		// Concurrency: another buyer just bought the last unit between our
@@ -1455,6 +1527,104 @@ func (h *StorefrontHandler) UploadPaymentProof(w http.ResponseWriter, r *http.Re
 		"ok":         true,
 		"proof_url":  res.PublicURL,
 		"proof_note": note,
+	})
+}
+
+// POST /api/v1/storefront/{slug}/orders/{number}/payment-link
+// PUBLIC, slug-scoped. Generates (or reuses) a Midtrans Snap redirect URL for
+// a storefront order so the buyer can pay online — used by the kiosk flow to
+// show a Snap QR on-screen. Mirrors OrderHandler.GeneratePaymentLink but is
+// unauthenticated: the amount is server-computed from the order and Snap reuse
+// is idempotent per order_id, so there's no buyer-tamperable input.
+func (h *StorefrontHandler) GeneratePaymentLink(w http.ResponseWriter, r *http.Request) {
+	slug := chi.URLParam(r, "slug")
+	orderNum := chi.URLParam(r, "number")
+
+	store, err := h.stores.FindBySlug(r.Context(), slug)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "toko tidak ditemukan")
+		return
+	}
+	order, err := h.orders.FindByOrderNumber(r.Context(), store.ID, orderNum)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "pesanan tidak ditemukan")
+		return
+	}
+	if order.Status == "cancelled" {
+		response.Error(w, http.StatusBadRequest, "pesanan dibatalkan")
+		return
+	}
+	if order.PaymentStatus == "paid" {
+		response.Error(w, http.StatusBadRequest, "pesanan sudah lunas")
+		return
+	}
+
+	gateway, err := h.gateways.Get(r.Context(), store.ID, "midtrans")
+	if errors.Is(err, repository.ErrGatewayNotFound) {
+		response.Error(w, http.StatusBadRequest, "pembayaran online belum tersedia")
+		return
+	}
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	var encryptedKey []byte
+	if gateway.IsSandbox {
+		encryptedKey = gateway.ServerKeySandboxEncrypted
+	} else {
+		encryptedKey = gateway.ServerKeyProdEncrypted
+	}
+	if len(encryptedKey) == 0 || h.encryptor == nil || h.midtrans == nil {
+		response.Error(w, http.StatusBadRequest, "pembayaran online belum tersedia")
+		return
+	}
+	keyBytes, err := h.encryptor.Decrypt(encryptedKey)
+	if err != nil {
+		h.logger.Error("storefront decrypt server key", "err", err)
+		response.Error(w, http.StatusInternalServerError, "gagal menyiapkan pembayaran")
+		return
+	}
+
+	items, err := h.orders.ListItems(r.Context(), order.ID)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	snapItems := make([]payments.SnapItem, 0, len(items))
+	for _, it := range items {
+		snapItems = append(snapItems, payments.SnapItem{
+			ID: it.ID.String(), Name: it.ProductName,
+			Price: it.UnitPriceCents, Quantity: it.Quantity,
+		})
+	}
+	if order.ShippingCents > 0 {
+		snapItems = append(snapItems, payments.SnapItem{
+			ID: "shipping", Name: "Ongkos Kirim",
+			Price: order.ShippingCents, Quantity: 1,
+		})
+	}
+
+	snap, err := h.midtrans.CreateSnapTransaction(payments.SnapTransactionInput{
+		OrderID:       order.OrderNumber,
+		GrossAmount:   order.TotalCents,
+		CustomerName:  order.CustomerName,
+		CustomerPhone: order.CustomerWhatsApp,
+		Items:         snapItems,
+		IsSandbox:     gateway.IsSandbox,
+		ServerKey:     string(keyBytes),
+	})
+	if err != nil {
+		h.logger.Warn("storefront midtrans snap failed", "err", err, "order", order.OrderNumber)
+		response.Error(w, http.StatusBadGateway, "gagal menyiapkan pembayaran")
+		return
+	}
+	if err := h.orders.SetPaymentURL(r.Context(), store.ID, order.ID, snap.RedirectURL); err != nil {
+		h.logger.Error("storefront save payment url", "err", err)
+	}
+
+	response.JSON(w, http.StatusOK, map[string]any{
+		"payment_url": snap.RedirectURL,
+		"token":       snap.Token,
 	})
 }
 

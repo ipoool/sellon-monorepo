@@ -5,6 +5,7 @@ import { PrintBar } from "@/components/dashboard/print-bar";
 import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import { formatRupiah, formatDateTimeID } from "@/lib/format";
+import { paymentMethodLabel } from "@/lib/payment";
 import type { OrderDetail, Store } from "@/lib/types";
 
 export const metadata = { title: "Cetak Nota - SellOn" };
@@ -120,7 +121,7 @@ export default async function NotaCetakPage({
                 <div className="flex justify-between">
                   <dt className="text-neutral-600">Metode</dt>
                   <dd className="font-medium text-neutral-900">
-                    {order.payment_method}
+                    {paymentMethodLabel(order.payment_method)}
                   </dd>
                 </div>
               )}

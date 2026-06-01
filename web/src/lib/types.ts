@@ -239,6 +239,37 @@ export type PlatformBanner = {
   created_at: string;
 };
 
+// Where a seller-owned banner is rendered.
+export type SellerBannerPlacement = "storefront" | "table_order" | "customer_queue";
+
+// Seller-owned promo banner, scoped per store + placement. Managed at
+// /settings/banners; surfaced publicly via the storefront banners endpoint.
+export type SellerBanner = {
+  id: string;
+  placement: SellerBannerPlacement;
+  image_url: string;
+  title: string;
+  link_url: string;
+  is_active: boolean;
+  sort_order: number;
+  created_at: string;
+};
+
+// Trimmed public shape returned by GET /storefront/{slug}/banners.
+export type PublicBanner = {
+  id: string;
+  image_url: string;
+  link_url: string;
+  title: string;
+};
+
+// Active banners grouped by placement (public storefront consumption).
+export type StorefrontBanners = {
+  storefront: PublicBanner[];
+  table_order: PublicBanner[];
+  customer_queue: PublicBanner[];
+};
+
 export type RestaurantTable = {
   id: string;
   label: string;

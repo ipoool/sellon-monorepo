@@ -157,6 +157,30 @@ func (r *SubscriptionRepo) GetOrCreate(ctx context.Context, storeID uuid.UUID) (
 	return scanSubscription(row)
 }
 
+// GetPlan returns just the effective plan tier for a store WITHOUT the
+// write-on-read side effects of GetOrCreate (no lazy-expiry UPDATE, no default
+// INSERT) — safe for public hot paths like the storefront banner read. It
+// mirrors GetOrCreate's lazy-expiry semantics in-memory: an unrenewed paid
+// period reads as "free". Returns "free" when no subscription row exists yet.
+func (r *SubscriptionRepo) GetPlan(ctx context.Context, storeID uuid.UUID) (string, error) {
+	var plan, status string
+	var periodEnd *time.Time
+	err := r.pool.QueryRow(ctx,
+		`SELECT plan, status, current_period_end FROM subscriptions WHERE store_id = $1`,
+		storeID).Scan(&plan, &status, &periodEnd)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "free", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if (plan == "pro" || plan == "bisnis") && periodEnd != nil &&
+		periodEnd.Before(time.Now()) && status != "expired" {
+		return "free", nil
+	}
+	return plan, nil
+}
+
 // Upgrade switches the subscription to the given plan ('pro' or 'bisnis')
 // and extends the period by `months` from the later of (now, current_period_end).
 // If an invoice is supplied, it's recorded as paid in the same transaction.

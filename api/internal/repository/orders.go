@@ -110,6 +110,9 @@ type CreateOrderInput struct {
 	// seller-configured custom checkout fields the buyer filled in. nil/empty
 	// stores an empty array.
 	CustomFields []byte
+	// Source is the order channel ("storefront" | "pos" | "whatsapp" |
+	// "kiosk"). Empty defaults to "storefront".
+	Source string
 }
 
 type OrderRepo struct {
@@ -791,23 +794,30 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 	}
 	total := subtotal + in.ShippingCents - discount
 
-	// Upsert customer (by store_id + whatsapp_number); atomic order/spend increment.
-	var customerID uuid.UUID
-	if err := tx.QueryRow(ctx, `
-		INSERT INTO customers (store_id, name, whatsapp_number, address, city,
-		                       total_orders, total_spent_cents, last_order_at)
-		VALUES ($1, $2, $3, $4, $5, 1, $6, now())
-		ON CONFLICT (store_id, whatsapp_number) DO UPDATE SET
-		    name = EXCLUDED.name,
-		    address = EXCLUDED.address,
-		    city = EXCLUDED.city,
-		    total_orders = customers.total_orders + 1,
-		    total_spent_cents = customers.total_spent_cents + EXCLUDED.total_spent_cents,
-		    last_order_at = now(),
-		    updated_at = now()
-		RETURNING id
-	`, in.StoreID, in.CustomerName, in.CustomerWA, in.CustomerAddress, in.CustomerCity, total).Scan(&customerID); err != nil {
-		return nil, fmt.Errorf("upsert customer: %w", err)
+	// Upsert customer (by store_id + whatsapp_number); atomic order/spend
+	// increment. Anonymous orders (no WA — e.g. kiosk in-store self-order)
+	// skip this entirely and store customer_id = NULL, so they don't all
+	// collide into one junk shared customer row on (store_id, "").
+	var customerID *uuid.UUID
+	if in.CustomerWA != "" {
+		var cid uuid.UUID
+		if err := tx.QueryRow(ctx, `
+			INSERT INTO customers (store_id, name, whatsapp_number, address, city,
+			                       total_orders, total_spent_cents, last_order_at)
+			VALUES ($1, $2, $3, $4, $5, 1, $6, now())
+			ON CONFLICT (store_id, whatsapp_number) DO UPDATE SET
+			    name = EXCLUDED.name,
+			    address = EXCLUDED.address,
+			    city = EXCLUDED.city,
+			    total_orders = customers.total_orders + 1,
+			    total_spent_cents = customers.total_spent_cents + EXCLUDED.total_spent_cents,
+			    last_order_at = now(),
+			    updated_at = now()
+			RETURNING id
+		`, in.StoreID, in.CustomerName, in.CustomerWA, in.CustomerAddress, in.CustomerCity, total).Scan(&cid); err != nil {
+			return nil, fmt.Errorf("upsert customer: %w", err)
+		}
+		customerID = &cid
 	}
 
 	// Generate human-friendly order number: SO-YYYYMMDD-XXXX (4-char random)
@@ -839,6 +849,11 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 		customFields = []byte("[]")
 	}
 
+	source := in.Source
+	if source == "" {
+		source = "storefront"
+	}
+
 	var o Order
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO orders (store_id, customer_id, order_number, status, payment_status,
@@ -847,9 +862,9 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 		                   courier, customer_name, customer_whatsapp, customer_email,
 		                   customer_address, customer_city,
 		                   notes, table_id, serving_type, kitchen_status, queue_number, queue_date,
-		                   custom_fields)
+		                   custom_fields, source)
 		VALUES ($1, $2, $3, 'pending', 'unpaid', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
-		        $18, $19, $20, $21, $22::date, $23::jsonb)
+		        $18, $19, $20, $21, $22::date, $23::jsonb, $24)
 		RETURNING id, store_id, order_number, status, payment_status, payment_method,
 		          subtotal_cents, shipping_cents, discount_cents, promo_code, total_cents, courier,
 		          customer_name, customer_whatsapp, customer_email, customer_city, created_at,
@@ -861,7 +876,7 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 		in.Courier, in.CustomerName, in.CustomerWA, in.CustomerEmail,
 		in.CustomerAddress, in.CustomerCity, in.Notes,
 		in.TableID, servingType, kitchenStatus, queueNum, queueDate,
-		string(customFields),
+		string(customFields), source,
 	).Scan(
 		&o.ID, &o.StoreID, &o.OrderNumber, &o.Status, &o.PaymentStatus, &o.PaymentMethod,
 		&o.SubtotalCents, &o.ShippingCents, &o.DiscountCents, &o.PromoCode, &o.TotalCents, &o.Courier,

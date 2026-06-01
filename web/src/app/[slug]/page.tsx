@@ -15,10 +15,11 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
 import { StorefrontCatalog } from "@/components/storefront/storefront-catalog";
 import { StoreHoursPopup } from "@/components/storefront/store-hours-popup";
+import { BannerCarousel } from "@/components/storefront/banner-carousel";
 import { waLink } from "@/lib/whatsapp";
 import { themeStyleForHue } from "@/lib/storefront-theme";
 import { pageMetadata } from "@/lib/seo";
-import type { OpenHours, DayOfWeek, LayoutConfig } from "@/lib/types";
+import type { OpenHours, DayOfWeek, LayoutConfig, PublicBanner } from "@/lib/types";
 
 const apiBase =
   process.env.API_INTERNAL_URL ||
@@ -49,11 +50,24 @@ type StorefrontStore = {
     | "showcase"
     | "compact"
     | "magazine"
-    | "feed";
+    | "feed"
+    | "kiosk"
+    | "katalog"
+    | "poster";
   show_hours_public?: boolean;
   show_social_public?: boolean;
   footer_text?: string;
   layout_config?: LayoutConfig;
+};
+
+type StorefrontVariant = { id: string; name: string; price_cents: number; stock: number };
+type StorefrontModifierOption = { id: string; name: string; price_delta_cents: number };
+type StorefrontModifierGroup = {
+  id: string;
+  name: string;
+  selection: "single" | "multi";
+  is_required: boolean;
+  options: StorefrontModifierOption[];
 };
 
 type StorefrontProduct = {
@@ -67,14 +81,26 @@ type StorefrontProduct = {
   photo_urls: string[];
   is_featured: boolean;
   product_type?: "physical" | "digital";
+  has_variants?: boolean;
+  variants?: StorefrontVariant[];
+  modifiers?: StorefrontModifierGroup[];
 };
 
 type StorefrontCategory = { id: string; name: string };
+
+type StorefrontPayment = {
+  has_midtrans: boolean;
+  midtrans_methods?: string[];
+  has_manual_bank: boolean;
+  has_qris_static: boolean;
+  bank_count: number;
+};
 
 type StorefrontData = {
   store: StorefrontStore;
   products: StorefrontProduct[];
   categories: StorefrontCategory[];
+  payment?: StorefrontPayment;
 };
 
 function todayKey(): DayOfWeek {
@@ -115,6 +141,19 @@ async function fetchStorefront(slug: string): Promise<StorefrontData | null> {
   }
 }
 
+async function fetchStorefrontBanners(slug: string): Promise<PublicBanner[]> {
+  try {
+    const res = await fetch(`${apiBase}/api/v1/storefront/${slug}/banners`, {
+      cache: "no-store",
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as { storefront?: PublicBanner[] };
+    return data.storefront ?? [];
+  } catch {
+    return [];
+  }
+}
+
 export async function generateMetadata({
   params,
 }: {
@@ -139,9 +178,12 @@ export default async function StorefrontPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const data = await fetchStorefront(slug);
+  const [data, banners] = await Promise.all([
+    fetchStorefront(slug),
+    fetchStorefrontBanners(slug),
+  ]);
   if (!data) notFound();
-  const { store, products, categories = [] } = data;
+  const { store, products, categories = [], payment } = data;
 
   const todayHours = store.open_hours?.[todayKey()];
   const openNow = store.is_open && isCurrentlyOpen(store.open_hours) !== false;
@@ -279,6 +321,9 @@ export default async function StorefrontPage({
 
       <main className="py-8 lg:py-12">
         <Container>
+          {banners.length > 0 && (
+            <BannerCarousel banners={banners} className="mb-6" />
+          )}
           {orderLimitReached ? (
             <div className="mb-6 flex flex-col gap-3 rounded-xl border border-warning/40 bg-warning/10 p-4 text-sm text-neutral-800 sm:flex-row sm:items-center sm:justify-between">
               <p>
@@ -318,6 +363,10 @@ export default async function StorefrontPage({
             categories={categories}
             layout={store.product_layout ?? "grid"}
             layoutConfig={store.layout_config}
+            storeName={store.name}
+            payment={payment}
+            acceptingOrders={store.accepting_orders}
+            acceptingOrdersReason={store.accepting_orders_reason}
           />
         </Container>
       </main>
