@@ -343,6 +343,11 @@ func (h *ReportsHandler) Export(w http.ResponseWriter, r *http.Request) {
 		setRow(sheet1, 9, []any{"Order Berbayar", headline.PaidOrders})
 		setRow(sheet1, 10, []any{"Order Dibatalkan", headline.OrdersCancelled})
 		setRow(sheet1, 11, []any{"Avg. Order Value", rupiah(headline.AOVCents)})
+		// Total PPN collected on paid, non-cancelled orders. For exclusive tax
+		// this sits on top of revenue; for inclusive tax it's the portion of
+		// revenue that is PPN. Either way it's the total tax figure sellers
+		// need for their own reporting.
+		setRow(sheet1, 12, []any{"Total PPN (Lunas)", rupiah(headline.TaxCents)})
 	}
 	_ = f.SetColWidth(sheet1, "A", "A", 28)
 	_ = f.SetColWidth(sheet1, "B", "B", 22)
@@ -350,7 +355,7 @@ func (h *ReportsHandler) Export(w http.ResponseWriter, r *http.Request) {
 	// ─── Sheet 2: Detail Pesanan ───────────────────────────────────────────
 	sheet2 := "Detail Pesanan"
 	_, _ = f.NewSheet(sheet2)
-	cols2 := []string{"No. Pesanan", "Tanggal", "Nama Pembeli", "WhatsApp", "Kota", "Kurir", "Metode Bayar", "Subtotal", "Ongkir", "Diskon", "Total", "Status Pesanan", "Status Bayar", "Catatan Pembeli"}
+	cols2 := []string{"No. Pesanan", "Tanggal", "Nama Pembeli", "WhatsApp", "Kota", "Kurir", "Metode Bayar", "Subtotal", "Ongkir", "Diskon", "PPN", "Total", "Status Pesanan", "Status Bayar", "Catatan Pembeli"}
 	setHeader(sheet2, 1, cols2)
 	for i, o := range orderList {
 		if o.CreatedAt.Before(since) {
@@ -367,13 +372,14 @@ func (h *ReportsHandler) Export(w http.ResponseWriter, r *http.Request) {
 			rupiah(o.SubtotalCents),
 			rupiah(o.ShippingCents),
 			rupiah(o.DiscountCents),
+			rupiah(o.TaxCents),
 			rupiah(o.TotalCents),
 			o.Status,
 			o.PaymentStatus,
 			o.Notes,
 		})
 	}
-	widths2 := []float64{18, 14, 22, 16, 14, 14, 18, 14, 12, 12, 14, 16, 14, 30}
+	widths2 := []float64{18, 14, 22, 16, 14, 14, 18, 14, 12, 12, 12, 14, 16, 14, 30}
 	for i, w2 := range widths2 {
 		col, _ := excelize.ColumnNumberToName(i + 1)
 		_ = f.SetColWidth(sheet2, col, col, w2)

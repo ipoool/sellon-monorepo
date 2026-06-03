@@ -4,13 +4,14 @@ import { useMemo, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { Package, Trash2, Loader2, MoreHorizontal, Percent } from "lucide-react";
-import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ShareProductButton } from "@/components/dashboard/share-product-button";
+// note: per-row navigation lives inside ProductRowActions; no direct Link here.
 import { ProductRowActions } from "@/components/dashboard/product-row-actions";
+import { AnchoredMenu } from "@/components/ui/anchored-menu";
 import {
   TABLE_PAGE_SIZE,
   TablePagination,
@@ -50,7 +51,6 @@ export function ProductsTable({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showConfirm, setShowConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [openPopover, setOpenPopover] = useState<string | null>(null);
 
   // Memoized helpers for "select all on this page" checkbox state.
   // `all` is checked when every row on this page is selected, else
@@ -231,29 +231,20 @@ export function ProductsTable({
                   </p>
                 </div>
                 {/* Mobile: popover berisi semua actions */}
-                <div className="relative shrink-0">
-                  <button
-                    type="button"
-                    aria-label="Aksi produk"
-                    onClick={() => setOpenPopover(openPopover === p.id ? null : p.id)}
-                    className="inline-flex size-8 items-center justify-center rounded-md border border-neutral-200 text-neutral-600 transition-colors hover:border-brand-500 hover:bg-brand-50 hover:text-brand-700"
+                <div className="shrink-0">
+                  <AnchoredMenu
+                    ariaLabel="Aksi produk"
+                    icon={<MoreHorizontal className="size-4" aria-hidden />}
+                    buttonClassName="inline-flex size-8 items-center justify-center rounded-md border border-neutral-200 text-neutral-600 transition-colors hover:border-brand-500 hover:bg-brand-50 hover:text-brand-700"
                   >
-                    <MoreHorizontal className="size-4" aria-hidden />
-                  </button>
-                  {openPopover === p.id && (
-                    <>
-                      {/* Backdrop to close */}
-                      <div
-                        className="fixed inset-0 z-10"
-                        onClick={() => setOpenPopover(null)}
-                      />
-                      <div className="absolute right-0 top-9 z-20 min-w-[11rem] rounded-xl border border-neutral-200 bg-white py-1 shadow-popout">
+                    {(close) => (
+                      <>
                         <ShareProductButton
                           storeSlug={storeSlug}
                           productSlug={p.slug}
                           productName={p.name}
                           asMenu
-                          onAction={() => setOpenPopover(null)}
+                          onAction={close}
                         />
                         <ProductRowActions
                           productId={p.id}
@@ -261,11 +252,11 @@ export function ProductsTable({
                           storeSlug={storeSlug}
                           quotaFull={quotaFull}
                           asMenu
-                          onMenuClose={() => setOpenPopover(null)}
+                          onMenuClose={close}
                         />
-                      </div>
-                    </>
-                  )}
+                      </>
+                    )}
+                  </AnchoredMenu>
                 </div>
               </div>
             );
@@ -359,25 +350,20 @@ export function ProductsTable({
                   </td>
                   <td className="px-5 py-3 text-neutral-600">{formatDateID(p.created_at)}</td>
                   <td className="px-5 py-3">
-                    <div className="relative flex justify-end">
-                      <button
-                        type="button"
-                        aria-label="Aksi produk"
-                        onClick={() => setOpenPopover(openPopover === p.id ? null : p.id)}
-                        className="inline-flex size-8 items-center justify-center rounded-md border border-neutral-200 text-neutral-600 transition-colors hover:border-brand-500 hover:bg-brand-50 hover:text-brand-700"
+                    <div className="flex justify-end">
+                      <AnchoredMenu
+                        ariaLabel="Aksi produk"
+                        icon={<MoreHorizontal className="size-4" aria-hidden />}
+                        buttonClassName="inline-flex size-8 items-center justify-center rounded-md border border-neutral-200 text-neutral-600 transition-colors hover:border-brand-500 hover:bg-brand-50 hover:text-brand-700"
                       >
-                        <MoreHorizontal className="size-4" aria-hidden />
-                      </button>
-                      {openPopover === p.id && (
-                        <>
-                          <div className="fixed inset-0 z-10" onClick={() => setOpenPopover(null)} />
-                          <div className="absolute right-0 top-9 z-20 min-w-[11rem] rounded-xl border border-neutral-200 bg-white py-1 shadow-popout">
+                        {(close) => (
+                          <>
                             <ShareProductButton
                               storeSlug={storeSlug}
                               productSlug={p.slug}
                               productName={p.name}
                               asMenu
-                              onAction={() => setOpenPopover(null)}
+                              onAction={close}
                             />
                             <ProductRowActions
                               productId={p.id}
@@ -385,11 +371,11 @@ export function ProductsTable({
                               storeSlug={storeSlug}
                               quotaFull={quotaFull}
                               asMenu
-                              onMenuClose={() => setOpenPopover(null)}
+                              onMenuClose={close}
                             />
-                          </div>
-                        </>
-                      )}
+                          </>
+                        )}
+                      </AnchoredMenu>
                     </div>
                   </td>
                 </tr>

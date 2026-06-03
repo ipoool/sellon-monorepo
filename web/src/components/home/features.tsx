@@ -18,6 +18,7 @@ import {
   Utensils,
   Award,
   Boxes,
+  Target,
   ChevronLeft,
   ChevronRight,
   Check,
@@ -165,6 +166,17 @@ const features: Feature[] = [
       "Atur minimum belanja & batas pemakaian kode",
       "Tentukan tanggal mulai dan kapan promo habis",
       "Pembeli tinggal masukkan kode pas checkout",
+    ],
+  },
+  {
+    icon: Target,
+    title: "Iklan Meta (Facebook & Instagram)",
+    tagline:
+      "Hubungkan Meta Pixel & katalog produk — iklan FB/IG kamu jadi tahu siapa yang benar-benar beli, lalu dipakai cari pembeli serupa.",
+    bullets: [
+      "Pixel + Conversions API (CAPI) lacak konversi server-side",
+      "Katalog produk auto-sync ke Meta Commerce Manager",
+      "Retargeting otomatis ke pengunjung yang belum checkout",
     ],
   },
   {

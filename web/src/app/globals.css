@@ -125,6 +125,19 @@
   }
 }
 
+/* Soft fade-in for content that swaps in client-side (e.g. the rotating Meta
+   ad mockup on the landing page) so the variant change reads as intentional. */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* === LANDING BRAND CYCLE ===
    Animasi warna brand di halaman landing. Hue OKLCH bergerak dari
    hijau (160) → oranye (30) → grayscale (chroma 0) → kembali hijau.

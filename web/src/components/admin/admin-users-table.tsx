@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition, useEffect, useRef, type FormEvent } from "react";
+import { createPortal } from "react-dom";
 import { showError, showSuccess } from "@/lib/toast";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -328,7 +329,7 @@ export function AdminUsersTable({ initial, initialQuery }: Props) {
                               <MoreHorizontal className="size-4" aria-hidden />
                             </button>
 
-                            {menuPos?.id === u.id && (
+                            {menuPos?.id === u.id && createPortal(
                               <div
                                 ref={menuRef}
                                 style={{ position: "fixed", top: menuPos.top, right: menuPos.right }}
@@ -388,7 +389,8 @@ export function AdminUsersTable({ initial, initialQuery }: Props) {
                                     Hapus
                                   </button>
                                 )}
-                              </div>
+                              </div>,
+                              document.body,
                             )}
                           </>
                         )}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { MoreHorizontal, ExternalLink, UserCog } from "lucide-react";
 
@@ -47,7 +48,7 @@ export function StoreRowActions({ slug, ownerUserId }: Props) {
         <MoreHorizontal className="size-4" aria-hidden />
       </button>
 
-      {pos && (
+      {pos && createPortal(
         <div
           ref={menuRef}
           style={{ position: "fixed", top: pos.top, right: pos.right }}
@@ -71,7 +72,8 @@ export function StoreRowActions({ slug, ownerUserId }: Props) {
             <UserCog className="size-4 shrink-0 text-neutral-400" aria-hidden />
             Pemilik
           </Link>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );

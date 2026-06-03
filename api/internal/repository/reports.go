@@ -25,6 +25,7 @@ type Headline struct {
 	RevenueCents    int64 // paid orders only
 	PaidOrders      int
 	AOVCents        int64 // average order value of paid orders
+	TaxCents        int64 // total PPN/tax collected on paid, non-cancelled orders
 }
 
 func (r *ReportsRepo) Headline(ctx context.Context, storeID uuid.UUID, since, until time.Time) (*Headline, error) {
@@ -38,10 +39,11 @@ func (r *ReportsRepo) Headline(ctx context.Context, storeID uuid.UUID, since, un
 		    COUNT(*) AS orders_total,
 		    COUNT(*) FILTER (WHERE status = 'cancelled') AS orders_cancelled,
 		    COALESCE(SUM(total_cents) FILTER (WHERE payment_status = 'paid' AND status <> 'cancelled'), 0) AS revenue_cents,
-		    COUNT(*) FILTER (WHERE payment_status = 'paid' AND status <> 'cancelled') AS paid_orders
+		    COUNT(*) FILTER (WHERE payment_status = 'paid' AND status <> 'cancelled') AS paid_orders,
+		    COALESCE(SUM(tax_cents) FILTER (WHERE payment_status = 'paid' AND status <> 'cancelled'), 0) AS tax_cents
 		FROM orders
 		WHERE store_id = $1 AND created_at >= $2 AND created_at < $3
-	`, storeID, since, until).Scan(&h.OrdersTotal, &h.OrdersCancelled, &h.RevenueCents, &h.PaidOrders)
+	`, storeID, since, until).Scan(&h.OrdersTotal, &h.OrdersCancelled, &h.RevenueCents, &h.PaidOrders, &h.TaxCents)
 	if err != nil {
 		return nil, err
 	}
