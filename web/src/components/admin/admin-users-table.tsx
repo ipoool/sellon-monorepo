@@ -105,7 +105,10 @@ export function AdminUsersTable({ initial, initialQuery }: Props) {
   const [pending, startTransition] = useTransition();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogState>(null);
-  const [menuPos, setMenuPos] = useState<{ id: string; top: number; right: number } | null>(null);
+  // top OR bottom is set, never both: `top` anchors below the trigger, `bottom`
+  // anchors above it (used when there isn't room below — the menu would
+  // otherwise be cut off by the viewport edge for the last rows).
+  const [menuPos, setMenuPos] = useState<{ id: string; top?: number; bottom?: number; right: number } | null>(null);
   const [grantSubUser, setGrantSubUser] = useState<AdminUser | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const triggerRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
@@ -131,7 +134,16 @@ export function AdminUsersTable({ initial, initialQuery }: Props) {
     const btn = triggerRefs.current.get(id);
     const rect = btn?.getBoundingClientRect();
     if (!rect) return;
-    setMenuPos({ id, top: rect.bottom + 4, right: window.innerWidth - rect.right });
+    const right = window.innerWidth - rect.right;
+    // Menu has up to ~5 items; flip above the trigger when it wouldn't fit
+    // below the viewport. Using `bottom` to anchor upward handles the variable
+    // item count without measuring the rendered height.
+    const estHeight = 230;
+    if (rect.bottom + estHeight > window.innerHeight - 8) {
+      setMenuPos({ id, bottom: window.innerHeight - rect.top + 4, right });
+    } else {
+      setMenuPos({ id, top: rect.bottom + 4, right });
+    }
   }
 
   function onSearch(e: FormEvent<HTMLFormElement>) {
@@ -332,7 +344,7 @@ export function AdminUsersTable({ initial, initialQuery }: Props) {
                             {menuPos?.id === u.id && createPortal(
                               <div
                                 ref={menuRef}
-                                style={{ position: "fixed", top: menuPos.top, right: menuPos.right }}
+                                style={{ position: "fixed", top: menuPos.top, bottom: menuPos.bottom, right: menuPos.right }}
                                 className="z-50 w-44 rounded-lg border border-neutral-200 bg-white py-1 shadow-card">
                                 <Link
                                   href={`/platform/users/${u.id}`}

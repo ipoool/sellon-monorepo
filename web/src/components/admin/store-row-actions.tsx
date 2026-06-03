@@ -11,7 +11,9 @@ type Props = {
 };
 
 export function StoreRowActions({ slug, ownerUserId }: Props) {
-  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
+  // top OR bottom is set: `top` opens below the trigger, `bottom` opens above
+  // it (when there isn't room below, so the menu isn't cut off by the viewport).
+  const [pos, setPos] = useState<{ top?: number; bottom?: number; right: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -33,7 +35,14 @@ export function StoreRowActions({ slug, ownerUserId }: Props) {
     if (pos) { setPos(null); return; }
     const rect = btnRef.current?.getBoundingClientRect();
     if (!rect) return;
-    setPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+    const right = window.innerWidth - rect.right;
+    // 2-item menu (~110px); flip above the trigger if it wouldn't fit below.
+    const estHeight = 110;
+    if (rect.bottom + estHeight > window.innerHeight - 8) {
+      setPos({ bottom: window.innerHeight - rect.top + 4, right });
+    } else {
+      setPos({ top: rect.bottom + 4, right });
+    }
   }
 
   return (
@@ -51,7 +60,7 @@ export function StoreRowActions({ slug, ownerUserId }: Props) {
       {pos && createPortal(
         <div
           ref={menuRef}
-          style={{ position: "fixed", top: pos.top, right: pos.right }}
+          style={{ position: "fixed", top: pos.top, bottom: pos.bottom, right: pos.right }}
           className="z-50 w-40 rounded-lg border border-neutral-200 bg-white py-1 shadow-card"
         >
           <a
