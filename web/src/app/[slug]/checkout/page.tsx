@@ -23,6 +23,10 @@ type StoreSummary = {
   accepting_orders_reason?: "" | "store_closed" | "order_limit";
   theme_hue: number;
   checkout_config?: CheckoutConfig;
+  tax_enabled?: boolean;
+  tax_bps?: number;
+  tax_inclusive?: boolean;
+  tax_label?: string;
 };
 
 type StorefrontPayment = {
@@ -105,6 +109,10 @@ export default async function CheckoutPage({ params }: { params: Params }) {
               acceptingOrdersReason={store.accepting_orders_reason ?? ""}
               payment={payment}
               checkoutConfig={store.checkout_config}
+              taxEnabled={store.tax_enabled ?? false}
+              taxBps={store.tax_bps ?? 0}
+              taxInclusive={store.tax_inclusive ?? false}
+              taxLabel={store.tax_label || "Pajak"}
             />
           </div>
         </Container>

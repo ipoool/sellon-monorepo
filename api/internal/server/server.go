@@ -18,6 +18,7 @@ import (
 	"github.com/sellon/sellon/api/internal/email"
 	"github.com/sellon/sellon/api/internal/events"
 	"github.com/sellon/sellon/api/internal/fulfillment"
+	"github.com/sellon/sellon/api/internal/meta"
 	"github.com/sellon/sellon/api/internal/handler"
 	"github.com/sellon/sellon/api/internal/middleware"
 	"github.com/sellon/sellon/api/internal/notify"
@@ -53,6 +54,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	adminRepo := repository.NewAdminRepo(pool)
 	planRepo := repository.NewPlanRepo(pool)
 	downloadTokens := repository.NewDownloadTokenRepo(pool)
+	downloadLogs := repository.NewDownloadLogRepo(pool)
 	bulkJobs := repository.NewBulkJobRepo(pool)
 	resellerRepo := repository.NewResellerRepo(pool)
 	posRepo := repository.NewPOSRepo(pool)
@@ -88,12 +90,17 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	// WebOrigin (raw, comma-separated) tetap dipakai oleh CORS middleware.
 	publicWebURL := cfg.PrimaryWebOrigin()
 	fulfiller := fulfillment.New(orders, stores, downloadTokens, mailer, publicWebURL, logger)
+	// Meta (Facebook) Conversions API — server-side Purchase events at the paid
+	// chokepoint. No-op per store until the seller enables Meta in settings.
+	metaClient := meta.NewClient(logger)
+	metaNotifier := meta.NewNotifier(stores, orders, subscriptions, encryptor, metaClient, publicWebURL, logger)
 
 	authHandler := handler.NewAuthHandler(users, memberships, googleVerifier, jwtSvc, mailer, publicWebURL, logger, cfg.IsProd())
 	storeHandler := handler.NewStoreHandler(stores, subscriptions, auditLogger, logger)
+	metaHandler := handler.NewMetaHandler(stores, encryptor, cfg.WebhookBaseURL, auditLogger, logger)
 	productHandler := handler.NewProductHandler(products, variants, stores, subscriptions, planRepo, bulkJobs, productDiscounts, modifierRepo, materialRepo, categories, storageClient, broker, auditLogger, logger)
 	uploadHandler := handler.NewUploadHandler(stores, storageClient, logger)
-	orderHandler := handler.NewOrderHandler(orders, stores, gateways, encryptor, midtransClient, auditLogger, fulfiller, mailer, publicWebURL, logger)
+	orderHandler := handler.NewOrderHandler(orders, stores, gateways, encryptor, midtransClient, auditLogger, fulfiller, metaNotifier, mailer, publicWebURL, logger)
 	customerHandler := handler.NewCustomerHandler(customers, orders, stores, auditLogger, logger)
 	materialHandler := handler.NewMaterialHandler(materialRepo, stores, subscriptions, auditLogger, logger)
 	membershipHandler := handler.NewMembershipHandler(membershipTierRepo, stores, subscriptions, auditLogger, logger)
@@ -115,7 +122,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	orderStreamHandler := handler.NewOrderStreamHandler(stores, broker, logger)
 	citiesHandler := handler.NewCitiesHandler(rajaOngkir, logger)
 	waTemplateHandler := handler.NewWATemplateHandler(waTemplates, stores, auditLogger, logger)
-	webhookHandler := handler.NewWebhookHandler(gateways, orders, stores, users, encryptor, mailer, fulfiller, publicWebURL, logger)
+	webhookHandler := handler.NewWebhookHandler(gateways, orders, stores, users, encryptor, mailer, fulfiller, metaNotifier, publicWebURL, logger)
 	bankAccountHandler := handler.NewBankAccountHandler(bankAccounts, stores, auditLogger, logger)
 	categoryHandler := handler.NewCategoryHandler(categories, stores, auditLogger, logger)
 	promoHandler := handler.NewPromoHandler(promos, stores, subscriptions, planRepo, auditLogger, logger)
@@ -127,7 +134,8 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	)
 	plansHandler := handler.NewPlansHandler(planRepo, logger)
 	adminPlansHandler := handler.NewAdminPlansHandler(planRepo, platformAuditRepo, users, logger)
-	downloadHandler := handler.NewDownloadHandler(downloadTokens, logger)
+	downloadHandler := handler.NewDownloadHandler(downloadTokens, downloadLogs, logger)
+	digitalDownloadHandler := handler.NewDigitalDownloadHandler(downloadTokens, downloadLogs, stores, logger)
 	platformWebhookHandler := handler.NewPlatformWebhookHandler(
 		subscriptions, cfg.PlatformMidtransServerKey, auditLogger, logger,
 	)
@@ -181,6 +189,8 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 		r.Route("/storefront/{slug}", func(r chi.Router) {
 			r.Get("/", storefrontHandler.GetStore)
 			r.Get("/banners", sellerBannerHandler.PublicList)
+			// Meta catalog feed (Facebook Commerce Manager crawls this).
+			r.Get("/meta-feed.xml", storefrontHandler.MetaFeed)
 			r.Get("/products/{productSlug}", storefrontHandler.GetProduct)
 			r.Post("/orders", storefrontHandler.CreateOrder)
 			r.Get("/orders/{number}", storefrontHandler.GetOrder)
@@ -227,6 +237,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 					r.Post("/", storeHandler.Create)
 					r.Put("/", storeHandler.Update)
 					r.Put("/shipping", storeHandler.UpdateShipping)
+					r.Put("/tax", storeHandler.UpdateTax)
 					r.Put("/storefront", storeHandler.UpdateStorefront)
 					r.With(feat(feature.CheckoutFields)).Put("/checkout-config", storeHandler.UpdateCheckoutConfig)
 					r.Put("/custom-domain", domainHandler.Set)
@@ -242,6 +253,11 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 						r.Put("/{id}", sellerBannerHandler.Update)
 						r.Delete("/{id}", sellerBannerHandler.Delete)
 					})
+
+					// Meta (Facebook) integration config. GET open so the settings
+					// page can render the upsell/state; PUT gated to Bisnis.
+					r.Get("/meta", metaHandler.Get)
+					r.With(feat(feature.MetaIntegration)).Put("/meta", metaHandler.Save)
 				})
 
 				r.Route("/products", func(r chi.Router) {
@@ -341,8 +357,19 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 					r.Get("/export", customerHandler.ExportCSV)
 					r.Get("/{id}", customerHandler.Get)
 					r.Put("/{id}", customerHandler.Update)
+					// Digital download history for this customer (audit card).
+					r.Get("/{id}/downloads", digitalDownloadHandler.ByCustomer)
 					// Member codes are part of the membership program (Bisnis-only).
 					r.With(feat(feature.Membership)).Post("/{id}/member-code", customerHandler.GenerateMemberCode)
+				})
+
+				// Digital download audit (all tiers). Lists each download link
+				// with usage + share signal; per-link revoke for leaked links.
+				r.Route("/digital-downloads", func(r chi.Router) {
+					r.Get("/", digitalDownloadHandler.List)
+					r.Get("/{tokenId}/logs", digitalDownloadHandler.Logs)
+					r.Post("/{tokenId}/revoke", digitalDownloadHandler.Revoke)
+					r.Post("/{tokenId}/unrevoke", digitalDownloadHandler.Unrevoke)
 				})
 
 				r.Route("/payments/midtrans", func(r chi.Router) {

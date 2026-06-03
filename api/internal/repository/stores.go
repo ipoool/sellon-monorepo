@@ -49,8 +49,20 @@ type Store struct {
 	DomainVerifiedAt           *time.Time // nullable
 	LayoutConfig               []byte     // raw JSONB per-layout config
 	CheckoutConfig             []byte     // raw JSONB checkout fields config
-	CreatedAt                  time.Time
-	UpdatedAt                  time.Time
+	// Meta (Facebook) integration — opt-in per seller. Token stored encrypted.
+	MetaEnabled        bool
+	MetaPixelID        string
+	MetaAccessTokenEnc []byte // AES-GCM encrypted CAPI token; nil when unset
+	MetaTestEventCode  string
+	MetaCatalogID      string
+	// Tax / PPN config. TaxBps = basis points (1100 = 11%). TaxInclusive:
+	// false = added on top (customer-borne); true = already in the price.
+	TaxEnabled   bool
+	TaxBps       int
+	TaxInclusive bool
+	TaxLabel     string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 type StoreRepo struct {
@@ -75,6 +87,8 @@ const storeColumns = `id, owner_id, slug, name, description, logo_url, banner_ur
 	segment_baru_name, segment_reguler_name, segment_loyal_name, segment_vip_name,
 	custom_domain, domain_status, domain_verified_at,
 	layout_config, checkout_config,
+	meta_enabled, meta_pixel_id, meta_access_token_encrypted, meta_test_event_code, meta_catalog_id,
+	tax_enabled, tax_bps, tax_inclusive, tax_label,
 	created_at, updated_at`
 
 // Same column list but qualified with the `s.` alias, used in joins.
@@ -88,6 +102,8 @@ const qualifiedStoreColumns = `s.id, s.owner_id, s.slug, s.name, s.description,
 	s.segment_baru_name, s.segment_reguler_name, s.segment_loyal_name, s.segment_vip_name,
 	s.custom_domain, s.domain_status, s.domain_verified_at,
 	s.layout_config, s.checkout_config,
+	s.meta_enabled, s.meta_pixel_id, s.meta_access_token_encrypted, s.meta_test_event_code, s.meta_catalog_id,
+	s.tax_enabled, s.tax_bps, s.tax_inclusive, s.tax_label,
 	s.created_at, s.updated_at`
 
 func scanStore(row pgx.Row, s *Store) error {
@@ -104,8 +120,55 @@ func scanStore(row pgx.Row, s *Store) error {
 		&s.SegmentBaruName, &s.SegmentRegulerName, &s.SegmentLoyalName, &s.SegmentVipName,
 		&s.CustomDomain, &s.DomainStatus, &s.DomainVerifiedAt,
 		&s.LayoutConfig, &s.CheckoutConfig,
+		&s.MetaEnabled, &s.MetaPixelID, &s.MetaAccessTokenEnc, &s.MetaTestEventCode, &s.MetaCatalogID,
+		&s.TaxEnabled, &s.TaxBps, &s.TaxInclusive, &s.TaxLabel,
 		&s.CreatedAt, &s.UpdatedAt,
 	)
+}
+
+// UpdateTaxInput configures per-store tax/PPN.
+type UpdateTaxInput struct {
+	Enabled   bool
+	Bps       int
+	Inclusive bool
+	Label     string
+}
+
+func (r *StoreRepo) UpdateTax(ctx context.Context, storeID uuid.UUID, in UpdateTaxInput) (*Store, error) {
+	q := `
+		UPDATE stores
+		SET tax_enabled = $2, tax_bps = $3, tax_inclusive = $4, tax_label = $5, updated_at = now()
+		WHERE id = $1
+		RETURNING ` + storeColumns
+	var s Store
+	if err := scanStore(r.pool.QueryRow(ctx, q, storeID, in.Enabled, in.Bps, in.Inclusive, in.Label), &s); err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+// UpdateMetaInput configures the per-seller Meta integration. AccessTokenEnc
+// nil means "keep existing" (so editing other fields doesn't wipe the token).
+type UpdateMetaInput struct {
+	Enabled        bool
+	PixelID        string
+	AccessTokenEnc []byte
+	TestEventCode  string
+	CatalogID      string
+}
+
+func (r *StoreRepo) UpdateMeta(ctx context.Context, storeID uuid.UUID, in UpdateMetaInput) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE stores SET
+			meta_enabled = $2,
+			meta_pixel_id = $3,
+			meta_test_event_code = $4,
+			meta_catalog_id = $5,
+			meta_access_token_encrypted = COALESCE($6, meta_access_token_encrypted),
+			updated_at = now()
+		WHERE id = $1`,
+		storeID, in.Enabled, in.PixelID, in.TestEventCode, in.CatalogID, in.AccessTokenEnc)
+	return err
 }
 
 

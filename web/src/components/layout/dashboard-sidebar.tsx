@@ -27,6 +27,7 @@ import {
   Boxes,
   ChefHat,
   GalleryHorizontalEnd,
+  Download,
   type LucideIcon,
 } from "lucide-react";
 
@@ -53,6 +54,7 @@ const primaryNav: NavItem[] = [
   { label: "Dasbor", href: "/dashboard", icon: LayoutDashboard },
   { label: "Pesanan", href: "/orders", icon: ShoppingBag },
   { label: "Produk", href: "/products", icon: Package },
+  { label: "Unduhan Digital", href: "/digital-downloads", icon: Download },
   { label: "Bahan Baku", href: "/materials", icon: Boxes },
   { label: "Pembelian", href: "/purchase-orders", icon: Truck },
   { label: "Pelanggan", href: "/customers", icon: Users },

@@ -740,6 +740,12 @@ func (h *POSHandler) CreatePOSOrder(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	// Tax config snapshot (applied to POS sales too, per store setting).
+	taxBps, taxInclusive := 0, false
+	if posStore, serr := h.stores.FindByID(r.Context(), c.storeID); serr == nil && posStore.TaxEnabled {
+		taxBps, taxInclusive = posStore.TaxBps, posStore.TaxInclusive
+	}
+
 	result, err := h.pos.CreatePOSOrder(r.Context(), repository.CreatePOSOrderInput{
 		StoreID:       c.storeID,
 		SessionID:     sessionID,
@@ -752,6 +758,8 @@ func (h *POSHandler) CreatePOSOrder(w http.ResponseWriter, r *http.Request) {
 		DiscountValue: body.DiscountValue,
 		RedeemPoints:  body.RedeemPoints,
 		Notes:         body.Notes,
+		TaxBps:        taxBps,
+		TaxInclusive:  taxInclusive,
 	})
 	if errors.Is(err, repository.ErrPOSPaymentShort) {
 		response.Error(w, http.StatusBadRequest, "Total pembayaran kurang dari total transaksi")
@@ -785,6 +793,7 @@ func (h *POSHandler) CreatePOSOrder(w http.ResponseWriter, r *http.Request) {
 		"order_number":        result.OrderNumber,
 		"subtotal_cents":      result.SubtotalCents,
 		"discount_cents":      result.DiscountCents,
+		"tax_cents":           result.TaxCents,
 		"total_cents":         result.TotalCents,
 		"payment_method":      result.PaymentMethod,
 		"change_amount_cents": result.ChangeAmountCents,

@@ -11,6 +11,7 @@ import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { formatRupiah } from "@/lib/format";
 import { waLink } from "@/lib/whatsapp";
+import { trackAddToCart } from "@/lib/meta-pixel";
 import { cn } from "@/lib/utils";
 import type { ModifierGroup, SelectedOption } from "@/lib/types";
 import { useCart, type CartItem } from "./cart-context";
@@ -168,14 +169,18 @@ export function AddToCartPanel({
 
   function handleAdd() {
     if (disabled) return;
-    addItem(buildItem());
+    const item = buildItem();
+    addItem(item);
+    trackAddToCart(product.id, item.unit_price_cents / 100, item.qty);
     setJustAdded(true);
     setTimeout(() => setJustAdded(false), 1500);
   }
 
   function handleBuyNow() {
     if (disabled) return;
-    addItem(buildItem());
+    const item = buildItem();
+    addItem(item);
+    trackAddToCart(product.id, item.unit_price_cents / 100, item.qty);
     push(`/${storeSlug}/checkout`);
   }
 

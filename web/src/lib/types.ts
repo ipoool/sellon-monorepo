@@ -59,6 +59,12 @@ export type Store = {
   domain_verified_at?: string | null;
   layout_config?: LayoutConfig;
   checkout_config?: CheckoutConfig;
+  // Tax / PPN. tax_bps = basis points (1100 = 11%). tax_inclusive: false =
+  // added on top (customer-borne); true = already included in the price.
+  tax_enabled?: boolean;
+  tax_bps?: number;
+  tax_inclusive?: boolean;
+  tax_label?: string;
 };
 
 export type BankAccount = {
@@ -469,6 +475,9 @@ export type OrderDetail = {
   subtotal_cents: number;
   shipping_cents: number;
   discount_cents: number;
+  tax_cents?: number;
+  tax_bps?: number;
+  tax_inclusive?: boolean;
   promo_code: string;
   total_cents: number;
   loyalty_points_redeemed?: number;
@@ -545,6 +554,32 @@ export type Customer = {
   loyalty_points?: number;
   member_code?: string;
   created_at?: string;
+};
+
+// Digital download audit: one row per download link (token), with usage +
+// share signal (distinct_ips > 1 suggests the link was shared).
+export type DigitalDownloadLink = {
+  token_id: string;
+  order_id: string;
+  order_number: string;
+  product_name: string;
+  variant_name: string;
+  customer_id: string;
+  customer_name: string;
+  download_count: number;
+  distinct_ips: number;
+  last_download_at: string;
+  revoked: boolean;
+  revoked_at: string;
+  created_at: string;
+};
+
+// One access event in a link's history.
+export type DownloadAccessLog = {
+  ip_address: string;
+  user_agent: string;
+  blocked: boolean; // attempt on a revoked/expired link
+  downloaded_at: string;
 };
 
 export type CustomerOrderSummary = {
@@ -905,6 +940,7 @@ export type POSOrderResult = {
   order_number: string;
   subtotal_cents: number;
   discount_cents: number;
+  tax_cents?: number;
   total_cents: number;
   payment_method: string;
   change_amount_cents: number;

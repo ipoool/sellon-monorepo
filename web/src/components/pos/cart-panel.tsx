@@ -85,6 +85,8 @@ export function CartPanel({ onCheckout, onHold }: Props) {
     tierDiscountCents,
     discountCents,
     redeemDiscountCents,
+    taxCents,
+    taxConfig,
     totalCents,
     loyaltyConfig,
     loyaltyCustomer,
@@ -443,6 +445,20 @@ export function CartPanel({ onCheckout, onHold }: Props) {
             <div className="flex justify-between text-brand-700">
               <span>Poin ({redeemPoints})</span>
               <span>−{formatRupiah(redeemDiscountCents)}</span>
+            </div>
+          )}
+          {taxConfig?.enabled && taxCents > 0 && (
+            <div className="flex justify-between text-neutral-600">
+              <span>
+                {taxConfig.label || "Pajak"} ({(taxConfig.bps / 100).toLocaleString("id-ID")}%)
+                {taxConfig.inclusive && (
+                  <span className="ml-1 text-xs text-neutral-400">termasuk</span>
+                )}
+              </span>
+              <span>
+                {taxConfig.inclusive ? "" : "+"}
+                {formatRupiah(taxCents)}
+              </span>
             </div>
           )}
           <div className="flex justify-between border-t border-neutral-200 pt-2 text-base font-bold text-neutral-900">

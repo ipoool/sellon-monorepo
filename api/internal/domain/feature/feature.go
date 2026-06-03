@@ -11,13 +11,14 @@ const (
 	AIAnalytics    Feature = "ai_analytics"
 	Printer        Feature = "printer"
 	CheckoutFields Feature = "checkout_fields"
-	TableQR        Feature = "table_qr"
-	Membership     Feature = "membership"
-	Loyalty        Feature = "loyalty"
+	TableQR         Feature = "table_qr"
+	Membership      Feature = "membership"
+	Loyalty         Feature = "loyalty"
+	MetaIntegration Feature = "meta_integration"
 )
 
 // bisnisOnly lists features exclusive to the Bisnis tier. A feature NOT in this
-// map is available to every plan.
+// map (and not in proOnly) is available to every plan.
 var bisnisOnly = map[Feature]bool{
 	POS:            true,
 	AIAnalytics:    true,
@@ -28,9 +29,15 @@ var bisnisOnly = map[Feature]bool{
 	Loyalty:        true,
 }
 
+// proOnly lists features unlocked from the Pro tier upward (Pro + Bisnis),
+// but not on Free.
+var proOnly = map[Feature]bool{
+	MetaIntegration: true,
+}
+
 // gatedOrder is the stable iteration order for ForPlan (maps are unordered).
 var gatedOrder = []Feature{
-	POS, AIAnalytics, Printer, CheckoutFields, TableQR, Membership, Loyalty,
+	POS, AIAnalytics, Printer, CheckoutFields, TableQR, Membership, Loyalty, MetaIntegration,
 }
 
 // HasFeature reports whether the given plan tier unlocks feature f.
@@ -38,7 +45,22 @@ func HasFeature(plan string, f Feature) bool {
 	if bisnisOnly[f] {
 		return plan == "bisnis"
 	}
+	if proOnly[f] {
+		return plan == "pro" || plan == "bisnis"
+	}
 	return true
+}
+
+// MinTier returns the lowest plan that unlocks f ("free" | "pro" | "bisnis").
+// Used to render accurate upgrade prompts.
+func MinTier(f Feature) string {
+	if bisnisOnly[f] {
+		return "bisnis"
+	}
+	if proOnly[f] {
+		return "pro"
+	}
+	return "free"
 }
 
 // ForPlan returns the gated features the plan unlocks, as strings — surfaced to

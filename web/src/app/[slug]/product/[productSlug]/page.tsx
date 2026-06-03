@@ -7,6 +7,7 @@ import { ArrowLeft, Package, ChevronRight } from "lucide-react";
 import { Container } from "@/components/layout/container";
 import { Badge } from "@/components/ui/badge";
 import { AddToCartPanel } from "@/components/storefront/add-to-cart-panel";
+import { MetaViewContent } from "@/components/storefront/meta-view-content";
 import { BuyerShareButton } from "@/components/storefront/buyer-share-button";
 import { ProductPhotoGallery } from "@/components/storefront/product-photo-gallery";
 import { formatRupiah } from "@/lib/format";
@@ -150,6 +151,7 @@ export default async function ProductDetailPage({
       className="min-h-svh bg-neutral-50"
       style={themeStyleForHue(store.theme_hue)}
     >
+      <MetaViewContent productId={product.id} valueRupiah={minPrice / 100} />
       <header className="border-b border-neutral-200 bg-white">
         <Container>
           <div className="flex h-14 items-center gap-3">

@@ -32,6 +32,7 @@ import { fillTemplate, waLink } from "@/lib/whatsapp";
 import { cn } from "@/lib/utils";
 import type { CheckoutConfig, CheckoutField } from "@/lib/types";
 import { useCart, cartItemKey } from "./cart-context";
+import { trackInitiateCheckout } from "@/lib/meta-pixel";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
@@ -121,6 +122,10 @@ type Props = {
   acceptingOrdersReason: "" | "store_closed" | "order_limit";
   payment: StorefrontPayment;
   checkoutConfig?: CheckoutConfig;
+  taxEnabled?: boolean;
+  taxBps?: number;
+  taxInclusive?: boolean;
+  taxLabel?: string;
 };
 
 type Step = 1 | 2 | 3 | 4;
@@ -134,6 +139,10 @@ export function CheckoutWizard({
   acceptingOrdersReason,
   payment,
   checkoutConfig,
+  taxEnabled = false,
+  taxBps = 0,
+  taxInclusive = false,
+  taxLabel = "Pajak",
 }: Props) {
   const { push, replace } = useRouter();
   const { items, subtotal, isAllDigital, hasDigital, isHydrated, clear } = useCart();
@@ -152,6 +161,17 @@ export function CheckoutWizard({
       replace(`/${storeSlug}/cart`);
     }
   }, [isHydrated, items.length, replace, storeSlug]);
+
+  // Meta Pixel InitiateCheckout — once, after the cart hydrates with items.
+  const checkoutTrackedRef = useRef(false);
+  useEffect(() => {
+    if (!isHydrated || items.length === 0 || checkoutTrackedRef.current) return;
+    checkoutTrackedRef.current = true;
+    trackInitiateCheckout(
+      items.map((it) => ({ id: it.product_id, quantity: it.qty, item_price: it.unit_price_cents / 100 })),
+      subtotal / 100,
+    );
+  }, [isHydrated, items, subtotal]);
 
   const [step, setStep] = useState<Step>(1);
   const [customerName, setCustomerName] = useState("");
@@ -334,7 +354,18 @@ export function CheckoutWizard({
       ? 0
       : baseShippingCents;
   const discountCents = appliedPromo?.discount_cents ?? 0;
-  const grandTotal = Math.max(0, subtotal - discountCents) + shippingCents;
+  // Tax preview (server is authoritative). Base = subtotal − discount (goods).
+  // Exclusive tax adds to the total; inclusive is informational (total unchanged).
+  const taxBase = Math.max(0, subtotal - discountCents);
+  const effectiveTaxBps = taxEnabled ? taxBps : 0;
+  const taxCents =
+    effectiveTaxBps > 0
+      ? taxInclusive
+        ? Math.round((taxBase * effectiveTaxBps) / (10000 + effectiveTaxBps))
+        : Math.round((taxBase * effectiveTaxBps) / 10000)
+      : 0;
+  const grandTotal =
+    Math.max(0, subtotal - discountCents) + shippingCents + (taxInclusive ? 0 : taxCents);
 
   // Re-validate applied promo whenever subtotal/shipping changes.
   useEffect(() => {
@@ -915,6 +946,10 @@ export function CheckoutWizard({
               baseShippingCents={baseShippingCents}
               discountCents={discountCents}
               freeShipping={!!appliedPromo?.free_shipping}
+              taxCents={taxCents}
+              taxBps={effectiveTaxBps}
+              taxInclusive={taxInclusive}
+              taxLabel={taxLabel}
               grandTotal={grandTotal}
               skipShipping={skipShippingStep}
               pickedOptionLabel={pickedOption ? `${pickedOption.courier} ${pickedOption.service}` : ""}
@@ -1062,6 +1097,10 @@ function ReviewSummary({
   baseShippingCents,
   discountCents,
   freeShipping,
+  taxCents,
+  taxBps,
+  taxInclusive,
+  taxLabel,
   grandTotal,
   skipShipping,
   pickedOptionLabel,
@@ -1072,6 +1111,10 @@ function ReviewSummary({
   baseShippingCents: number;
   discountCents: number;
   freeShipping: boolean;
+  taxCents: number;
+  taxBps: number;
+  taxInclusive: boolean;
+  taxLabel: string;
   grandTotal: number;
   skipShipping: boolean;
   pickedOptionLabel: string;
@@ -1142,6 +1185,19 @@ function ReviewSummary({
               ) : (
                 formatRupiah(shippingCents)
               )}
+            </dd>
+          </div>
+        )}
+        {taxCents > 0 && (
+          <div className="flex justify-between text-neutral-600">
+            <dt>
+              {taxLabel}
+              {taxBps ? ` (${(taxBps / 100).toLocaleString("id-ID")}%)` : ""}
+              {taxInclusive ? " · termasuk" : ""}
+            </dt>
+            <dd className="font-mono">
+              {taxInclusive ? "" : "+"}
+              {formatRupiah(taxCents)}
             </dd>
           </div>
         )}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -11,6 +12,21 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// ComputeTaxCents returns the tax amount (cents) for a taxable base, given the
+// rate in basis points (1100 = 11%). When inclusive, the base already contains
+// the tax and this returns the embedded portion (base − base/(1+rate)); the
+// order total is unchanged. When exclusive, it returns base·rate (added on top).
+// Shared by the storefront and POS order paths so they agree exactly.
+func ComputeTaxCents(base int64, bps int, inclusive bool) int64 {
+	if bps <= 0 || base <= 0 {
+		return 0
+	}
+	if inclusive {
+		return int64(math.Round(float64(base) * float64(bps) / float64(10000+bps)))
+	}
+	return int64(math.Round(float64(base) * float64(bps) / 10000.0))
+}
 
 type Order struct {
 	ID                 uuid.UUID
@@ -23,6 +39,9 @@ type Order struct {
 	SubtotalCents      int64
 	ShippingCents      int64
 	DiscountCents      int64
+	TaxCents           int64
+	TaxBps             int
+	TaxInclusive       bool
 	PromoCode          string
 	TotalCents         int64
 	Courier            string
@@ -113,6 +132,9 @@ type CreateOrderInput struct {
 	// Source is the order channel ("storefront" | "pos" | "whatsapp" |
 	// "kiosk"). Empty defaults to "storefront".
 	Source string
+	// Tax config snapshot. TaxBps=0 → no tax. Tax base = subtotal − discount.
+	TaxBps       int
+	TaxInclusive bool
 }
 
 type OrderRepo struct {
@@ -317,6 +339,7 @@ func (r *OrderRepo) FindByID(ctx context.Context, storeID, id uuid.UUID) (*Order
 		       refund_amount_cents, refund_reason, refunded_at,
 		       payment_proof_url, payment_proof_note, payment_proof_at,
 		       loyalty_points_redeemed, loyalty_discount_cents,
+		       tax_cents, tax_bps, tax_inclusive,
 		       created_at, updated_at
 		FROM orders WHERE id = $1 AND store_id = $2
 	`
@@ -331,6 +354,7 @@ func (r *OrderRepo) FindByID(ctx context.Context, storeID, id uuid.UUID) (*Order
 		&o.RefundAmountCents, &o.RefundReason, &o.RefundedAt,
 		&o.PaymentProofURL, &o.PaymentProofNote, &o.PaymentProofAt,
 		&o.LoyaltyPointsRedeemed, &o.LoyaltyDiscountCents,
+		&o.TaxCents, &o.TaxBps, &o.TaxInclusive,
 		&o.CreatedAt, &o.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -646,6 +670,7 @@ func (r *OrderRepo) FindByOrderNumber(ctx context.Context, storeID uuid.UUID, or
 		       refund_amount_cents, refund_reason, refunded_at,
 		       payment_proof_url, payment_proof_note, payment_proof_at,
 		       loyalty_points_redeemed, loyalty_discount_cents,
+		       tax_cents, tax_bps, tax_inclusive,
 		       created_at, updated_at
 		FROM orders WHERE store_id = $1 AND order_number = $2
 	`
@@ -660,6 +685,7 @@ func (r *OrderRepo) FindByOrderNumber(ctx context.Context, storeID uuid.UUID, or
 		&o.RefundAmountCents, &o.RefundReason, &o.RefundedAt,
 		&o.PaymentProofURL, &o.PaymentProofNote, &o.PaymentProofAt,
 		&o.LoyaltyPointsRedeemed, &o.LoyaltyDiscountCents,
+		&o.TaxCents, &o.TaxBps, &o.TaxInclusive,
 		&o.CreatedAt, &o.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -792,7 +818,13 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 	if discount < 0 {
 		discount = 0
 	}
+	// Tax on the goods value (subtotal − discount). Exclusive tax is added on
+	// top of the total; inclusive tax is informational (total unchanged).
+	taxCents := ComputeTaxCents(subtotal-discount, in.TaxBps, in.TaxInclusive)
 	total := subtotal + in.ShippingCents - discount
+	if !in.TaxInclusive {
+		total += taxCents
+	}
 
 	// Upsert customer (by store_id + whatsapp_number); atomic order/spend
 	// increment. Anonymous orders (no WA — e.g. kiosk in-store self-order)
@@ -862,13 +894,13 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 		                   courier, customer_name, customer_whatsapp, customer_email,
 		                   customer_address, customer_city,
 		                   notes, table_id, serving_type, kitchen_status, queue_number, queue_date,
-		                   custom_fields, source)
+		                   custom_fields, source, tax_cents, tax_bps, tax_inclusive)
 		VALUES ($1, $2, $3, 'pending', 'unpaid', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
-		        $18, $19, $20, $21, $22::date, $23::jsonb, $24)
+		        $18, $19, $20, $21, $22::date, $23::jsonb, $24, $25, $26, $27)
 		RETURNING id, store_id, order_number, status, payment_status, payment_method,
 		          subtotal_cents, shipping_cents, discount_cents, promo_code, total_cents, courier,
 		          customer_name, customer_whatsapp, customer_email, customer_city, created_at,
-		          queue_number, kitchen_status, serving_type
+		          queue_number, kitchen_status, serving_type, tax_cents, tax_bps, tax_inclusive
 	`,
 		in.StoreID, customerID, orderNum,
 		in.PaymentMethod, subtotal, in.ShippingCents, discount,
@@ -876,12 +908,12 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 		in.Courier, in.CustomerName, in.CustomerWA, in.CustomerEmail,
 		in.CustomerAddress, in.CustomerCity, in.Notes,
 		in.TableID, servingType, kitchenStatus, queueNum, queueDate,
-		string(customFields), source,
+		string(customFields), source, taxCents, in.TaxBps, in.TaxInclusive,
 	).Scan(
 		&o.ID, &o.StoreID, &o.OrderNumber, &o.Status, &o.PaymentStatus, &o.PaymentMethod,
 		&o.SubtotalCents, &o.ShippingCents, &o.DiscountCents, &o.PromoCode, &o.TotalCents, &o.Courier,
 		&o.CustomerName, &o.CustomerWhatsApp, &o.CustomerEmail, &o.CustomerCity, &o.CreatedAt,
-		&o.QueueNumber, &o.KitchenStatus, &o.ServingType,
+		&o.QueueNumber, &o.KitchenStatus, &o.ServingType, &o.TaxCents, &o.TaxBps, &o.TaxInclusive,
 	); err != nil {
 		return nil, fmt.Errorf("insert order: %w", err)
 	}

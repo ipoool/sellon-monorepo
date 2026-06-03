@@ -19,6 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CustomerProfileForm } from "@/components/dashboard/customer-profile-form";
 import { MemberCard } from "@/components/dashboard/member-card";
+import { DigitalDownloadsTable } from "@/components/dashboard/digital-downloads-table";
 import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import { formatRupiah, formatRupiahShort, formatDateID, formatDateTimeID } from "@/lib/format";
@@ -30,6 +31,7 @@ import type {
   PaymentStatus,
   LoyaltyTransaction,
   MembershipTier,
+  DigitalDownloadLink,
 } from "@/lib/types";
 
 function resolveTier(tiers: MembershipTier[], totalSpentCents: number): MembershipTier | null {
@@ -97,6 +99,12 @@ export default async function PelangganDetailPage({
   // Membership tier (best-effort): derived from lifetime spend vs configured tiers.
   const tiersRes = await serverApi<{ tiers: MembershipTier[] }>("/api/v1/membership/tiers");
   const tier = resolveTier(tiersRes?.tiers ?? [], customer.total_spent_cents);
+
+  // Digital download links for this customer (best-effort; card hidden if none).
+  const downloadsRes = await serverApi<{ links: DigitalDownloadLink[] }>(
+    `/api/v1/customers/${id}/downloads`,
+  );
+  const downloadLinks = downloadsRes?.links ?? [];
 
   const waUrl = customer.whatsapp_number
     ? waLink(
@@ -404,6 +412,18 @@ export default async function PelangganDetailPage({
               </ul>
             )}
           </Card>
+
+          {downloadLinks.length > 0 && (
+            <div className="mt-6">
+              <div className="mb-2 flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-neutral-900">Riwayat Unduhan</h3>
+                <span className="text-xs text-neutral-500">
+                  {downloadLinks.length} link produk digital
+                </span>
+              </div>
+              <DigitalDownloadsTable links={downloadLinks} />
+            </div>
+          )}
         </div>
       </div>
     </DashboardShell>

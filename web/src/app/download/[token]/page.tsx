@@ -7,8 +7,10 @@ import { Header } from "@/components/layout/header";
 import { Footer } from "@/components/layout/footer";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { headers } from "next/headers";
+
 import { getMe } from "@/lib/server-auth";
-import { serverApi } from "@/lib/server-api";
+import { publicServerApi } from "@/lib/server-api";
 
 type Params = Promise<{ token: string }>;
 
@@ -45,10 +47,20 @@ function formatDate(iso: string): string {
 
 export default async function DownloadPage({ params }: { params: Params }) {
   const { token } = await params;
+  // Forward the BUYER's real IP + User-Agent to the API for the download
+  // audit. This page renders server-side, so without forwarding the API would
+  // only ever see this Next.js server. Public fetch (no seller session needed)
+  // so anonymous email-link buyers can download.
+  const h = await headers();
+  const clientIp =
+    h.get("x-forwarded-for")?.split(",")[0].trim() || h.get("x-real-ip") || "";
+  const clientUA = h.get("user-agent") || "";
+
   const [me, data] = await Promise.all([
     getMe(),
-    serverApi<{ download: DownloadDTO }>(
+    publicServerApi<{ download: DownloadDTO }>(
       `/api/v1/download/${encodeURIComponent(token)}`,
+      { headers: { "X-Client-Ip": clientIp, "X-Client-User-Agent": clientUA } },
     ),
   ]);
 

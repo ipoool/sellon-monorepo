@@ -225,6 +225,19 @@ export default async function OrderDetailPage({
                 <span>Ongkir{order.courier ? ` (${order.courier})` : ""}</span>
                 <span>{formatRupiah(order.shipping_cents)}</span>
               </div>
+              {(order.tax_cents ?? 0) > 0 && (
+                <div className="flex justify-between text-neutral-600">
+                  <span>
+                    Pajak
+                    {order.tax_bps ? ` (${(order.tax_bps / 100).toLocaleString("id-ID")}%)` : ""}
+                    {order.tax_inclusive ? " · termasuk" : ""}
+                  </span>
+                  <span>
+                    {order.tax_inclusive ? "" : "+"}
+                    {formatRupiah(order.tax_cents ?? 0)}
+                  </span>
+                </div>
+              )}
               <div className="flex justify-between border-t border-neutral-200 pt-2 font-display text-base font-semibold text-neutral-900">
                 <span>Total</span>
                 <span>{formatRupiah(order.total_cents)}</span>

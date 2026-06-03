@@ -120,6 +120,9 @@ type CreatePOSOrderInput struct {
 	DiscountValue int64  // % (0-100) or cents
 	RedeemPoints  int    // loyalty points to redeem (0 = none)
 	Notes         string
+	// Tax config snapshot (from store). TaxBps=0 → no tax. Base = subtotal − discount.
+	TaxBps       int
+	TaxInclusive bool
 }
 
 type POSOrderResult struct {
@@ -127,6 +130,7 @@ type POSOrderResult struct {
 	OrderNumber      string
 	SubtotalCents    int64
 	DiscountCents    int64
+	TaxCents         int64
 	TotalCents       int64
 	PaymentMethod    string // primary or "pos_split"
 	ChangeAmountCents int64
@@ -587,7 +591,13 @@ func (r *POSRepo) CreatePOSOrder(ctx context.Context, in CreatePOSOrderInput) (*
 	if totalDiscount > subtotal {
 		totalDiscount = subtotal
 	}
+	// Tax on goods value (subtotal − discount). Exclusive adds to the total the
+	// cashier collects; inclusive is informational (total unchanged).
+	taxCents := ComputeTaxCents(subtotal-totalDiscount, in.TaxBps, in.TaxInclusive)
 	total := subtotal - totalDiscount
+	if !in.TaxInclusive {
+		total += taxCents
+	}
 
 	// Validate payments cover total.
 	var paidTotal int64
@@ -648,6 +658,7 @@ func (r *POSRepo) CreatePOSOrder(ctx context.Context, in CreatePOSOrderInput) (*
 		    notes,
 		    source, pos_session_id, change_amount_cents,
 		    loyalty_points_redeemed, loyalty_discount_cents,
+		    tax_cents, tax_bps, tax_inclusive,
 		    paid_at, completed_at
 		)
 		VALUES (
@@ -658,10 +669,11 @@ func (r *POSRepo) CreatePOSOrder(ctx context.Context, in CreatePOSOrderInput) (*
 		    $10,
 		    'pos', $11, $12,
 		    $13, $14,
+		    $16, $17, $18,
 		    $15, $15
 		)
 		RETURNING id, order_number, subtotal_cents, discount_cents, total_cents,
-		          payment_method, change_amount_cents, created_at
+		          payment_method, change_amount_cents, created_at, tax_cents
 	`,
 		in.StoreID, customerID, orderNum,
 		primaryMethod,
@@ -671,10 +683,11 @@ func (r *POSRepo) CreatePOSOrder(ctx context.Context, in CreatePOSOrderInput) (*
 		in.SessionID, change,
 		redeemPoints, redeemDiscount,
 		now,
+		taxCents, in.TaxBps, in.TaxInclusive,
 	).Scan(
 		&result.OrderID, &result.OrderNumber,
 		&result.SubtotalCents, &result.DiscountCents, &result.TotalCents,
-		&result.PaymentMethod, &result.ChangeAmountCents, &result.CreatedAt,
+		&result.PaymentMethod, &result.ChangeAmountCents, &result.CreatedAt, &result.TaxCents,
 	); err != nil {
 		return nil, fmt.Errorf("insert order: %w", err)
 	}

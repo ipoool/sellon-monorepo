@@ -15,6 +15,7 @@ import (
 	"github.com/sellon/sellon/api/internal/auth"
 	"github.com/sellon/sellon/api/internal/email"
 	"github.com/sellon/sellon/api/internal/fulfillment"
+	"github.com/sellon/sellon/api/internal/meta"
 	"github.com/sellon/sellon/api/internal/payments"
 	"github.com/sellon/sellon/api/internal/pkg/response"
 	"github.com/sellon/sellon/api/internal/repository"
@@ -28,6 +29,7 @@ type WebhookHandler struct {
 	encryptor *auth.AESEncryptor
 	mailer    *email.Mailer
 	fulfiller *fulfillment.Fulfiller
+	meta      *meta.Notifier
 	webOrigin string
 	logger    *slog.Logger
 }
@@ -40,6 +42,7 @@ func NewWebhookHandler(
 	enc *auth.AESEncryptor,
 	mailer *email.Mailer,
 	fulfiller *fulfillment.Fulfiller,
+	metaNotifier *meta.Notifier,
 	webOrigin string,
 	logger *slog.Logger,
 ) *WebhookHandler {
@@ -48,6 +51,7 @@ func NewWebhookHandler(
 		encryptor: enc,
 		mailer:    mailer,
 		fulfiller: fulfiller,
+		meta:      metaNotifier,
 		webOrigin: webOrigin,
 		logger:    logger,
 	}
@@ -162,6 +166,11 @@ func (h *WebhookHandler) Midtrans(w http.ResponseWriter, r *http.Request) {
 		// email buyer. Background context so this survives the webhook
 		// HTTP handler returning.
 		go h.fulfiller.OnPaymentPaid(context.Background(), gateway.StoreID, order.ID)
+		// Meta Conversions API: fire a server-side Purchase so Facebook/Instagram
+		// can attribute the sale to an ad. No-op when the store hasn't enabled Meta.
+		if h.meta != nil {
+			go h.meta.OnPaymentPaid(context.Background(), gateway.StoreID, order.ID)
+		}
 	}
 
 	response.JSON(w, http.StatusOK, map[string]string{

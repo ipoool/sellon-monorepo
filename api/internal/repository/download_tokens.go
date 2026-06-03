@@ -23,6 +23,7 @@ type DownloadToken struct {
 	ExpiresAt      *time.Time
 	ConsumedCount  int
 	LastConsumedAt *time.Time
+	RevokedAt      *time.Time // per-link revoke; non-nil = link disabled
 	CreatedAt      time.Time
 }
 
@@ -38,6 +39,7 @@ type DownloadInfo struct {
 	StoreSlug           string
 	OrderNumber         string
 	CustomerName        string
+	CustomerID          *uuid.UUID // nil for anonymous orders
 	ProductName         string
 	VariantName         string
 	DigitalDeliveryURL  string
@@ -67,16 +69,44 @@ func (r *DownloadTokenRepo) Create(ctx context.Context, in DownloadToken) (*Down
 		INSERT INTO download_tokens (token, order_id, order_item_id, store_id, expires_at)
 		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id, token, order_id, order_item_id, store_id, expires_at,
-		          consumed_count, last_consumed_at, created_at
+		          consumed_count, last_consumed_at, revoked_at, created_at
 	`, in.Token, in.OrderID, in.OrderItemID, in.StoreID, in.ExpiresAt)
 	var t DownloadToken
 	if err := row.Scan(
 		&t.ID, &t.Token, &t.OrderID, &t.OrderItemID, &t.StoreID,
-		&t.ExpiresAt, &t.ConsumedCount, &t.LastConsumedAt, &t.CreatedAt,
+		&t.ExpiresAt, &t.ConsumedCount, &t.LastConsumedAt, &t.RevokedAt, &t.CreatedAt,
 	); err != nil {
 		return nil, err
 	}
 	return &t, nil
+}
+
+// Revoke disables a specific download link (store-scoped). Idempotent.
+func (r *DownloadTokenRepo) Revoke(ctx context.Context, storeID, tokenID uuid.UUID) error {
+	ct, err := r.pool.Exec(ctx,
+		`UPDATE download_tokens SET revoked_at = now() WHERE id = $1 AND store_id = $2`,
+		tokenID, storeID)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrDownloadTokenNotFound
+	}
+	return nil
+}
+
+// Unrevoke re-enables a previously revoked link (store-scoped).
+func (r *DownloadTokenRepo) Unrevoke(ctx context.Context, storeID, tokenID uuid.UUID) error {
+	ct, err := r.pool.Exec(ctx,
+		`UPDATE download_tokens SET revoked_at = NULL WHERE id = $1 AND store_id = $2`,
+		tokenID, storeID)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrDownloadTokenNotFound
+	}
+	return nil
 }
 
 // FindForDelivery looks up everything the download page needs in one
@@ -87,9 +117,9 @@ func (r *DownloadTokenRepo) FindForDelivery(ctx context.Context, token string) (
 	const q = `
 		SELECT
 		  dt.id, dt.token, dt.order_id, dt.order_item_id, dt.store_id,
-		  dt.expires_at, dt.consumed_count, dt.last_consumed_at, dt.created_at,
+		  dt.expires_at, dt.consumed_count, dt.last_consumed_at, dt.revoked_at, dt.created_at,
 		  s.name, s.slug,
-		  o.order_number, o.customer_name,
+		  o.order_number, o.customer_name, o.customer_id,
 		  oi.product_name, oi.variant_name,
 		  COALESCE(p.digital_delivery_url, ''),
 		  COALESCE(p.digital_file_url, ''),
@@ -105,9 +135,9 @@ func (r *DownloadTokenRepo) FindForDelivery(ctx context.Context, token string) (
 	var info DownloadInfo
 	err := r.pool.QueryRow(ctx, q, token).Scan(
 		&info.Token.ID, &info.Token.Token, &info.Token.OrderID, &info.Token.OrderItemID, &info.Token.StoreID,
-		&info.Token.ExpiresAt, &info.Token.ConsumedCount, &info.Token.LastConsumedAt, &info.Token.CreatedAt,
+		&info.Token.ExpiresAt, &info.Token.ConsumedCount, &info.Token.LastConsumedAt, &info.Token.RevokedAt, &info.Token.CreatedAt,
 		&info.StoreName, &info.StoreSlug,
-		&info.OrderNumber, &info.CustomerName,
+		&info.OrderNumber, &info.CustomerName, &info.CustomerID,
 		&info.ProductName, &info.VariantName,
 		&info.DigitalDeliveryURL, &info.DigitalFileURL, &info.DigitalInstructions,
 	)
@@ -138,7 +168,7 @@ func (r *DownloadTokenRepo) MarkConsumed(ctx context.Context, token string) erro
 func (r *DownloadTokenRepo) ListForOrder(ctx context.Context, orderID uuid.UUID) ([]DownloadToken, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, token, order_id, order_item_id, store_id, expires_at,
-		       consumed_count, last_consumed_at, created_at
+		       consumed_count, last_consumed_at, revoked_at, created_at
 		FROM download_tokens
 		WHERE order_id = $1
 		ORDER BY created_at ASC
@@ -152,7 +182,7 @@ func (r *DownloadTokenRepo) ListForOrder(ctx context.Context, orderID uuid.UUID)
 		var t DownloadToken
 		if err := rows.Scan(
 			&t.ID, &t.Token, &t.OrderID, &t.OrderItemID, &t.StoreID,
-			&t.ExpiresAt, &t.ConsumedCount, &t.LastConsumedAt, &t.CreatedAt,
+			&t.ExpiresAt, &t.ConsumedCount, &t.LastConsumedAt, &t.RevokedAt, &t.CreatedAt,
 		); err != nil {
 			return nil, err
 		}

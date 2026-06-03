@@ -64,6 +64,10 @@ type storeDTO struct {
 	DomainVerifiedAt           *string         `json:"domain_verified_at"`
 	LayoutConfig               json.RawMessage `json:"layout_config,omitempty"`
 	CheckoutConfig             json.RawMessage `json:"checkout_config,omitempty"`
+	TaxEnabled                 bool            `json:"tax_enabled"`
+	TaxBps                     int             `json:"tax_bps"`
+	TaxInclusive               bool            `json:"tax_inclusive"`
+	TaxLabel                   string          `json:"tax_label"`
 }
 
 func toStoreDTO(s *repository.Store) storeDTO {
@@ -104,6 +108,10 @@ func toStoreDTO(s *repository.Store) storeDTO {
 		DomainVerifiedAt: formatTimePtr(s.DomainVerifiedAt),
 		LayoutConfig:     json.RawMessage(s.LayoutConfig),
 		CheckoutConfig:   json.RawMessage(s.CheckoutConfig),
+		TaxEnabled:       s.TaxEnabled,
+		TaxBps:           s.TaxBps,
+		TaxInclusive:     s.TaxInclusive,
+		TaxLabel:         s.TaxLabel,
 	}
 }
 
@@ -502,6 +510,66 @@ func (h *StoreHandler) UpdateShipping(w http.ResponseWriter, r *http.Request) {
 			"origin_city":              store.ShippingOriginCityName,
 			"enabled_couriers":         clean,
 			"free_shipping_threshold":  store.FreeShippingThresholdCents,
+		},
+	})
+	response.JSON(w, http.StatusOK, map[string]any{"store": toStoreDTO(store)})
+}
+
+type updateTaxReq struct {
+	TaxEnabled   bool   `json:"tax_enabled"`
+	TaxBps       int    `json:"tax_bps"`
+	TaxInclusive bool   `json:"tax_inclusive"`
+	TaxLabel     string `json:"tax_label"`
+}
+
+// PUT /api/v1/store/tax — narrow updater for the Pajak/PPN page.
+func (h *StoreHandler) UpdateTax(w http.ResponseWriter, r *http.Request) {
+	uid, _ := auth.UserIDFromContext(r.Context())
+	existing, err := h.stores.FindByOwnerID(r.Context(), uid)
+	if errors.Is(err, repository.ErrStoreNotFound) {
+		response.Error(w, http.StatusNotFound, "toko belum dibuat")
+		return
+	}
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	var req updateTaxReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	// Clamp rate to 0–100% (0–10000 bps).
+	if req.TaxBps < 0 {
+		req.TaxBps = 0
+	}
+	if req.TaxBps > 10000 {
+		req.TaxBps = 10000
+	}
+	label := strings.TrimSpace(req.TaxLabel)
+	if label == "" {
+		label = "PPN"
+	}
+	store, err := h.stores.UpdateTax(r.Context(), existing.ID, repository.UpdateTaxInput{
+		Enabled:   req.TaxEnabled,
+		Bps:       req.TaxBps,
+		Inclusive: req.TaxInclusive,
+		Label:     label,
+	})
+	if err != nil {
+		h.logger.Error("update tax", "err", err)
+		response.Error(w, http.StatusInternalServerError, "gagal simpan")
+		return
+	}
+	h.audit.Log(r.Context(), store.ID, audit.Event{
+		Action:     "store.tax_updated",
+		EntityType: "store",
+		EntityID:   store.ID.String(),
+		Summary:    "Update setting pajak/PPN",
+		Metadata: map[string]any{
+			"tax_enabled":   store.TaxEnabled,
+			"tax_bps":       store.TaxBps,
+			"tax_inclusive": store.TaxInclusive,
 		},
 	})
 	response.JSON(w, http.StatusOK, map[string]any{"store": toStoreDTO(store)})

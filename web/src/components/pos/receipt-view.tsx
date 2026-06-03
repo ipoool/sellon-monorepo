@@ -144,6 +144,12 @@ export function ReceiptView({
           {order.shipping_cents > 0 && (
             <Row label="Ongkir" value={formatRupiah(order.shipping_cents)} />
           )}
+          {(order.tax_cents ?? 0) > 0 && (
+            <Row
+              label={`Pajak${order.tax_bps ? ` (${(order.tax_bps / 100).toLocaleString("id-ID")}%)` : ""}${order.tax_inclusive ? " *termasuk" : ""}`}
+              value={`${order.tax_inclusive ? "" : "+"}${formatRupiah(order.tax_cents ?? 0)}`}
+            />
+          )}
           <div className="my-1 border-t border-double border-neutral-400" />
           <Row
             label="TOTAL"

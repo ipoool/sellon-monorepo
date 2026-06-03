@@ -19,6 +19,8 @@ import {
   QrCode,
   ClipboardList,
   ImageIcon,
+  Megaphone,
+  Receipt,
   ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -30,8 +32,10 @@ const tabs = [
   { label: "Profil Toko", href: "/settings/store", icon: Store },
   { label: "Storefront", href: "/settings/storefront", icon: Palette },
   { label: "Banner", href: "/settings/banners", icon: ImageIcon },
+  { label: "Meta / Facebook", href: "/settings/meta", icon: Megaphone },
   { label: "Domain", href: "/settings/domain", icon: Globe },
   { label: "Pembayaran", href: "/settings/payment", icon: CreditCard },
+  { label: "Pajak / PPN", href: "/settings/tax", icon: Receipt },
   { label: "Loyalty", href: "/settings/loyalty", icon: Sparkles, bisnisOnly: true },
   { label: "Membership", href: "/settings/membership", icon: Award, bisnisOnly: true },
   { label: "Meja & QR", href: "/settings/tables", icon: QrCode, bisnisOnly: true },

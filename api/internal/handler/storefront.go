@@ -17,6 +17,7 @@ import (
 
 	"github.com/sellon/sellon/api/internal/audit"
 	"github.com/sellon/sellon/api/internal/auth"
+	"github.com/sellon/sellon/api/internal/domain/feature"
 	"github.com/sellon/sellon/api/internal/email"
 	"github.com/sellon/sellon/api/internal/events"
 	"github.com/sellon/sellon/api/internal/notify"
@@ -171,6 +172,14 @@ type publicStoreDTO struct {
 	AcceptingOrdersReason string          `json:"accepting_orders_reason"`
 	LayoutConfig          json.RawMessage `json:"layout_config,omitempty"`
 	CheckoutConfig        json.RawMessage `json:"checkout_config,omitempty"`
+	// MetaPixelID is exposed (browser-public by design) only when the seller
+	// enabled Meta tracking, so the storefront can fire Pixel events.
+	MetaPixelID string `json:"meta_pixel_id,omitempty"`
+	// Tax config — lets the checkout preview the tax line client-side.
+	TaxEnabled   bool   `json:"tax_enabled"`
+	TaxBps       int    `json:"tax_bps"`
+	TaxInclusive bool   `json:"tax_inclusive"`
+	TaxLabel     string `json:"tax_label"`
 }
 
 type publicProductDTO struct {
@@ -243,6 +252,42 @@ func toPublicStore(s *repository.Store) publicStoreDTO {
 		AcceptingOrdersReason: "",
 		LayoutConfig:          json.RawMessage(s.LayoutConfig),
 		CheckoutConfig:        json.RawMessage(s.CheckoutConfig),
+		MetaPixelID:           metaPixelIfEnabled(s),
+		TaxEnabled:            s.TaxEnabled,
+		TaxBps:                s.TaxBps,
+		TaxInclusive:          s.TaxInclusive,
+		TaxLabel:              s.TaxLabel,
+	}
+}
+
+// taxBpsFor returns the store's tax rate in basis points, or 0 when tax is
+// disabled — so order creation applies tax only when the seller turned it on.
+func taxBpsFor(s *repository.Store) int {
+	if s.TaxEnabled {
+		return s.TaxBps
+	}
+	return 0
+}
+
+// metaPixelIfEnabled returns the store's Pixel ID only when Meta tracking is
+// on, so the storefront never fires events for a disabled integration.
+func metaPixelIfEnabled(s *repository.Store) string {
+	if s.MetaEnabled {
+		return s.MetaPixelID
+	}
+	return ""
+}
+
+// gateMetaPixel zeroes the Pixel ID on the DTO when the store's plan no longer
+// unlocks Meta (downgraded after enabling). Fail open on a plan-lookup error so
+// a paying store never loses its Pixel to a transient DB blip. Mirrors the
+// seller-banner public-leak downgrade fix.
+func (h *StorefrontHandler) gateMetaPixel(ctx context.Context, store *repository.Store, dto *publicStoreDTO) {
+	if dto.MetaPixelID == "" {
+		return
+	}
+	if plan, err := h.subs.GetPlan(ctx, store.ID); err == nil && !feature.HasFeature(plan, feature.MetaIntegration) {
+		dto.MetaPixelID = ""
 	}
 }
 
@@ -506,6 +551,7 @@ func (h *StorefrontHandler) GetStore(w http.ResponseWriter, r *http.Request) {
 	storeDTO := toPublicStore(store)
 	storeDTO.AcceptingOrders, storeDTO.AcceptingOrdersReason =
 		h.acceptingOrdersStatus(r.Context(), store)
+	h.gateMetaPixel(r.Context(), store, &storeDTO)
 
 	response.JSON(w, http.StatusOK, map[string]any{
 		"store":      storeDTO,
@@ -577,6 +623,7 @@ func (h *StorefrontHandler) GetProduct(w http.ResponseWriter, r *http.Request) {
 	storeDTO := toPublicStore(store)
 	storeDTO.AcceptingOrders, storeDTO.AcceptingOrdersReason =
 		h.acceptingOrdersStatus(r.Context(), store)
+	h.gateMetaPixel(r.Context(), store, &storeDTO)
 
 	response.JSON(w, http.StatusOK, map[string]any{
 		"store":     storeDTO,
@@ -947,6 +994,8 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 		KitchenStatus:   dineKitchen,
 		CustomFields:    customFieldsJSON,
 		Source:          orderSource,
+		TaxBps:          taxBpsFor(store),
+		TaxInclusive:    store.TaxInclusive,
 	})
 	if err != nil {
 		// Concurrency: another buyer just bought the last unit between our
@@ -1200,12 +1249,17 @@ func (h *StorefrontHandler) GetOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	itemsOut := make([]map[string]any, 0, len(items))
 	for _, it := range items {
+		pid := ""
+		if it.ProductID != nil {
+			pid = it.ProductID.String()
+		}
 		itemsOut = append(itemsOut, map[string]any{
-			"product_name":      it.ProductName,
-			"variant_name":      it.VariantName,
-			"unit_price_cents":  it.UnitPriceCents,
-			"quantity":          it.Quantity,
-			"subtotal_cents":    it.SubtotalCents,
+			"product_id":       pid,
+			"product_name":     it.ProductName,
+			"variant_name":     it.VariantName,
+			"unit_price_cents": it.UnitPriceCents,
+			"quantity":         it.Quantity,
+			"subtotal_cents":   it.SubtotalCents,
 		})
 	}
 
@@ -1232,6 +1286,9 @@ func (h *StorefrontHandler) GetOrder(w http.ResponseWriter, r *http.Request) {
 			"subtotal_cents":     order.SubtotalCents,
 			"shipping_cents":     order.ShippingCents,
 			"discount_cents":     order.DiscountCents,
+			"tax_cents":          order.TaxCents,
+			"tax_bps":            order.TaxBps,
+			"tax_inclusive":      order.TaxInclusive,
 			"promo_code":         order.PromoCode,
 			"total_cents":        order.TotalCents,
 			"courier":            order.Courier,

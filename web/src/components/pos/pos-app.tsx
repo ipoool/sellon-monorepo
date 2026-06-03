@@ -36,13 +36,27 @@ const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
 function POSAppInner({ me, products, categories, initialSession }: Props) {
   const router = useRouter();
-  const { session, setSession, cart, totalCents, clearCart, setLoyaltyConfig, setPrinterConfig, setMidtransLive } = usePOS();
+  const { session, setSession, cart, totalCents, clearCart, setLoyaltyConfig, setPrinterConfig, setMidtransLive, setTaxConfig } = usePOS();
 
-  // Fetch loyalty config + printer config + midtrans status once on mount.
+  // Fetch loyalty config + printer config + midtrans status + tax config once
+  // on mount.
   useEffect(() => {
     fetch(`${apiBase}/api/v1/pos/loyalty/config`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((d) => setLoyaltyConfig(d.config))
+      .catch(() => {});
+    fetch(`${apiBase}/api/v1/store`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((d) => {
+        const s = d.store;
+        if (!s) return;
+        setTaxConfig({
+          enabled: !!s.tax_enabled,
+          bps: s.tax_bps ?? 0,
+          inclusive: !!s.tax_inclusive,
+          label: s.tax_label || "PPN",
+        });
+      })
       .catch(() => {});
     fetch(`${apiBase}/api/v1/pos/printer/config`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : Promise.reject()))

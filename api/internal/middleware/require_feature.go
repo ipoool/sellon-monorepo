@@ -32,11 +32,16 @@ func RequireFeature(f feature.Feature, stores *repository.StoreRepo, subs *repos
 				return
 			}
 			if !feature.HasFeature(sub.Plan, f) {
+				tier := feature.MinTier(f)
+				label := "Bisnis"
+				if tier == "pro" {
+					label = "Pro"
+				}
 				response.JSON(w, http.StatusPaymentRequired, map[string]any{
 					"code":       "FEATURE_LOCKED",
-					"message":    "Fitur ini tersedia di paket Bisnis",
+					"message":    "Fitur ini tersedia di paket " + label,
 					"feature":    string(f),
-					"upgrade_to": "bisnis",
+					"upgrade_to": tier,
 				})
 				return
 			}

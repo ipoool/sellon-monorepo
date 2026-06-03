@@ -6,6 +6,7 @@ import { ArrowLeft, CheckCircle2, Clock } from "lucide-react";
 import { Container } from "@/components/layout/container";
 import { Badge } from "@/components/ui/badge";
 import { BuyerPaymentPanel } from "@/components/storefront/buyer-payment-panel";
+import { MetaPurchaseTracker } from "@/components/storefront/meta-purchase-tracker";
 import { formatRupiah, formatDateTimeID } from "@/lib/format";
 
 const apiBase =
@@ -14,6 +15,7 @@ const apiBase =
   "http://localhost:8080";
 
 type BuyerOrderItem = {
+  product_id?: string;
   product_name: string;
   variant_name: string;
   unit_price_cents: number;
@@ -30,6 +32,9 @@ type BuyerOrder = {
   subtotal_cents: number;
   shipping_cents: number;
   discount_cents: number;
+  tax_cents?: number;
+  tax_bps?: number;
+  tax_inclusive?: boolean;
   promo_code: string;
   total_cents: number;
   courier: string;
@@ -118,6 +123,16 @@ export default async function BuyerOrderPage({
 
   return (
     <div className="min-h-svh bg-neutral-50">
+      {/* Fire the Meta Pixel Purchase only once the order is PAID — mirroring
+          the server CAPI chokepoint so browser + server agree and we never
+          report a conversion before money is collected. Deduped by order_number. */}
+      {isPaid && (
+        <MetaPurchaseTracker
+          orderNumber={order.order_number}
+          totalCents={order.total_cents}
+          items={order.items}
+        />
+      )}
       <header className="border-b border-neutral-200 bg-white">
         <Container>
           <div className="flex h-14 items-center gap-3">
@@ -235,6 +250,19 @@ export default async function BuyerOrderPage({
                     <dt>Ongkir{order.courier ? ` (${order.courier})` : ""}</dt>
                     <dd>{formatRupiah(order.shipping_cents)}</dd>
                   </div>
+                  {(order.tax_cents ?? 0) > 0 && (
+                    <div className="flex justify-between text-neutral-600">
+                      <dt>
+                        Pajak
+                        {order.tax_bps ? ` (${(order.tax_bps / 100).toLocaleString("id-ID")}%)` : ""}
+                        {order.tax_inclusive ? " · termasuk" : ""}
+                      </dt>
+                      <dd>
+                        {order.tax_inclusive ? "" : "+"}
+                        {formatRupiah(order.tax_cents ?? 0)}
+                      </dd>
+                    </div>
+                  )}
                   <div className="flex justify-between border-t border-neutral-200 pt-2 font-display text-base font-semibold text-neutral-900">
                     <dt>Total</dt>
                     <dd>{formatRupiah(order.total_cents)}</dd>

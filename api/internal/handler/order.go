@@ -20,6 +20,7 @@ import (
 	"github.com/sellon/sellon/api/internal/auth"
 	"github.com/sellon/sellon/api/internal/email"
 	"github.com/sellon/sellon/api/internal/fulfillment"
+	"github.com/sellon/sellon/api/internal/meta"
 	"github.com/sellon/sellon/api/internal/payments"
 	"github.com/sellon/sellon/api/internal/pkg/response"
 	"github.com/sellon/sellon/api/internal/repository"
@@ -33,6 +34,7 @@ type OrderHandler struct {
 	midtrans  *payments.MidtransClient
 	audit     *audit.Logger
 	fulfiller *fulfillment.Fulfiller
+	meta      *meta.Notifier
 	mailer    *email.Mailer
 	webOrigin string
 	logger    *slog.Logger
@@ -46,6 +48,7 @@ func NewOrderHandler(
 	midtrans *payments.MidtransClient,
 	audit *audit.Logger,
 	fulfiller *fulfillment.Fulfiller,
+	metaNotifier *meta.Notifier,
 	mailer *email.Mailer,
 	webOrigin string,
 	logger *slog.Logger,
@@ -54,6 +57,7 @@ func NewOrderHandler(
 		orders: orders, stores: stores, gateways: gateways,
 		encryptor: enc, midtrans: midtrans, audit: audit,
 		fulfiller: fulfiller,
+		meta:      metaNotifier,
 		mailer:    mailer,
 		webOrigin: webOrigin,
 		logger:    logger,
@@ -109,6 +113,9 @@ type orderDetailDTO struct {
 	SubtotalCents      int64          `json:"subtotal_cents"`
 	ShippingCents      int64          `json:"shipping_cents"`
 	DiscountCents      int64          `json:"discount_cents"`
+	TaxCents           int64          `json:"tax_cents"`
+	TaxBps             int            `json:"tax_bps"`
+	TaxInclusive       bool           `json:"tax_inclusive"`
 	PromoCode          string         `json:"promo_code"`
 	TotalCents         int64          `json:"total_cents"`
 	LoyaltyPointsRedeemed int         `json:"loyalty_points_redeemed"`
@@ -330,6 +337,7 @@ func orderDetailToDTO(o *repository.Order, items []orderItemDTO) orderDetailDTO 
 		Source:        o.Source,
 		SubtotalCents: o.SubtotalCents, ShippingCents: o.ShippingCents,
 		DiscountCents: o.DiscountCents, PromoCode: o.PromoCode,
+		TaxCents:      o.TaxCents, TaxBps: o.TaxBps, TaxInclusive: o.TaxInclusive,
 		TotalCents:            o.TotalCents,
 		LoyaltyPointsRedeemed: o.LoyaltyPointsRedeemed,
 		LoyaltyDiscountCents:  o.LoyaltyDiscountCents,
@@ -525,6 +533,10 @@ func (h *OrderHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 	// Async — buyer/seller doesn't wait for tokens + email.
 	if req.Action == "mark_paid" && o.PaymentStatus == "paid" {
 		go h.fulfiller.OnPaymentPaid(context.Background(), store.ID, o.ID)
+		// Meta Conversions API Purchase (no-op when Meta not enabled).
+		if h.meta != nil {
+			go h.meta.OnPaymentPaid(context.Background(), store.ID, o.ID)
+		}
 	}
 
 	orderDTO := orderDetailToDTO(o, itemsDTO)

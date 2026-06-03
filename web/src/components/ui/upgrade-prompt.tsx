@@ -4,17 +4,22 @@ import { Lock, Crown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-// UpgradePrompt — the standard locked-feature panel for Bisnis-only features.
-// Server-compatible (no hooks): renders inside server or client trees.
+// UpgradePrompt — the standard locked-feature panel. Defaults to Bisnis; pass
+// tier="pro" for Pro-tier features. Server-compatible (no hooks): renders
+// inside server or client trees.
 export function UpgradePrompt({
   feature,
   description,
+  tier = "bisnis",
   className,
 }: {
   feature: string;
   description?: string;
+  tier?: "pro" | "bisnis";
   className?: string;
 }) {
+  const label = tier === "pro" ? "Pro" : "Bisnis";
+  const price = tier === "pro" ? "Rp99rb/bulan" : "Rp299rb/bulan";
   return (
     <div
       className={cn(
@@ -26,16 +31,16 @@ export function UpgradePrompt({
         <Lock className="size-7" aria-hidden />
       </div>
       <h2 className="mt-4 font-display text-xl font-semibold text-neutral-900">
-        {feature} tersedia di paket Bisnis
+        {feature} tersedia di paket {label}
       </h2>
       <p className="mx-auto mt-2 max-w-md text-sm text-neutral-600">
         {description ??
-          "Upgrade ke paket Bisnis (Rp299rb/bulan) untuk membuka fitur ini."}
+          `Upgrade ke paket ${label} (${price}) untuk membuka fitur ini.`}
       </p>
       <Link href="/settings/subscription" className="mt-5 inline-block">
         <Button size="sm">
           <Crown className="size-4" aria-hidden />
-          Lihat Paket Bisnis
+          Lihat Paket {label}
         </Button>
       </Link>
     </div>

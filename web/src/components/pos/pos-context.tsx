@@ -31,6 +31,29 @@ export type PrinterConfig = {
   footer: string;
 };
 
+export type TaxConfig = {
+  enabled: boolean;
+  bps: number; // basis points, 1100 = 11%
+  inclusive: boolean; // true = tax already inside price (informational); false = added on top
+  label: string; // e.g. "PPN"
+};
+
+// Mirror of the backend repository.ComputeTaxCents — MUST stay in sync so the
+// cashier collects exactly what the API will persist (an exclusive tax raises
+// the order total, and the API rejects a payment that doesn't cover it).
+// All inputs are non-negative cents, so Math.round (half-up) matches Go's
+// math.Round (half-away-from-zero).
+export function computePOSTaxCents(
+  base: number,
+  bps: number,
+  inclusive: boolean,
+): number {
+  if (base <= 0 || bps <= 0) return 0;
+  return inclusive
+    ? Math.round((base * bps) / (10000 + bps))
+    : Math.round((base * bps) / 10000);
+}
+
 type POSContextValue = {
   // True on touch devices (tablets/phones) — used to hide keyboard
   // shortcut hints (F2/F8) that only make sense with a physical keyboard.
@@ -43,6 +66,8 @@ type POSContextValue = {
   setLoyaltyConfig: (c: LoyaltyConfig | null) => void;
   printerConfig: PrinterConfig | null;
   setPrinterConfig: (c: PrinterConfig | null) => void;
+  taxConfig: TaxConfig | null;
+  setTaxConfig: (c: TaxConfig | null) => void;
   loyaltyCustomer: LoyaltyCustomer | null;
   setLoyaltyCustomer: (c: LoyaltyCustomer | null) => void;
   redeemPoints: number;
@@ -72,6 +97,10 @@ type POSContextValue = {
   tierDiscountCents: number;
   discountCents: number;
   redeemDiscountCents: number;
+  // Total of goods after all discounts, before tax. This is the tax base and
+  // matches the backend's (subtotal − discount) base for POS orders.
+  preTaxTotalCents: number;
+  taxCents: number;
   totalCents: number;
 };
 
@@ -100,6 +129,7 @@ export function POSProvider({ children }: { children: ReactNode }) {
   const [customerWA, setCustomerWA] = useState("");
   const [loyaltyConfig, setLoyaltyConfig] = useState<LoyaltyConfig | null>(null);
   const [printerConfig, setPrinterConfig] = useState<PrinterConfig | null>(null);
+  const [taxConfig, setTaxConfig] = useState<TaxConfig | null>(null);
   const [loyaltyCustomer, setLoyaltyCustomer] = useState<LoyaltyCustomer | null>(null);
   const [redeemPoints, setRedeemPoints] = useState(0);
   const [midtransLive, setMidtransLive] = useState(false);
@@ -249,7 +279,25 @@ export function POSProvider({ children }: { children: ReactNode }) {
     return Math.max(0, Math.min(raw, remainAfterDiscount));
   }, [loyaltyConfig, loyaltyCustomer, redeemPoints, subtotalCents, tierDiscountCents, discountCents]);
 
-  const totalCents = Math.max(0, subtotalCents - tierDiscountCents - discountCents - redeemDiscountCents);
+  // Goods total after every discount — the tax base. Mirrors the backend POS
+  // path, which taxes (subtotal − discount). Tax is never applied to shipping
+  // (POS has none) or to packaging beyond what's already in the line subtotal.
+  const preTaxTotalCents = Math.max(
+    0,
+    subtotalCents - tierDiscountCents - discountCents - redeemDiscountCents,
+  );
+
+  const taxCents = useMemo(() => {
+    if (!taxConfig?.enabled || taxConfig.bps <= 0) return 0;
+    return computePOSTaxCents(preTaxTotalCents, taxConfig.bps, taxConfig.inclusive);
+  }, [taxConfig, preTaxTotalCents]);
+
+  // Exclusive tax (customer-borne) is added on top; inclusive tax is already
+  // inside the goods price, so the total is unchanged (tax shown for info).
+  const totalCents =
+    taxConfig?.enabled && !taxConfig.inclusive
+      ? preTaxTotalCents + taxCents
+      : preTaxTotalCents;
 
   const value: POSContextValue = {
     isTouch,
@@ -259,6 +307,8 @@ export function POSProvider({ children }: { children: ReactNode }) {
     setLoyaltyConfig,
     printerConfig,
     setPrinterConfig,
+    taxConfig,
+    setTaxConfig,
     loyaltyCustomer,
     setLoyaltyCustomer,
     redeemPoints,
@@ -283,6 +333,8 @@ export function POSProvider({ children }: { children: ReactNode }) {
     tierDiscountCents,
     discountCents,
     redeemDiscountCents,
+    preTaxTotalCents,
+    taxCents,
     totalCents,
   };
 

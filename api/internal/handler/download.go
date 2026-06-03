@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -15,11 +17,46 @@ import (
 
 type DownloadHandler struct {
 	tokens *repository.DownloadTokenRepo
+	logs   *repository.DownloadLogRepo
 	logger *slog.Logger
 }
 
-func NewDownloadHandler(tokens *repository.DownloadTokenRepo, logger *slog.Logger) *DownloadHandler {
-	return &DownloadHandler{tokens: tokens, logger: logger}
+func NewDownloadHandler(tokens *repository.DownloadTokenRepo, logs *repository.DownloadLogRepo, logger *slog.Logger) *DownloadHandler {
+	return &DownloadHandler{tokens: tokens, logs: logs, logger: logger}
+}
+
+const (
+	maxIPLen = 64
+	maxUALen = 512
+)
+
+// clientIP / clientUA prefer the buyer's real values forwarded by the Next.js
+// SSR download page (X-Client-Ip / X-Client-User-Agent) — in production the
+// request reaches this endpoint from the SSR server, so r.RemoteAddr is the
+// SSR/proxy address, not the buyer's. The forwarded header carries the real
+// buyer value. For direct hits (no header) we fall back to r.RemoteAddr /
+// r.UserAgent(). Values are validated/capped before storage since this is a
+// public endpoint and the headers are attacker-controllable.
+func clientIP(r *http.Request) string {
+	if v := strings.TrimSpace(r.Header.Get("X-Client-Ip")); v != "" && net.ParseIP(v) != nil {
+		return v
+	}
+	ip := r.RemoteAddr
+	if len(ip) > maxIPLen {
+		ip = ip[:maxIPLen]
+	}
+	return ip
+}
+
+func clientUA(r *http.Request) string {
+	v := strings.TrimSpace(r.Header.Get("X-Client-User-Agent"))
+	if v == "" {
+		v = r.UserAgent()
+	}
+	if len(v) > maxUALen {
+		v = v[:maxUALen]
+	}
+	return v
 }
 
 type downloadDTO struct {
@@ -59,25 +96,32 @@ func (h *DownloadHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// IP/UA captured here (request is gone by the time the audit goroutine runs).
+	ip, ua := clientIP(r), clientUA(r)
+
+	// Blocked attempts (revoked / expired) are STILL audited — a leaked link
+	// being hammered after revoke is the highest-value signal for the seller.
+	// They're flagged Blocked=true so they don't inflate the share counts.
+	if info.Token.RevokedAt != nil {
+		h.logAccess(*info, ip, ua, true)
+		response.Error(w, http.StatusForbidden, "link telah dinonaktifkan oleh penjual")
+		return
+	}
 	if info.Token.ExpiresAt != nil && info.Token.ExpiresAt.Before(time.Now()) {
+		h.logAccess(*info, ip, ua, true)
 		response.Error(w, http.StatusGone, "link sudah kedaluwarsa")
 		return
 	}
 
-	// Best-effort consumption bump. Detach from r.Context() — that ctx
-	// is cancelled the instant the handler returns (BUG-021), causing
-	// the UPDATE to silently drop. context.Background with a short
-	// timeout keeps the goroutine alive long enough to commit, and any
-	// failure is logged rather than swallowed so we can spot a broken
-	// audit pipeline.
+	// Successful open: bump consumption + audit (not blocked).
 	go func(t string) {
 		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := h.tokens.MarkConsumed(bgCtx, t); err != nil {
-			h.logger.Error("download: mark consumed",
-				"err", err, "token_prefix", t[:8])
+			h.logger.Error("download: mark consumed", "err", err, "token_prefix", t[:8])
 		}
 	}(token)
+	h.logAccess(*info, ip, ua, false)
 
 	out := downloadDTO{
 		StoreName:           info.StoreName,
@@ -96,4 +140,27 @@ func (h *DownloadHandler) Get(w http.ResponseWriter, r *http.Request) {
 		out.ExpiresAt = info.Token.ExpiresAt.Format(time.RFC3339)
 	}
 	response.JSON(w, http.StatusOK, map[string]any{"download": out})
+}
+
+// logAccess records one download-link access (best-effort, detached from the
+// request context which dies when the handler returns). blocked=true marks a
+// hit on a revoked/expired link so the seller can see post-revoke abuse without
+// it polluting the success/share counts.
+func (h *DownloadHandler) logAccess(in repository.DownloadInfo, ip, ua string, blocked bool) {
+	go func() {
+		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := h.logs.Create(bgCtx, repository.DownloadLog{
+			TokenID:     in.Token.ID,
+			StoreID:     in.Token.StoreID,
+			OrderID:     in.Token.OrderID,
+			OrderItemID: in.Token.OrderItemID,
+			CustomerID:  in.CustomerID,
+			IPAddress:   ip,
+			UserAgent:   ua,
+			Blocked:     blocked,
+		}); err != nil {
+			h.logger.Error("download: audit log", "err", err, "token", in.Token.ID)
+		}
+	}()
 }
