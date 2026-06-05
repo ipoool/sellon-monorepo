@@ -219,6 +219,14 @@ func (c *Client) SearchCities(ctx context.Context, query string, limit int) ([]C
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		// Komerce returns 404 "Data not found" for a query with no matching
+		// destinations (e.g. a partial like "depo"). That's a normal empty
+		// result, not an error — cache + return [] so the UI shows "no match"
+		// instead of a 502.
+		c.cache.set(cacheKey, []City{})
+		return []City{}, nil
+	}
 	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		return nil, fmt.Errorf("komerce destination status %d: %s", resp.StatusCode, body)
@@ -307,6 +315,11 @@ func (c *Client) Cost(ctx context.Context, req CostRequest) ([]CostOption, error
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		// No shipping options for this route/courier — empty, not an error.
+		c.cache.set(cacheKey, []CostOption{})
+		return []CostOption{}, nil
+	}
 	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		return nil, fmt.Errorf("komerce cost status %d: %s", resp.StatusCode, body)
