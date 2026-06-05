@@ -115,6 +115,45 @@ func (c *Client) IsConfigured() bool {
 	return c != nil && c.apiKey != ""
 }
 
+// doRetry runs the request, retrying transient failures (network errors, HTTP
+// 429, and 5xx) a few times with linear backoff. Komerce throttles bursts
+// (e.g. the city autocomplete firing per keystroke) with a 429/5xx that usually
+// succeeds on a quick retry — this keeps those from surfacing as user-facing
+// 502s. Auth/4xx (e.g. invalid key) are returned immediately (won't recover).
+// `build` recreates the request each attempt because the body is consumed.
+func (c *Client) doRetry(ctx context.Context, build func() (*http.Request, error)) (*http.Response, error) {
+	const maxAttempts = 3
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if attempt > 0 {
+			// Linear backoff (300ms, 600ms); abort early if the caller's
+			// context is cancelled (e.g. the FE aborted a superseded keystroke).
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(time.Duration(attempt) * 300 * time.Millisecond):
+			}
+		}
+		req, err := build()
+		if err != nil {
+			return nil, err
+		}
+		resp, err := c.http.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+			resp.Body.Close()
+			lastErr = fmt.Errorf("komerce status %d: %s", resp.StatusCode, body)
+			continue
+		}
+		return resp, nil
+	}
+	return nil, lastErr
+}
+
 func New(apiKey, tier string) *Client {
 	t := Tier(strings.ToLower(strings.TrimSpace(tier)))
 	switch t {
@@ -168,13 +207,14 @@ func (c *Client) SearchCities(ctx context.Context, query string, limit int) ([]C
 		"%s/destination/domestic-destination?search=%s&limit=%d&offset=0",
 		baseURL, url.QueryEscape(q), limit,
 	)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("key", c.apiKey)
-
-	resp, err := c.http.Do(req)
+	resp, err := c.doRetry(ctx, func() (*http.Request, error) {
+		req, rerr := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if rerr != nil {
+			return nil, rerr
+		}
+		req.Header.Set("key", c.apiKey)
+		return req, nil
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -250,17 +290,19 @@ func (c *Client) Cost(ctx context.Context, req CostRequest) ([]CostOption, error
 	form.Set("weight", strconv.Itoa(req.WeightG))
 	form.Set("courier", courier)
 
-	httpReq, err := http.NewRequestWithContext(ctx,
-		http.MethodPost, baseURL+"/calculate/domestic-cost",
-		strings.NewReader(form.Encode()),
-	)
-	if err != nil {
-		return nil, err
-	}
-	httpReq.Header.Set("key", c.apiKey)
-	httpReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := c.http.Do(httpReq)
+	encoded := form.Encode()
+	resp, err := c.doRetry(ctx, func() (*http.Request, error) {
+		httpReq, rerr := http.NewRequestWithContext(ctx,
+			http.MethodPost, baseURL+"/calculate/domestic-cost",
+			strings.NewReader(encoded),
+		)
+		if rerr != nil {
+			return nil, rerr
+		}
+		httpReq.Header.Set("key", c.apiKey)
+		httpReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		return httpReq, nil
+	})
 	if err != nil {
 		return nil, err
 	}

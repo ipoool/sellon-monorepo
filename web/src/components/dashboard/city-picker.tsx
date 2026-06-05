@@ -5,7 +5,6 @@ import { MapPin, Search, X } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { showError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -46,6 +45,10 @@ export function CityPicker({
   const [loading, setLoading] = useState(false);
   // True when /cities/search returns 503 - degrades to plain text input.
   const [noServer, setNoServer] = useState(false);
+  // True when a search request failed transiently (e.g. RajaOngkir 502/429) —
+  // shown as a subtle inline hint instead of a scary global toast, since the
+  // next keystroke usually succeeds (and the API now retries transient errors).
+  const [searchErr, setSearchErr] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Re-sync the visible label whenever the parent provides a fresh
@@ -62,6 +65,15 @@ export function CityPicker({
     if (!open) return;
     const ctrl = new AbortController();
     const t = setTimeout(() => {
+      // Require ≥3 chars before hitting the API — cuts the per-keystroke load
+      // on RajaOngkir's tight quota (1-2 char prefixes aren't useful anyway).
+      if (query.trim().length < 3) {
+        setResults([]);
+        setSearchErr(false);
+        setLoading(false);
+        return;
+      }
+      setLoading(true);
       void fetch(
         `${apiBase}/api/v1/cities/search?q=${encodeURIComponent(query)}`,
         { signal: ctrl.signal },
@@ -85,14 +97,17 @@ export function CityPicker({
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
           const data = (await r.json()) as { cities: CityResult[] };
           setNoServer(false);
+          setSearchErr(false);
           setResults(data.cities ?? []);
         })
         .catch((err) => {
           if ((err as Error).name === "AbortError") return;
-          showError("Gagal cari kota");
+          // Transient (e.g. RajaOngkir throttle) — show a soft inline hint,
+          // not a global toast. The next keystroke usually recovers.
+          setSearchErr(true);
+          setResults([]);
         })
         .finally(() => setLoading(false));
-      setLoading(true);
     }, 250);
     return () => {
       ctrl.abort();
@@ -166,7 +181,7 @@ export function CityPicker({
           </button>
         )}
 
-        {open && (results.length > 0 || loading) && (
+        {open && (results.length > 0 || loading || searchErr) && (
           <ul
             role="listbox"
             className="absolute left-0 right-0 top-full z-20 mt-1 max-h-72 overflow-y-auto rounded-lg border border-neutral-200 bg-white shadow-popout"
@@ -174,6 +189,11 @@ export function CityPicker({
             {loading && (
               <li className="px-3 py-2 text-sm text-neutral-500">
                 Mencari…
+              </li>
+            )}
+            {!loading && searchErr && (
+              <li className="px-3 py-2 text-sm text-neutral-500">
+                Gagal cari kota, coba ketik lagi.
               </li>
             )}
                         {!loading && results.length === 0 && query && (
