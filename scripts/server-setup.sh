@@ -56,6 +56,9 @@ SWARM_NETWORK="${SWARM_NETWORK:-sellon-net}"
 log()  { printf "\n\033[1;36m▶ %s\033[0m\n" "$*"; }
 ok()   { printf "  \033[1;32m✓\033[0m %s\n" "$*"; }
 warn() { printf "  \033[1;33m⚠\033[0m %s\n" "$*"; }
+# note() = informational reminder (blue ℹ), NOT an error. Used for things the
+# script can't verify from the host (e.g. your Cloudflare/DNS dashboard settings).
+note() { printf "  \033[1;34mℹ\033[0m %s\n" "$*"; }
 die()  { printf "\n\033[1;31m✗ %s\033[0m\n" "$*" >&2; exit 1; }
 
 need_root() {
@@ -431,7 +434,7 @@ setup_caddy() {
   if [[ -f "$ORIGIN_CERT" && -f "$ORIGIN_KEY" ]]; then
     platform_tls="tls ${ORIGIN_CERT} ${ORIGIN_KEY}"
     ok "Origin certificate ditemukan — platform domain pakai cert ini (cocok di belakang Cloudflare proxy)."
-    warn "Pastikan SSL/TLS mode Cloudflare = Full (strict)."
+    note "Pengingat (bukan error): pastikan SSL/TLS mode Cloudflare = Full (strict)."
   else
     warn "Origin certificate belum ada (${ORIGIN_CERT} + ${ORIGIN_KEY})."
     warn "Kalau ${DOMAIN} di belakang Cloudflare proxy (awan oranye), Caddy TIDAK bisa ambil"
@@ -500,11 +503,11 @@ EOF
   systemctl reload caddy 2>/dev/null || systemctl restart caddy
   ok "Caddy aktif (auto-renewal cert built-in)"
 
-  warn "DNS yang harus disiapkan:"
-  warn "  - A record  ${DOMAIN} / www / api  → IP server ini (boleh Proxied kalau pakai origin cert)"
-  warn "  - A record  cname.sellon.id → IP server ini, WAJIB 'DNS only' (grey cloud), bukan Proxied —"
-  warn "    domain custom seller CNAME ke sini & harus mendarat langsung di origin untuk on-demand TLS."
-  warn "    Juga harus A record terminal (bukan CNAME berantai) supaya verifikasi DNS seller match."
+  note "Pengingat DNS (bukan error — script tidak bisa cek dashboard DNS-mu):"
+  note "  - A record  ${DOMAIN} / www / api  → IP server ini (boleh Proxied kalau pakai origin cert)"
+  note "  - A record  cname.sellon.id → IP server ini, WAJIB 'DNS only' (grey cloud), bukan Proxied —"
+  note "    domain custom seller CNAME ke sini & harus mendarat langsung di origin untuk on-demand TLS."
+  note "    Juga harus A record terminal (bukan CNAME berantai) supaya verifikasi DNS seller match."
 }
 
 # ───────────────────────────────────────────────────────────────────────────
