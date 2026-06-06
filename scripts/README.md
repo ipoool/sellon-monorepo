@@ -68,10 +68,21 @@ sudo DOMAIN=your-domain.id LETSENCRYPT_EMAIL=ops@your-domain.id \
 Renewal cert otomatis di-handle Caddy (built-in, tidak perlu certbot/timer).
 
 **Domain custom seller** (fitur Bisnis): seller CNAME domain mereka ke `cname.sellon.id`. Supaya berfungsi, siapkan DNS:
-- A record `your-domain.id` + `www.your-domain.id` → IP server
-- A record `cname.sellon.id` → IP server (**harus A record terminal**, bukan CNAME berantai — kalau berantai, verifikasi DNS seller via `LookupCNAME` tidak akan match)
+- A record `your-domain.id` + `www` + `api` → IP server (boleh **Proxied** kalau pakai Cloudflare Origin Cert — lihat bawah)
+- A record `cname.sellon.id` → IP server, **WAJIB "DNS only" (grey cloud)** — domain custom seller harus mendarat langsung di origin untuk on-demand TLS. Harus A record terminal (bukan CNAME berantai) supaya verifikasi DNS seller via `LookupCNAME` match.
 
 Caddy otomatis terbitkan cert untuk tiap domain custom **on-demand**, tapi hanya kalau API (`/api/v1/internal/tls-check`) konfirmasi domain itu sudah `active` di DB — jadi host asing yang nunjuk ke IP tidak bisa nge-spam penerbitan cert.
+
+#### Platform domain di belakang Cloudflare proxy (orange cloud)
+
+Kalau `DOMAIN` di-Proxied di Cloudflare, Caddy **tidak bisa** ambil cert Let's Encrypt-nya (CF terminate TLS di edge). Pakai **Cloudflare Origin Certificate**:
+
+1. CF dashboard → **SSL/TLS → Origin Server → Create Certificate** (hostnames: `your-domain.id`, `*.your-domain.id`).
+2. Di server simpan: cert → `/etc/caddy/origin/tls.pem`, key → `/etc/caddy/origin/tls.key` (`chmod 600` key-nya).
+3. CF dashboard → **SSL/TLS → Overview → Full (strict)**.
+4. Jalankan ulang: `sudo DOMAIN=your-domain.id LETSENCRYPT_EMAIL=ops@your-domain.id bash scripts/server-setup.sh setup_caddy` — Caddy otomatis deteksi cert + pakai untuk platform domain.
+
+Domain custom seller **tidak terpengaruh** — mereka DNS-only (CNAME ke `cname.sellon.id`), jadi tetap pakai on-demand Let's Encrypt langsung ke origin. (Override path cert via env `ORIGIN_CERT` / `ORIGIN_KEY`.)
 
 ### 2) Di laptop (tiap kali ada perubahan code)
 
