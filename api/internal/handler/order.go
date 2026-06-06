@@ -77,6 +77,8 @@ type orderListItemDTO struct {
 	CustomerName     string `json:"customer_name"`
 	CustomerWhatsApp string `json:"customer_whatsapp"`
 	CustomerCity     string `json:"customer_city"`
+	NeedsReview      bool   `json:"needs_review"`
+	ReviewReason     string `json:"review_reason,omitempty"`
 	CreatedAt        string `json:"created_at"`
 }
 
@@ -186,6 +188,7 @@ func (h *OrderHandler) List(w http.ResponseWriter, r *http.Request) {
 		Search:        strings.TrimSpace(q.Get("q")),
 		Statuses:      statuses,
 		PaymentStatus: q.Get("payment_status"),
+		NeedsReview:   q.Get("needs_review") == "1" || q.Get("needs_review") == "true",
 		Limit:         limit,
 		Offset:        offset,
 	})
@@ -203,6 +206,7 @@ func (h *OrderHandler) List(w http.ResponseWriter, r *http.Request) {
 			SubtotalCents: o.SubtotalCents, ShippingCents: o.ShippingCents, TotalCents: o.TotalCents,
 			Courier: o.Courier,
 			CustomerName: o.CustomerName, CustomerWhatsApp: o.CustomerWhatsApp, CustomerCity: o.CustomerCity,
+			NeedsReview: o.NeedsReview, ReviewReason: o.ReviewReason,
 			CreatedAt: o.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		})
 	}

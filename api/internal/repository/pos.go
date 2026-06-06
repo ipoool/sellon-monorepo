@@ -123,6 +123,10 @@ type CreatePOSOrderInput struct {
 	// Tax config snapshot (from store). TaxBps=0 → no tax. Base = subtotal − discount.
 	TaxBps       int
 	TaxInclusive bool
+	// Offline support. IdempotencyKey ("" = none) makes replay safe; when
+	// Offline is true the stock guard is relaxed (decrement anyway + flag).
+	IdempotencyKey string
+	Offline        bool
 }
 
 type POSOrderResult struct {
@@ -137,6 +141,7 @@ type POSOrderResult struct {
 	CreatedAt        time.Time
 	PointsEarned     int
 	PointsRedeemed   int
+	NeedsReview      bool
 }
 
 // ─── Repo ────────────────────────────────────────────────────────────────────
@@ -471,6 +476,32 @@ func (r *POSRepo) CreatePOSOrder(ctx context.Context, in CreatePOSOrderInput) (*
 	if len(in.Items) == 0 {
 		return nil, errors.New("minimal 1 item")
 	}
+
+	// Idempotency: if this order was already created with the same key (e.g. an
+	// offline order replayed on reconnect), return the existing order instead of
+	// creating a duplicate. Unique index (store_id, idempotency_key) is the
+	// backstop against a concurrent race.
+	if in.IdempotencyKey != "" {
+		var ex POSOrderResult
+		err := r.pool.QueryRow(ctx, `
+			SELECT id, order_number, subtotal_cents, discount_cents, total_cents,
+			       payment_method, change_amount_cents, created_at, tax_cents,
+			       loyalty_points_redeemed, needs_review
+			FROM orders WHERE store_id = $1 AND idempotency_key = $2
+		`, in.StoreID, in.IdempotencyKey).Scan(
+			&ex.OrderID, &ex.OrderNumber,
+			&ex.SubtotalCents, &ex.DiscountCents, &ex.TotalCents,
+			&ex.PaymentMethod, &ex.ChangeAmountCents, &ex.CreatedAt, &ex.TaxCents,
+			&ex.PointsRedeemed, &ex.NeedsReview,
+		)
+		if err == nil {
+			return &ex, nil // already created — replay is a no-op
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return nil, err
+		}
+	}
+
 	// NOTE: empty payments is allowed only for free orders (total 0). The
 	// "paidTotal < total" check below rejects empty payments when total > 0,
 	// so no separate min-payment guard is needed here.
@@ -607,10 +638,22 @@ func (r *POSRepo) CreatePOSOrder(ctx context.Context, in CreatePOSOrderInput) (*
 		}
 		paidTotal += p.AmountCents
 	}
+	// Offline-synced sales were already paid physically against the totals shown
+	// at sale time. If a config change (e.g. tax/loyalty rate) recomputes a higher
+	// total than was collected, still record the order and flag it for review
+	// rather than rejecting — a rejection would lose the sale (cash taken, no
+	// record). Online orders keep the strict guard.
+	paymentShort := false
 	if paidTotal < total {
-		return nil, ErrPOSPaymentShort
+		if !in.Offline {
+			return nil, ErrPOSPaymentShort
+		}
+		paymentShort = true
 	}
 	change := paidTotal - total
+	if change < 0 {
+		change = 0
+	}
 
 	// Determine primary payment method label for orders.payment_method.
 	// A free order (total fully covered by points/discount) carries no
@@ -646,6 +689,13 @@ func (r *POSRepo) CreatePOSOrder(ctx context.Context, in CreatePOSOrderInput) (*
 	// Generate order number — same format as storefront orders.
 	orderNum := generateOrderNumber()
 
+	// Store the idempotency key as NULL when empty so the partial unique index
+	// only constrains real (offline-queued) orders.
+	var idemKey *string
+	if in.IdempotencyKey != "" {
+		idemKey = &in.IdempotencyKey
+	}
+
 	// Insert order. POS orders are completed + paid immediately.
 	var result POSOrderResult
 	now := time.Now().UTC()
@@ -659,7 +709,7 @@ func (r *POSRepo) CreatePOSOrder(ctx context.Context, in CreatePOSOrderInput) (*
 		    source, pos_session_id, change_amount_cents,
 		    loyalty_points_redeemed, loyalty_discount_cents,
 		    tax_cents, tax_bps, tax_inclusive,
-		    paid_at, completed_at
+		    paid_at, completed_at, idempotency_key
 		)
 		VALUES (
 		    $1, $2, $3,
@@ -670,7 +720,7 @@ func (r *POSRepo) CreatePOSOrder(ctx context.Context, in CreatePOSOrderInput) (*
 		    'pos', $11, $12,
 		    $13, $14,
 		    $16, $17, $18,
-		    $15, $15
+		    $15, $15, $19
 		)
 		RETURNING id, order_number, subtotal_cents, discount_cents, total_cents,
 		          payment_method, change_amount_cents, created_at, tax_cents
@@ -684,6 +734,7 @@ func (r *POSRepo) CreatePOSOrder(ctx context.Context, in CreatePOSOrderInput) (*
 		redeemPoints, redeemDiscount,
 		now,
 		taxCents, in.TaxBps, in.TaxInclusive,
+		idemKey,
 	).Scan(
 		&result.OrderID, &result.OrderNumber,
 		&result.SubtotalCents, &result.DiscountCents, &result.TotalCents,
@@ -692,7 +743,9 @@ func (r *POSRepo) CreatePOSOrder(ctx context.Context, in CreatePOSOrderInput) (*
 		return nil, fmt.Errorf("insert order: %w", err)
 	}
 
-	// Decrement stock + insert order_items.
+	// Decrement stock + insert order_items. needsReview is flipped when an
+	// offline-synced order has to overdraw stock (sale already happened).
+	needsReview := false
 	for _, it := range in.Items {
 		isDigital := it.ProductType == "digital"
 
@@ -722,7 +775,26 @@ func (r *POSRepo) CreatePOSOrder(ctx context.Context, in CreatePOSOrderInput) (*
 				rowsAffected = tag.RowsAffected()
 			}
 			if rowsAffected == 0 {
-				return nil, ErrStockInsufficient
+				if !in.Offline {
+					return nil, ErrStockInsufficient
+				}
+				// Offline-synced sale already happened physically — decrement
+				// anyway (stock may go negative) and flag the order for the
+				// seller to reconcile manually.
+				needsReview = true
+				if it.VariantID != nil {
+					if _, err := tx.Exec(ctx,
+						`UPDATE product_variants SET stock = stock - $2 WHERE id = $1`,
+						*it.VariantID, it.Quantity); err != nil {
+						return nil, fmt.Errorf("offline decrement variant stock: %w", err)
+					}
+				} else {
+					if _, err := tx.Exec(ctx,
+						`UPDATE products SET stock = stock - $2, updated_at = now() WHERE id = $1`,
+						*it.ProductID, it.Quantity); err != nil {
+						return nil, fmt.Errorf("offline decrement product stock: %w", err)
+					}
+				}
 			}
 		}
 
@@ -816,6 +888,25 @@ func (r *POSRepo) CreatePOSOrder(ctx context.Context, in CreatePOSOrderInput) (*
 				result.PointsEarned = earn
 			}
 		}
+	}
+
+	// Flag the order if an offline sale had to overdraw stock or came up short on
+	// payment after a config change. Either way the seller reconciles manually.
+	if needsReview || paymentShort {
+		reason := "stok tidak cukup saat sync offline"
+		switch {
+		case needsReview && paymentShort:
+			reason = "stok kurang & pembayaran kurang dari total saat sync offline"
+		case paymentShort:
+			reason = "pembayaran kurang dari total saat sync offline"
+		}
+		if _, err := tx.Exec(ctx,
+			`UPDATE orders SET needs_review = true, review_reason = $2 WHERE id = $1`,
+			result.OrderID, reason,
+		); err != nil {
+			return nil, fmt.Errorf("flag needs_review: %w", err)
+		}
+		result.NeedsReview = true
 	}
 
 	if err := tx.Commit(ctx); err != nil {

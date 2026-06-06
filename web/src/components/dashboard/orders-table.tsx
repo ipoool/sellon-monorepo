@@ -82,6 +82,11 @@ export function OrdersTable({ orders, page, total }: Props) {
                 <Badge variant={paymentBadge[o.payment_status].variant}>
                   {paymentBadge[o.payment_status].label}
                 </Badge>
+                {o.needs_review && (
+                  <Badge variant="warning" title={o.review_reason || "Perlu dicek"}>
+                    Perlu dicek
+                  </Badge>
+                )}
               </div>
               <span className="inline-flex items-center gap-1 text-xs font-medium text-brand-600">
                 Detail <ArrowRight className="size-3" aria-hidden />
@@ -121,9 +126,16 @@ export function OrdersTable({ orders, page, total }: Props) {
                   {formatRupiah(o.total_cents)}
                 </td>
                 <td className="px-5 py-3">
-                  <Badge variant={statusBadge[o.status].variant}>
-                    {statusBadge[o.status].label}
-                  </Badge>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <Badge variant={statusBadge[o.status].variant}>
+                      {statusBadge[o.status].label}
+                    </Badge>
+                    {o.needs_review && (
+                      <Badge variant="warning" title={o.review_reason || "Perlu dicek"}>
+                        Perlu dicek
+                      </Badge>
+                    )}
+                  </div>
                 </td>
                 <td className="px-5 py-3">
                   <Badge variant={paymentBadge[o.payment_status].variant}>

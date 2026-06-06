@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { LogOut, Banknote, PauseCircle, Power, Clock } from "lucide-react";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { usePOS } from "./pos-context";
+import { OfflineIndicator } from "./offline-indicator";
 import type { POSSession } from "@/lib/types";
 import type { Me } from "@/lib/auth-types";
 
@@ -22,6 +23,7 @@ export function POSHeader({ me, session, onCashMovement, onHoldOrders, onCloseSh
   const [showExitConfirm, setShowExitConfirm] = useState(false);
 
   const openedAt = new Date(session.opened_at).toLocaleTimeString("id-ID", {
+    timeZone: "Asia/Jakarta",
     hour: "2-digit",
     minute: "2-digit",
   });
@@ -37,6 +39,7 @@ export function POSHeader({ me, session, onCashMovement, onHoldOrders, onCloseSh
       </div>
 
       <div className="flex shrink-0 items-center gap-2">
+        <OfflineIndicator />
         <button
           onClick={onHoldOrders}
           className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-4 py-2.5 text-sm font-medium text-neutral-700 transition-colors hover:bg-neutral-50 active:bg-neutral-100"

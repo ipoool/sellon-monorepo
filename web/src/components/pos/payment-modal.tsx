@@ -6,6 +6,8 @@ import { formatRupiah } from "@/lib/format";
 import { showError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { usePOS } from "./pos-context";
+import { isOnline, useOnlineStatus } from "@/lib/offline/online";
+import { enqueueOrder } from "@/lib/offline/db";
 import type { POSPayment, POSPaymentMethod, POSOrderResult } from "@/lib/types";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -43,7 +45,7 @@ function isEDC(m: POSPaymentMethod): boolean {
 }
 
 export function PaymentModal({ totalCents, onClose, onSuccess }: Props) {
-  const { session, cart, discount, customerName, customerWA, subtotalCents, redeemPoints, midtransLive } = usePOS();
+  const { session, cart, discount, customerName, customerWA, subtotalCents, redeemPoints, midtransLive, offlineEnabled, taxConfig } = usePOS();
   const [mode, setMode] = useState<Mode>("single");
   const [singleMethod, setSingleMethod] = useState<POSPaymentMethod>("cash");
   const [singleAmount, setSingleAmount] = useState<number>(totalCents);
@@ -56,10 +58,21 @@ export function PaymentModal({ totalCents, onClose, onSuccess }: Props) {
   const [edcRef, setEdcRef] = useState("");
   const [edcApproval, setEdcApproval] = useState("");
 
+  // Cash-only only while actually disconnected: non-cash rails (QRIS/Transfer/
+  // Midtrans/EDC) need connectivity. When online — even with Offline Mode
+  // enabled — every method works and the order POSTs normally; the cashier is
+  // locked to cash only once the connection actually drops.
+  const online = useOnlineStatus();
+  const cashOnly = offlineEnabled && !online;
+  const effectiveMethod: POSPaymentMethod = cashOnly ? "cash" : singleMethod;
+  // Split-pay needs non-cash rails to be meaningful, so cash-only collapses to a
+  // single cash payment.
+  const effectiveMode: Mode = cashOnly ? "single" : mode;
+
   const singlePayment: POSPayment = {
-    method: singleMethod,
+    method: effectiveMethod,
     amount_cents: singleAmount,
-    ...(isEDC(singleMethod)
+    ...(isEDC(effectiveMethod)
       ? {
           card_brand: edcBank,
           card_last4: edcLast4,
@@ -69,7 +82,7 @@ export function PaymentModal({ totalCents, onClose, onSuccess }: Props) {
       : {}),
   };
 
-  const payments: POSPayment[] = mode === "single" ? [singlePayment] : splitRows;
+  const payments: POSPayment[] = effectiveMode === "single" ? [singlePayment] : splitRows;
 
   const paid = useMemo(
     () => payments.reduce((sum, p) => sum + (p.amount_cents || 0), 0),
@@ -105,58 +118,108 @@ export function PaymentModal({ totalCents, onClose, onSuccess }: Props) {
   const handleSubmit = async () => {
     if (!session || !canSubmit) return;
     setSubmitting(true);
+
+    const items = cart.map((c) => {
+      // Auto-apply tier discount: hitung effective unit price per item.
+      let effectiveUnit = c.unit_cents;
+      if (c.discounts && c.discounts.length > 0) {
+        const best = c.discounts
+          .filter((d) => d.is_active && d.min_quantity <= c.quantity)
+          .sort((a, b) => b.min_quantity - a.min_quantity)[0];
+        if (best) {
+          const lineGross = c.unit_cents * c.quantity;
+          let lineDisc = 0;
+          if (best.discount_type === "percent") {
+            const v = Math.max(0, Math.min(100, best.discount_value));
+            lineDisc = Math.floor((lineGross * v) / 100);
+          } else {
+            lineDisc = Math.min(lineGross, Math.max(0, best.discount_value));
+          }
+          if (c.quantity > 0) {
+            effectiveUnit = Math.floor((lineGross - lineDisc) / c.quantity);
+          }
+        }
+      }
+      return {
+        product_id: c.product_id,
+        variant_id: c.variant_id ?? null,
+        quantity: c.quantity,
+        unit_cents: effectiveUnit,
+        product_name: c.product_name,
+        variant_name: c.variant_name ?? "",
+        product_type: c.product_type,
+        selected_option_ids: (c.selected_options ?? []).map((o) => o.option_id),
+        serving_type: c.serving_type ?? "",
+      };
+    });
+
+    const idempotencyKey =
+      typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${session.id}-${Date.now()}`;
+
+    const basePayload = {
+      session_id: session.id,
+      customer_name: customerName,
+      customer_wa: customerWA,
+      discount_type: discount.type ?? "",
+      discount_value: discount.value || 0,
+      redeem_points: redeemPoints,
+      items,
+      payments: isFree ? [] : payments,
+      idempotency_key: idempotencyKey,
+      // Tax snapshot at sale time — the server honors this for offline orders so
+      // the synced total matches what was collected even if the store's tax
+      // setting changes before the queued order syncs.
+      offline_tax_bps: taxConfig?.enabled ? (taxConfig.bps ?? 0) : 0,
+      offline_tax_inclusive: !!taxConfig?.inclusive,
+    };
+
+    // Queue the sale locally + show a local receipt; the sync engine replays it
+    // (offline:true → server relaxes the stock/payment guard and flags if short).
+    const queueOffline = async () => {
+      const localNumber = "LOKAL-" + idempotencyKey.slice(0, 6).toUpperCase();
+      try {
+        await enqueueOrder({
+          idempotency_key: idempotencyKey,
+          payload: { ...basePayload, offline: true },
+          local_number: localNumber,
+          total_cents: totalCents,
+          status: "pending",
+          created_at: Date.now(),
+        });
+      } catch {
+        // IndexedDB unavailable/full (private mode, quota). Surface it instead of
+        // silently dropping the sale + showing a success modal.
+        showError("Gagal menyimpan transaksi offline di perangkat ini. Coba lagi.");
+        return;
+      }
+      onSuccess({
+        order_id: idempotencyKey,
+        order_number: localNumber,
+        subtotal_cents: subtotalCents,
+        discount_cents: 0,
+        total_cents: totalCents,
+        payment_method: effectiveMode === "split" ? "pos_split" : effectiveMethod,
+        change_amount_cents: Math.max(0, change),
+        created_at: new Date().toISOString(),
+      } as POSOrderResult);
+    };
+
     try {
+      // Clearly offline + offline mode enabled → don't even try the network.
+      if (offlineEnabled && !isOnline()) {
+        await queueOffline();
+        return;
+      }
       const res = await fetch(`${apiBase}/api/v1/pos/orders`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          session_id: session.id,
-          customer_name: customerName,
-          customer_wa: customerWA,
-          discount_type: discount.type ?? "",
-          discount_value: discount.value || 0,
-          redeem_points: redeemPoints,
-          // Free order (total 0): no payment rows — points/discount cover it.
-          items: cart.map((c) => {
-            // Auto-apply tier discount: hitung effective unit price per item.
-            let effectiveUnit = c.unit_cents;
-            if (c.discounts && c.discounts.length > 0) {
-              const best = c.discounts
-                .filter((d) => d.is_active && d.min_quantity <= c.quantity)
-                .sort((a, b) => b.min_quantity - a.min_quantity)[0];
-              if (best) {
-                const lineGross = c.unit_cents * c.quantity;
-                let lineDisc = 0;
-                if (best.discount_type === "percent") {
-                  const v = Math.max(0, Math.min(100, best.discount_value));
-                  lineDisc = Math.floor((lineGross * v) / 100);
-                } else {
-                  lineDisc = Math.min(lineGross, Math.max(0, best.discount_value));
-                }
-                if (c.quantity > 0) {
-                  effectiveUnit = Math.floor((lineGross - lineDisc) / c.quantity);
-                }
-              }
-            }
-            return {
-              product_id: c.product_id,
-              variant_id: c.variant_id ?? null,
-              quantity: c.quantity,
-              unit_cents: effectiveUnit,
-              product_name: c.product_name,
-              variant_name: c.variant_name ?? "",
-              product_type: c.product_type,
-              selected_option_ids: (c.selected_options ?? []).map(
-                (o) => o.option_id,
-              ),
-              serving_type: c.serving_type ?? "",
-            };
-          }),
-          payments: isFree ? [] : payments,
-        }),
+        body: JSON.stringify(basePayload),
       });
       if (!res.ok) {
+        // A real rejection (payment short, etc.) — surface it, don't queue.
         const err = await res.json().catch(() => ({}));
         showError(err.error || `HTTP ${res.status}`);
         return;
@@ -164,7 +227,14 @@ export function PaymentModal({ totalCents, onClose, onSuccess }: Props) {
       const data: POSOrderResult = await res.json();
       onSuccess(data);
     } catch (e) {
-      showError(`Gagal memproses pembayaran: ${e}`);
+      // Network failure mid-submit: queue it if offline mode is on (the same
+      // idempotency_key makes a retry safe even if the server did get it),
+      // otherwise surface the error.
+      if (offlineEnabled) {
+        await queueOffline();
+      } else {
+        showError(`Gagal memproses pembayaran: ${e}`);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -205,8 +275,9 @@ export function PaymentModal({ totalCents, onClose, onSuccess }: Props) {
           </button>
         </div>
 
-        {/* Mode tabs — hidden for free orders (no payment to split) */}
-        {!isFree && (
+        {/* Mode tabs — hidden for free orders (no payment to split) and when
+            cash-only (split is meaningless with a single cash rail). */}
+        {!isFree && !cashOnly && (
         <div className="border-b border-neutral-100 px-5 pt-3">
           <div className="inline-flex gap-1 rounded-lg border border-neutral-200 bg-neutral-100 p-1">
             <button
@@ -259,23 +330,36 @@ export function PaymentModal({ totalCents, onClose, onSuccess }: Props) {
                 proses saja.
               </p>
             </div>
-          ) : mode === "single" ? (
+          ) : effectiveMode === "single" ? (
             <>
+              {cashOnly && (
+                <p className="mb-3 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs leading-relaxed text-neutral-700">
+                  Sedang offline — hanya pembayaran <strong>tunai</strong> yang
+                  tersedia. Metode lain otomatis aktif saat internet kembali.
+                </p>
+              )}
               <div className="grid grid-cols-4 gap-2">
                 {(Object.keys(methodLabels) as POSPaymentMethod[]).map((m) => {
                   const Icon = methodIcons[m];
-                  const disabled = m === "midtrans" && !midtransLive;
+                  const offlineBlocked = cashOnly && m !== "cash";
+                  const disabled = (m === "midtrans" && !midtransLive) || offlineBlocked;
                   return (
                     <button
                       key={m}
                       onClick={() => !disabled && setSingleMethod(m)}
                       disabled={disabled}
-                      title={disabled ? "Midtrans belum aktif — verifikasi key di Pengaturan Pembayaran" : undefined}
+                      title={
+                        offlineBlocked
+                          ? "Sedang offline — hanya tunai yang tersedia"
+                          : disabled
+                            ? "Midtrans belum aktif — verifikasi key di Pengaturan Pembayaran"
+                            : undefined
+                      }
                       className={cn(
                         "relative flex flex-col items-center gap-1 rounded-lg border-2 p-3 text-xs font-medium transition-colors",
                         disabled
                           ? "cursor-not-allowed border-neutral-200 bg-neutral-50 text-neutral-400 opacity-60"
-                          : singleMethod === m
+                          : effectiveMethod === m
                             ? "border-brand-500 bg-brand-50 text-brand-700"
                             : "border-neutral-200 bg-white text-neutral-600 hover:border-neutral-300",
                       )}
@@ -294,7 +378,7 @@ export function PaymentModal({ totalCents, onClose, onSuccess }: Props) {
 
               <div className="mt-4 flex flex-col gap-2">
                 <label className="text-sm font-medium text-neutral-700">
-                  {singleMethod === "cash" ? "Uang Diterima" : "Nominal"}
+                  {effectiveMethod === "cash" ? "Uang Diterima" : "Nominal"}
                 </label>
                 <div className="relative">
                   <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-neutral-400">
@@ -316,7 +400,7 @@ export function PaymentModal({ totalCents, onClose, onSuccess }: Props) {
                   />
                 </div>
 
-                {singleMethod === "cash" && (
+                {effectiveMethod === "cash" && (
                   <>
                     <div className="flex flex-wrap gap-1.5">
                       {[totalCents, 50_000_00, 100_000_00, 200_000_00, 500_000_00].map((amt) => (
@@ -340,7 +424,7 @@ export function PaymentModal({ totalCents, onClose, onSuccess }: Props) {
                   </>
                 )}
 
-                {isEDC(singleMethod) && (
+                {isEDC(effectiveMethod) && (
                   <div className="mt-2 grid gap-2 rounded-lg border border-neutral-200 bg-neutral-50 p-3 sm:grid-cols-2">
                     <div className="flex flex-col gap-1 sm:col-span-1">
                       <label className="text-xs font-medium text-neutral-600">Bank</label>

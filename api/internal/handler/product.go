@@ -279,6 +279,18 @@ func (h *ProductHandler) List(w http.ResponseWriter, r *http.Request) {
 		aggs = map[uuid.UUID]repository.VariantAggregate{}
 	}
 
+	// POS asks for the full variant rows inline (include_variants=1) so the
+	// offline catalog cache holds everything — the cashier can open the variant
+	// picker with no network. One batch query, only for has_variants products.
+	var variantsByProduct map[uuid.UUID][]repository.Variant
+	if q.Get("include_variants") == "1" || q.Get("include_variants") == "true" {
+		variantsByProduct, err = h.variants.ListByProducts(r.Context(), ids)
+		if err != nil {
+			h.logger.Error("list variants for products", "err", err)
+			variantsByProduct = map[uuid.UUID][]repository.Variant{}
+		}
+	}
+
 	// Batch-load active tier discounts in one query so POS can auto-apply
 	// without N+1 round trips.
 	productIDs := make([]uuid.UUID, 0, len(items))
@@ -301,9 +313,13 @@ func (h *ProductHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	out := make([]productDTO, 0, len(items))
 	for i := range items {
-		// List view doesn't fetch variants for each row (N+1 avoidance);
-		// callers needing variants use GET /products/{id}.
-		dto := toProductDTO(&items[i], nil)
+		// List view omits variants by default (N+1 avoidance); callers needing
+		// them either use GET /products/{id} or pass include_variants=1 (POS).
+		var v []repository.Variant
+		if variantsByProduct != nil {
+			v = variantsByProduct[items[i].ID]
+		}
+		dto := toProductDTO(&items[i], v)
 		if agg, ok := aggs[items[i].ID]; ok {
 			dto.VariantsCount = agg.Count
 			dto.VariantsStock = agg.StockTotal

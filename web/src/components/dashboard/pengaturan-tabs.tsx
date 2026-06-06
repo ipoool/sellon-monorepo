@@ -21,6 +21,7 @@ import {
   ImageIcon,
   Megaphone,
   Receipt,
+  WifiOff,
   ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -43,6 +44,7 @@ const tabs = [
   { label: "Pengiriman", href: "/settings/shipping", icon: Truck },
   { label: "Field Checkout", href: "/settings/checkout", icon: ClipboardList, bisnisOnly: true },
   { label: "Printer", href: "/settings/printer", icon: Printer, bisnisOnly: true },
+  { label: "Mode Offline", href: "/settings/offline", icon: WifiOff, bisnisOnly: true },
   { label: "WhatsApp", href: "/settings/whatsapp", icon: MessageCircle },
   { label: "Tim", href: "/settings/team", icon: Users },
   { label: "Aktivitas", href: "/settings/activity", icon: History },

@@ -54,6 +54,8 @@ type Order struct {
 	CustomerCity       string
 	Notes              string
 	SellerNotes        string
+	NeedsReview        bool   // offline-synced order that overdrew stock
+	ReviewReason       string
 	PaymentURL         string
 	PaidAt             *time.Time
 	ShippedAt          *time.Time
@@ -151,6 +153,7 @@ type ListOrdersFilter struct {
 	Status        string   // "" = all (single-value, legacy callers)
 	Statuses      []string // non-empty = filter to this set (status = ANY); takes precedence over Status
 	PaymentStatus string   // "" = all
+	NeedsReview   bool     // true = only orders flagged for review (offline sync conflicts)
 	Limit         int
 	Offset        int
 }
@@ -187,6 +190,9 @@ func (r *OrderRepo) List(ctx context.Context, f ListOrdersFilter) ([]Order, int,
 		args = append(args, f.PaymentStatus)
 		where += " AND payment_status = $" + itoa(len(args))
 	}
+	if f.NeedsReview {
+		where += " AND needs_review = true"
+	}
 
 	var total int
 	if err := r.pool.QueryRow(ctx,
@@ -199,7 +205,7 @@ func (r *OrderRepo) List(ctx context.Context, f ListOrdersFilter) ([]Order, int,
 	q := `
 		SELECT id, store_id, order_number, status, payment_status, payment_method,
 		       subtotal_cents, shipping_cents, discount_cents, tax_cents, total_cents, courier,
-		       customer_name, customer_whatsapp, customer_city, created_at
+		       customer_name, customer_whatsapp, customer_city, needs_review, review_reason, created_at
 		FROM orders
 		WHERE ` + where + `
 		ORDER BY created_at DESC
@@ -217,7 +223,7 @@ func (r *OrderRepo) List(ctx context.Context, f ListOrdersFilter) ([]Order, int,
 		if err := rows.Scan(
 			&o.ID, &o.StoreID, &o.OrderNumber, &o.Status, &o.PaymentStatus, &o.PaymentMethod,
 			&o.SubtotalCents, &o.ShippingCents, &o.DiscountCents, &o.TaxCents, &o.TotalCents, &o.Courier,
-			&o.CustomerName, &o.CustomerWhatsApp, &o.CustomerCity, &o.CreatedAt,
+			&o.CustomerName, &o.CustomerWhatsApp, &o.CustomerCity, &o.NeedsReview, &o.ReviewReason, &o.CreatedAt,
 		); err != nil {
 			return nil, 0, err
 		}

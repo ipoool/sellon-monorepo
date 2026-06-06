@@ -607,7 +607,17 @@ func (h *POSHandler) CreatePOSOrder(w http.ResponseWriter, r *http.Request) {
 		DiscountValue int64  `json:"discount_value"`
 		RedeemPoints  int    `json:"redeem_points"`
 		Notes         string `json:"notes"`
-		Items         []struct {
+		// Offline support: idempotency_key (client UUID per order) makes replay
+		// of a queued offline order safe; offline=true relaxes the stock guard
+		// (decrement anyway + flag for review) since the sale already happened.
+		IdempotencyKey string `json:"idempotency_key"`
+		Offline        bool   `json:"offline"`
+		// Tax snapshot captured at offline sale time. Honored only for offline
+		// orders so the synced total matches what the cashier actually collected,
+		// even if the store's tax setting changed before the order synced.
+		OfflineTaxBps       *int  `json:"offline_tax_bps"`
+		OfflineTaxInclusive *bool `json:"offline_tax_inclusive"`
+		Items               []struct {
 			ProductID         string   `json:"product_id"`
 			VariantID         *string  `json:"variant_id"`
 			Quantity          int      `json:"quantity"`
@@ -745,6 +755,14 @@ func (h *POSHandler) CreatePOSOrder(w http.ResponseWriter, r *http.Request) {
 	if posStore, serr := h.stores.FindByID(r.Context(), c.storeID); serr == nil && posStore.TaxEnabled {
 		taxBps, taxInclusive = posStore.TaxBps, posStore.TaxInclusive
 	}
+	// Offline orders were rung up against the tax in effect at sale time. Honor
+	// the snapshot the client queued so the synced total matches what the cashier
+	// actually collected — otherwise a tax change between sale and sync would
+	// recompute a different total and could trip the payment guard.
+	if body.Offline && body.OfflineTaxBps != nil {
+		taxBps = *body.OfflineTaxBps
+		taxInclusive = body.OfflineTaxInclusive != nil && *body.OfflineTaxInclusive
+	}
 
 	result, err := h.pos.CreatePOSOrder(r.Context(), repository.CreatePOSOrderInput{
 		StoreID:       c.storeID,
@@ -756,10 +774,12 @@ func (h *POSHandler) CreatePOSOrder(w http.ResponseWriter, r *http.Request) {
 		Payments:      payments,
 		DiscountType:  body.DiscountType,
 		DiscountValue: body.DiscountValue,
-		RedeemPoints:  body.RedeemPoints,
-		Notes:         body.Notes,
-		TaxBps:        taxBps,
-		TaxInclusive:  taxInclusive,
+		RedeemPoints:   body.RedeemPoints,
+		Notes:          body.Notes,
+		TaxBps:         taxBps,
+		TaxInclusive:   taxInclusive,
+		IdempotencyKey: strings.TrimSpace(body.IdempotencyKey),
+		Offline:        body.Offline,
 	})
 	if errors.Is(err, repository.ErrPOSPaymentShort) {
 		response.Error(w, http.StatusBadRequest, "Total pembayaran kurang dari total transaksi")
@@ -800,6 +820,7 @@ func (h *POSHandler) CreatePOSOrder(w http.ResponseWriter, r *http.Request) {
 		"created_at":          result.CreatedAt,
 		"points_earned":       result.PointsEarned,
 		"points_redeemed":     result.PointsRedeemed,
+		"needs_review":        result.NeedsReview,
 	})
 }
 
@@ -1343,8 +1364,8 @@ func (h *POSHandler) UpdatePrinterConfig(w http.ResponseWriter, r *http.Request)
 		response.Error(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	if len(body.Header) > 200 || len(body.Footer) > 200 {
-		response.Error(w, http.StatusBadRequest, "teks header/footer terlalu panjang (maks 200 karakter)")
+	if len(body.Header) > 500 || len(body.Footer) > 500 {
+		response.Error(w, http.StatusBadRequest, "teks header/footer terlalu panjang (maks 500 karakter)")
 		return
 	}
 	if err := h.pos.UpdatePrinterConfig(r.Context(), c.storeID, repository.PrinterConfig{

@@ -20,10 +20,13 @@ type Props = {
   totalCents: number;
   changeCents: number;
   cashierName: string;
+  // Offline order: its server record + receipt only exist after sync, so the
+  // print / WA / fetch-by-id actions are unavailable until then.
+  offline?: boolean;
   onClose: () => void;
 };
 
-export function SuccessModal({ orderId, orderNumber, totalCents, changeCents, cashierName, onClose }: Props) {
+export function SuccessModal({ orderId, orderNumber, totalCents, changeCents, cashierName, offline, onClose }: Props) {
   const { printerConfig, loyaltyCustomer, customerWA } = usePOS();
   // Pre-fill the WA field with the member's / buyer's number from this
   // transaction so the cashier can send the receipt in one tap. Context still
@@ -79,7 +82,8 @@ export function SuccessModal({ orderId, orderNumber, totalCents, changeCents, ca
   // (no user gesture) — the manual button stays as fallback.
   const autoPrinted = useRef(false);
   useEffect(() => {
-    if (autoPrinted.current || !printerConfig?.auto_print) return;
+    // Offline orders have no server record yet — skip the auto-print fetch.
+    if (offline || autoPrinted.current || !printerConfig?.auto_print) return;
     autoPrinted.current = true;
     handlePrint();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -133,45 +137,59 @@ export function SuccessModal({ orderId, orderNumber, totalCents, changeCents, ca
           </div>
         </div>
 
-        {/* WA form */}
-        <div className="border-t border-neutral-100 px-6 py-4">
-          <label className="text-xs font-medium text-neutral-600">Kirim struk via WhatsApp</label>
-          <div className="mt-1 flex gap-2">
-            <Input
-              type="tel"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder="08xxxxxxx"
-              className="h-9 flex-1 text-sm"
-            />
-            <button
-              onClick={handleSendWA}
-              disabled={sending || !phone.trim()}
-              className="rounded-md bg-brand-700 px-3 text-sm font-medium text-white hover:bg-brand-800 disabled:bg-neutral-300"
-            >
-              <MessageCircle className="size-4" aria-hidden />
-            </button>
+        {/* Offline: server-dependent actions unavailable until sync. */}
+        {offline && (
+          <div className="border-t border-neutral-100 px-6 py-4">
+            <p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs leading-relaxed text-neutral-700">
+              Transaksi tersimpan offline. Cetak struk & kirim WhatsApp tersedia
+              setelah internet kembali dan transaksi tersinkron.
+            </p>
           </div>
-        </div>
+        )}
+
+        {/* WA form (online orders only) */}
+        {!offline && (
+          <div className="border-t border-neutral-100 px-6 py-4">
+            <label className="text-xs font-medium text-neutral-600">Kirim struk via WhatsApp</label>
+            <div className="mt-1 flex gap-2">
+              <Input
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="08xxxxxxx"
+                className="h-9 flex-1 text-sm"
+              />
+              <button
+                onClick={handleSendWA}
+                disabled={sending || !phone.trim()}
+                className="rounded-md bg-brand-700 px-3 text-sm font-medium text-white hover:bg-brand-800 disabled:bg-neutral-300"
+              >
+                <MessageCircle className="size-4" aria-hidden />
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Actions */}
         <div className="flex flex-col gap-2 border-t border-neutral-100 bg-neutral-50 px-6 py-4">
-          <button
-            onClick={handlePrint}
-            disabled={printing}
-            className="inline-flex items-center justify-center gap-2 rounded-lg border border-neutral-200 bg-white px-4 py-2.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-60"
-          >
-            {useBluetooth ? (
-              <Bluetooth className="size-4" aria-hidden />
-            ) : (
-              <Printer className="size-4" aria-hidden />
-            )}
-            {printing
-              ? "Mencetak…"
-              : useBluetooth
-                ? "Cetak via Bluetooth"
-                : "Cetak Struk"}
-          </button>
+          {!offline && (
+            <button
+              onClick={handlePrint}
+              disabled={printing}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-neutral-200 bg-white px-4 py-2.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-60"
+            >
+              {useBluetooth ? (
+                <Bluetooth className="size-4" aria-hidden />
+              ) : (
+                <Printer className="size-4" aria-hidden />
+              )}
+              {printing
+                ? "Mencetak…"
+                : useBluetooth
+                  ? "Cetak via Bluetooth"
+                  : "Cetak Struk"}
+            </button>
+          )}
           <button
             onClick={onClose}
             className="inline-flex items-center justify-center gap-2 rounded-lg bg-brand-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-800"

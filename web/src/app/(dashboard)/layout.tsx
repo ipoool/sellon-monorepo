@@ -5,6 +5,7 @@ import type { Metadata } from "next";
 import { ImpersonationBanner } from "@/components/admin/impersonation-banner";
 import { BannersWrapper } from "@/components/dashboard/banners-wrapper";
 import { OrderNotifier } from "@/components/dashboard/order-notifier";
+import { OfflineSyncWatcher } from "@/components/dashboard/offline-sync-watcher";
 import { KdsProvider } from "@/components/dashboard/kds-context";
 import { PlanProvider } from "@/components/dashboard/plan-context";
 import { BisnisGateProvider } from "@/components/dashboard/bisnis-gate";
@@ -92,6 +93,10 @@ export default async function DashboardLayout({
       {/* OrderNotifier subscribes to a per-store SSE stream — no point
           mounting it for an admin who has no store of their own. */}
       {data?.store && <OrderNotifier />}
+      {/* Global offline-order sync: flushes the IndexedDB queue in the
+          background on every page (not just /pos), so queued POS sales sync
+          even after the cashier navigates away or refreshes. */}
+      {data?.store && <OfflineSyncWatcher />}
       {/* Surface the active tier to the dashboard sidebar (and any
           other client components that want to gate by plan) without
           prop-drilling through every page. */}

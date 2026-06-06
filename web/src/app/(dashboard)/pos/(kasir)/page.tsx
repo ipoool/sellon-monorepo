@@ -14,7 +14,9 @@ export default async function POSPage() {
   if (!me) redirect("/login");
 
   const [productsRes, categoriesRes, subRes, sessionRes] = await Promise.all([
-    serverApi<{ products: Product[]; total: number }>("/api/v1/products?limit=200&status=active"),
+    // include_variants=1 embeds full variant rows so the offline catalog cache
+    // is self-contained — the variant picker needs no network when offline.
+    serverApi<{ products: Product[]; total: number }>("/api/v1/products?limit=200&status=active&include_variants=1"),
     serverApi<{ categories: Category[] }>("/api/v1/categories"),
     serverApi<{ subscription: Subscription }>("/api/v1/subscription"),
     serverApi<{ session: POSSession | null }>("/api/v1/pos/sessions/active"),

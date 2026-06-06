@@ -238,6 +238,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 					r.Put("/", storeHandler.Update)
 					r.Put("/shipping", storeHandler.UpdateShipping)
 					r.Put("/tax", storeHandler.UpdateTax)
+					r.Put("/offline", storeHandler.UpdateOffline)
 					r.Put("/storefront", storeHandler.UpdateStorefront)
 					r.With(feat(feature.CheckoutFields)).Put("/checkout-config", storeHandler.UpdateCheckoutConfig)
 					r.Put("/custom-domain", domainHandler.Set)

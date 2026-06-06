@@ -61,7 +61,10 @@ type Store struct {
 	TaxBps       int
 	TaxInclusive bool
 	TaxLabel     string
-	CreatedAt    time.Time
+	// OfflineEnabled turns on offline-mode capability for the POS (catalog
+	// cached + orders queued on the cashier device until reconnect).
+	OfflineEnabled bool
+	CreatedAt      time.Time
 	UpdatedAt    time.Time
 }
 
@@ -89,6 +92,7 @@ const storeColumns = `id, owner_id, slug, name, description, logo_url, banner_ur
 	layout_config, checkout_config,
 	meta_enabled, meta_pixel_id, meta_access_token_encrypted, meta_test_event_code, meta_catalog_id,
 	tax_enabled, tax_bps, tax_inclusive, tax_label,
+	offline_enabled,
 	created_at, updated_at`
 
 // Same column list but qualified with the `s.` alias, used in joins.
@@ -104,6 +108,7 @@ const qualifiedStoreColumns = `s.id, s.owner_id, s.slug, s.name, s.description,
 	s.layout_config, s.checkout_config,
 	s.meta_enabled, s.meta_pixel_id, s.meta_access_token_encrypted, s.meta_test_event_code, s.meta_catalog_id,
 	s.tax_enabled, s.tax_bps, s.tax_inclusive, s.tax_label,
+	s.offline_enabled,
 	s.created_at, s.updated_at`
 
 func scanStore(row pgx.Row, s *Store) error {
@@ -122,6 +127,7 @@ func scanStore(row pgx.Row, s *Store) error {
 		&s.LayoutConfig, &s.CheckoutConfig,
 		&s.MetaEnabled, &s.MetaPixelID, &s.MetaAccessTokenEnc, &s.MetaTestEventCode, &s.MetaCatalogID,
 		&s.TaxEnabled, &s.TaxBps, &s.TaxInclusive, &s.TaxLabel,
+		&s.OfflineEnabled,
 		&s.CreatedAt, &s.UpdatedAt,
 	)
 }
@@ -142,6 +148,20 @@ func (r *StoreRepo) UpdateTax(ctx context.Context, storeID uuid.UUID, in UpdateT
 		RETURNING ` + storeColumns
 	var s Store
 	if err := scanStore(r.pool.QueryRow(ctx, q, storeID, in.Enabled, in.Bps, in.Inclusive, in.Label), &s); err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+// UpdateOffline toggles offline-mode capability for the store.
+func (r *StoreRepo) UpdateOffline(ctx context.Context, storeID uuid.UUID, enabled bool) (*Store, error) {
+	q := `
+		UPDATE stores
+		SET offline_enabled = $2, updated_at = now()
+		WHERE id = $1
+		RETURNING ` + storeColumns
+	var s Store
+	if err := scanStore(r.pool.QueryRow(ctx, q, storeID, enabled), &s); err != nil {
 		return nil, err
 	}
 	return &s, nil

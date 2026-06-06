@@ -68,6 +68,7 @@ type storeDTO struct {
 	TaxBps                     int             `json:"tax_bps"`
 	TaxInclusive               bool            `json:"tax_inclusive"`
 	TaxLabel                   string          `json:"tax_label"`
+	OfflineEnabled             bool            `json:"offline_enabled"`
 }
 
 func toStoreDTO(s *repository.Store) storeDTO {
@@ -112,6 +113,7 @@ func toStoreDTO(s *repository.Store) storeDTO {
 		TaxBps:           s.TaxBps,
 		TaxInclusive:     s.TaxInclusive,
 		TaxLabel:         s.TaxLabel,
+		OfflineEnabled:   s.OfflineEnabled,
 	}
 }
 
@@ -511,6 +513,43 @@ func (h *StoreHandler) UpdateShipping(w http.ResponseWriter, r *http.Request) {
 			"enabled_couriers":         clean,
 			"free_shipping_threshold":  store.FreeShippingThresholdCents,
 		},
+	})
+	response.JSON(w, http.StatusOK, map[string]any{"store": toStoreDTO(store)})
+}
+
+type updateOfflineReq struct {
+	OfflineEnabled bool `json:"offline_enabled"`
+}
+
+// PUT /api/v1/store/offline — toggle offline-mode capability for the POS.
+func (h *StoreHandler) UpdateOffline(w http.ResponseWriter, r *http.Request) {
+	uid, _ := auth.UserIDFromContext(r.Context())
+	existing, err := h.stores.FindByOwnerID(r.Context(), uid)
+	if errors.Is(err, repository.ErrStoreNotFound) {
+		response.Error(w, http.StatusNotFound, "toko belum dibuat")
+		return
+	}
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	var req updateOfflineReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	store, err := h.stores.UpdateOffline(r.Context(), existing.ID, req.OfflineEnabled)
+	if err != nil {
+		h.logger.Error("update offline", "err", err)
+		response.Error(w, http.StatusInternalServerError, "gagal simpan")
+		return
+	}
+	h.audit.Log(r.Context(), store.ID, audit.Event{
+		Action:     "store.offline_updated",
+		EntityType: "store",
+		EntityID:   store.ID.String(),
+		Summary:    "Update setting mode offline",
+		Metadata:   map[string]any{"offline_enabled": store.OfflineEnabled},
 	})
 	response.JSON(w, http.StatusOK, map[string]any{"store": toStoreDTO(store)})
 }

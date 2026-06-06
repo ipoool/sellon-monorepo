@@ -6,7 +6,7 @@ import Link from "next/link";
 import { Power, ArrowLeft, Clock } from "lucide-react";
 import type { Product, Category, POSSession } from "@/lib/types";
 import type { Me } from "@/lib/auth-types";
-import { POSProvider, usePOS } from "./pos-context";
+import { POSProvider, usePOS, type TaxConfig } from "./pos-context";
 import { POSHeader } from "./pos-header";
 import { ProductGrid } from "./product-grid";
 import { CartPanel } from "./cart-panel";
@@ -16,6 +16,14 @@ import { ShiftCloseModal } from "./shift-close-modal";
 import { CashMovementModal } from "./cash-movement-modal";
 import { HoldOrderPanel } from "./hold-order-panel";
 import { SuccessModal } from "./success-modal";
+import { cacheCatalog, getCachedProducts, getCachedCategories, setMeta, getMeta } from "@/lib/offline/db";
+import { syncServiceWorker } from "@/lib/offline/register-sw";
+
+// Snapshot of the store config that the POS needs even with no network: the
+// offline toggle (drives cash-only + order queueing) and tax (drives the amount
+// the cashier collects). Persisted to IndexedDB while online, restored on a
+// cold offline reload when the live /store fetch can't reach the API.
+type StoreConfigSnapshot = { tax: TaxConfig; offlineEnabled: boolean };
 
 type Props = {
   me: Me;
@@ -36,7 +44,24 @@ const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
 function POSAppInner({ me, products, categories, initialSession }: Props) {
   const router = useRouter();
-  const { session, setSession, cart, totalCents, clearCart, setLoyaltyConfig, setPrinterConfig, setMidtransLive, setTaxConfig } = usePOS();
+  const { session, setSession, cart, totalCents, clearCart, setLoyaltyConfig, setPrinterConfig, setMidtransLive, setTaxConfig, setOfflineEnabled } = usePOS();
+
+  // Catalog source: server props when online; cached IndexedDB copy when the
+  // page is served offline (props empty). Online loads also refresh the cache.
+  const [catProducts, setCatProducts] = useState<Product[]>(products);
+  const [catCategories, setCatCategories] = useState<Category[]>(categories);
+  useEffect(() => {
+    if (products.length > 0) {
+      void cacheCatalog(products, categories);
+    } else {
+      void (async () => {
+        const [p, c] = await Promise.all([getCachedProducts(), getCachedCategories()]);
+        if (p.length) setCatProducts(p);
+        if (c.length) setCatCategories(c);
+      })();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Fetch loyalty config + printer config + midtrans status + tax config once
   // on mount.
@@ -50,14 +75,29 @@ function POSAppInner({ me, products, categories, initialSession }: Props) {
       .then((d) => {
         const s = d.store;
         if (!s) return;
-        setTaxConfig({
+        const tax: TaxConfig = {
           enabled: !!s.tax_enabled,
           bps: s.tax_bps ?? 0,
           inclusive: !!s.tax_inclusive,
           label: s.tax_label || "PPN",
-        });
+        };
+        const offlineEnabled = !!s.offline_enabled;
+        setTaxConfig(tax);
+        setOfflineEnabled(offlineEnabled);
+        syncServiceWorker(offlineEnabled);
+        // Persist so a later cold offline reload (when this fetch fails) can
+        // still apply cash-only + the correct tax without the network.
+        void setMeta("store_config", { tax, offlineEnabled } satisfies StoreConfigSnapshot);
       })
-      .catch(() => {});
+      .catch(async () => {
+        // Offline (or auth) failure: the API is unreachable. Restore the last
+        // known store config so offline mode (cash-only) and tax stay correct.
+        const snap = await getMeta<StoreConfigSnapshot>("store_config");
+        if (!snap) return;
+        setTaxConfig(snap.tax);
+        setOfflineEnabled(!!snap.offlineEnabled);
+        syncServiceWorker(!!snap.offlineEnabled);
+      });
     fetch(`${apiBase}/api/v1/pos/printer/config`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((d) => setPrinterConfig(d.config))
@@ -84,6 +124,7 @@ function POSAppInner({ me, products, categories, initialSession }: Props) {
     orderNumber: string;
     totalCents: number;
     changeCents: number;
+    offline: boolean;
   } | null>(null);
 
   // On mount: hydrate session from server. Tidak auto-popup modal —
@@ -170,7 +211,7 @@ function POSAppInner({ me, products, categories, initialSession }: Props) {
       />
 
       <div className="grid flex-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(420px,460px)]">
-        <ProductGrid products={products} categories={categories} />
+        <ProductGrid products={catProducts} categories={catCategories} />
         <CartPanel onCheckout={() => setShowPayment(true)} onHold={() => setShowHold(true)} />
       </div>
 
@@ -185,6 +226,9 @@ function POSAppInner({ me, products, categories, initialSession }: Props) {
               orderNumber: result.order_number,
               totalCents: result.total_cents,
               changeCents: result.change_amount_cents,
+              // Offline orders carry a local "LOKAL-" number; their server
+              // record + receipt only exist after sync.
+              offline: result.order_number.startsWith("LOKAL-"),
             });
           }}
         />
@@ -224,6 +268,7 @@ function POSAppInner({ me, products, categories, initialSession }: Props) {
           orderNumber={successData.orderNumber}
           totalCents={successData.totalCents}
           changeCents={successData.changeCents}
+          offline={successData.offline}
           cashierName={me.name || me.email}
           onClose={() => {
             setSuccessData(null);

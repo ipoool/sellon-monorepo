@@ -65,6 +65,9 @@ export type Store = {
   tax_bps?: number;
   tax_inclusive?: boolean;
   tax_label?: string;
+  // Enables offline-mode capability for the POS (catalog cached + orders
+  // queued on the cashier device until reconnect).
+  offline_enabled?: boolean;
 };
 
 export type BankAccount = {
@@ -447,6 +450,9 @@ export type Order = {
   customer_name: string;
   customer_whatsapp: string;
   customer_city: string;
+  // Set when an offline-synced order overdrew stock — surfaced for review.
+  needs_review?: boolean;
+  review_reason?: string;
   created_at: string;
 };
 

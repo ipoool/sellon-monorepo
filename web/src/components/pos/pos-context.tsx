@@ -1,7 +1,13 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import type { POSSession, POSCartItem, SelectedOption } from "@/lib/types";
+import {
+  saveCart as dbSaveCart,
+  loadCart as dbLoadCart,
+  saveActiveSession,
+  loadActiveSession,
+} from "@/lib/offline/db";
 
 type DiscountState = {
   type: "percent" | "fixed" | null;
@@ -60,7 +66,7 @@ type POSContextValue = {
   isTouch: boolean;
 
   session: POSSession | null;
-  setSession: (s: POSSession | null) => void;
+  setSession: Dispatch<SetStateAction<POSSession | null>>;
 
   loyaltyConfig: LoyaltyConfig | null;
   setLoyaltyConfig: (c: LoyaltyConfig | null) => void;
@@ -75,6 +81,8 @@ type POSContextValue = {
 
   midtransLive: boolean;
   setMidtransLive: (v: boolean) => void;
+  offlineEnabled: boolean;
+  setOfflineEnabled: (v: boolean) => void;
 
   cart: POSCartItem[];
   addToCart: (item: POSCartItem) => void;
@@ -133,6 +141,7 @@ export function POSProvider({ children }: { children: ReactNode }) {
   const [loyaltyCustomer, setLoyaltyCustomer] = useState<LoyaltyCustomer | null>(null);
   const [redeemPoints, setRedeemPoints] = useState(0);
   const [midtransLive, setMidtransLive] = useState(false);
+  const [offlineEnabled, setOfflineEnabled] = useState(false);
 
   // Detect touch / coarse-pointer devices so keyboard shortcut hints can
   // hide on tablets. Defaults to false (desktop) to avoid SSR/hydration
@@ -145,6 +154,44 @@ export function POSProvider({ children }: { children: ReactNode }) {
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
   }, []);
+
+  // Persist the in-progress cart to IndexedDB so it survives a refresh or going
+  // offline. Restore once on mount, then save on every change. `hydrated` gates
+  // the save so the initial empty state can't clobber a saved cart before the
+  // async restore lands.
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
+    Promise.all([dbLoadCart(), loadActiveSession()]).then(([s, cachedSession]) => {
+      if (s) {
+        setCart(s.cart ?? []);
+        setCustomerName(s.customerName ?? "");
+        setCustomerWA(s.customerWA ?? "");
+        if (s.discount) setDiscount(s.discount);
+        setRedeemPoints(s.redeemPoints ?? 0);
+      }
+      // Restore a cached open shift ONLY when offline — a cold offline reload
+      // can't reach the server for the active session, so the cache is the only
+      // source. When online the server's initialSession is authoritative (it
+      // knows if the shift was closed elsewhere), so we don't resurrect a stale
+      // cached shift. The functional update still defers to anything already set.
+      const offline = typeof navigator !== "undefined" && !navigator.onLine;
+      if (cachedSession && offline) setSession((prev) => prev ?? cachedSession);
+      setHydrated(true);
+    });
+  }, []);
+  // Cart bundle — note: NO session here. The active shift has its own key so a
+  // cart write can never null it out (see saveActiveSession below).
+  useEffect(() => {
+    if (!hydrated) return;
+    void dbSaveCart({ cart, customerName, customerWA, discount, redeemPoints });
+  }, [hydrated, cart, customerName, customerWA, discount, redeemPoints]);
+  // Persist the active shift on its own key with explicit open/close semantics:
+  // a non-null session is stored, a close (null) deletes it. Gated on `hydrated`
+  // so the initial null (before restore) can't delete a cached shift.
+  useEffect(() => {
+    if (!hydrated) return;
+    void saveActiveSession(session);
+  }, [hydrated, session]);
 
   const addToCart = useCallback((item: POSCartItem) => {
     setCart((prev) => {
@@ -315,6 +362,8 @@ export function POSProvider({ children }: { children: ReactNode }) {
     setRedeemPoints,
     midtransLive,
     setMidtransLive,
+    offlineEnabled,
+    setOfflineEnabled,
     cart,
     addToCart,
     updateQty,

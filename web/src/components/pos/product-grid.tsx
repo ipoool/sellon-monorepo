@@ -100,12 +100,23 @@ export function ProductGrid({ products, categories }: Props) {
     p.takeaway_enabled ||
     (p.modifiers && p.modifiers.length > 0);
 
-  // Open the variant/option picker. The list payload omits the full variants[]
-  // array (N+1 avoidance), so for variant products we fetch the product detail
-  // first to hydrate variants before showing the picker. Modifiers are already
-  // present in the list payload.
+  // Open the variant/option picker. The POS catalog is loaded with
+  // include_variants=1, so variant rows are normally already embedded (and
+  // cached for offline). We only hit the network as a fallback when they're
+  // somehow absent — and never when offline, where we use whatever we have.
   const openPicker = async (p: Product) => {
     if (!p.has_variants) {
+      setPickerProduct(p);
+      return;
+    }
+    // Variants already present (embedded in the catalog / restored from cache).
+    if (p.variants && p.variants.length > 0) {
+      setPickerProduct(p);
+      return;
+    }
+    // Offline with no embedded variants: don't fire a fetch that will fail —
+    // fall back to the picker with whatever data we have.
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
       setPickerProduct(p);
       return;
     }
