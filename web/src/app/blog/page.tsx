@@ -19,6 +19,7 @@ export const metadata = pageMetadata({
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString("id-ID", {
+    timeZone: "Asia/Jakarta",
     day: "numeric",
     month: "long",
     year: "numeric",

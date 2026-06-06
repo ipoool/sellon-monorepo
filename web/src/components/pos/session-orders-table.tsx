@@ -14,9 +14,13 @@ import type { POSSessionOrder } from "@/lib/types";
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
 function formatTime(iso: string) {
+  // Explicit Jakarta TZ so SSR (UTC) and the client render the same hour —
+  // without it the server prints UTC and the client local time, tripping a
+  // hydration mismatch.
   return new Date(iso).toLocaleTimeString("id-ID", {
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: "Asia/Jakarta",
   });
 }
 

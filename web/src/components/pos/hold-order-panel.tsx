@@ -140,6 +140,7 @@ export function HoldOrderPanel({ sessionId, onClose, onRestored }: Props) {
                 const items = h.cart_snapshot as POSCartItem[];
                 const totalCents = items.reduce((s, i) => s + i.unit_cents * i.quantity, 0);
                 const time = new Date(h.created_at).toLocaleTimeString("id-ID", {
+    timeZone: "Asia/Jakarta",
                   hour: "2-digit",
                   minute: "2-digit",
                 });

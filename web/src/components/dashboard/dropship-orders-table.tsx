@@ -13,6 +13,7 @@ const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString("id-ID", {
+    timeZone: "Asia/Jakarta",
     day: "numeric", month: "short", year: "numeric",
   });
 }
