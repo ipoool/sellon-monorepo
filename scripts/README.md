@@ -1,12 +1,12 @@
 # Deployment scripts
 
-**Target OS production**: Ubuntu 22.04 / 24.04 LTS. Debian 12 juga jalan (apt path-nya sama). RHEL/CentOS/Amazon Linux **tidak didukung** — script pakai `apt-get`, `/etc/nginx/sites-available`, dan `ufw`.
+**Target OS production**: Ubuntu 22.04 / 24.04 LTS. Debian 12 juga jalan (apt path-nya sama). RHEL/CentOS/Amazon Linux **tidak didukung** — script pakai `apt-get`, `/etc/caddy`, dan `ufw`.
 
 Tiga script + dua helper ngrok yang sudah ada. Ringkasannya:
 
 | Script | Dijalankan di | Frekuensi | Tujuan |
 |---|---|---|---|
-| `server-setup.sh` | server prod | sekali per host | Install Docker, init Swarm, buat `/var/www/app`, pasang nginx |
+| `server-setup.sh` | server prod | sekali per host | Install Docker, init Swarm, buat `/var/www/app`, pasang Caddy (auto-HTTPS + on-demand TLS) |
 | `build-push.sh` | laptop / CI | tiap kali ada perubahan code | Build image prod, push ke `ghcr.io` |
 | `deploy.sh` | server prod | tiap kali habis push | Pull image baru + rolling update zero-downtime |
 
@@ -25,9 +25,8 @@ Script ini akan:
 - Install Docker + Compose plugin (dari official repo Docker)
 - `docker swarm init` + buat overlay network `sellon-net`
 - Buat `/var/www/app/docker-compose.yml` (stack file) dan `/var/www/app/.env` kosong
-- Install nginx + pasang vhost reverse proxy
 - Setup UFW firewall (deny incoming, allow SSH/HTTP/HTTPS)
-- Issue Let's Encrypt cert via certbot + auto-redirect 80→443 (kalau `DOMAIN` + `LETSENCRYPT_EMAIL` di-set)
+- Install **Caddy** sebagai reverse proxy: automatic HTTPS untuk platform domain + **on-demand TLS** untuk domain custom seller (kalau `DOMAIN` + `LETSENCRYPT_EMAIL` di-set)
 
 **Penting**: script menambahkan user Anda ke group `docker` supaya `docker ...` bisa **tanpa sudo**. Tapi membership baru aktif di shell baru — jalankan salah satu sekarang:
 
@@ -59,14 +58,20 @@ sudo DOMAIN=your-domain.id LETSENCRYPT_EMAIL=ops@your-domain.id \
      bash scripts/server-setup.sh
 ```
 
-Kalau setup pertama jalan tanpa domain/email (HTTPS di-skip), jalankan susulan setelah DNS siap:
+Kalau setup pertama jalan tanpa domain/email (Caddy di-skip), jalankan susulan setelah DNS siap:
 
 ```bash
 sudo DOMAIN=your-domain.id LETSENCRYPT_EMAIL=ops@your-domain.id \
-     bash scripts/server-setup.sh setup_https
+     bash scripts/server-setup.sh setup_caddy
 ```
 
-Renewal otomatis lewat `certbot.timer` (systemd, 2× sehari).
+Renewal cert otomatis di-handle Caddy (built-in, tidak perlu certbot/timer).
+
+**Domain custom seller** (fitur Bisnis): seller CNAME domain mereka ke `cname.sellon.id`. Supaya berfungsi, siapkan DNS:
+- A record `your-domain.id` + `www.your-domain.id` → IP server
+- A record `cname.sellon.id` → IP server (**harus A record terminal**, bukan CNAME berantai — kalau berantai, verifikasi DNS seller via `LookupCNAME` tidak akan match)
+
+Caddy otomatis terbitkan cert untuk tiap domain custom **on-demand**, tapi hanya kalau API (`/api/v1/internal/tls-check`) konfirmasi domain itu sudah `active` di DB — jadi host asing yang nunjuk ke IP tidak bisa nge-spam penerbitan cert.
 
 ### 2) Di laptop (tiap kali ada perubahan code)
 
@@ -127,7 +132,7 @@ Registry + owner di-hard-code: `ghcr.io/ipoool/sellon-{api,web}`. Yang lain bisa
 | `APP_DIR` | `/var/www/app` | semua |
 | `APP_USER` | `$(logname)` | server-setup |
 | `IMAGE_TAG` | `latest` | deploy |
-| `DOMAIN` | `_` (catch-all) | server-setup (nginx) |
+| `DOMAIN` | `_` (catch-all) | server-setup (Caddy) |
 | `STACK_NAME` | `sellon` | deploy |
 | `SWARM_NETWORK` | `sellon-net` | server-setup |
 | `GHCR_USER` + `GHCR_PAT` | — | build-push, deploy (login otomatis) |
@@ -160,6 +165,6 @@ bash scripts/build-push.sh          # bake + push image
 - **Redis**: container di-pin ke manager node + named volume `sellon_redis-data` mount ke `/data`. Container BISA di-recreate saat deploy (kalau image upstream updates, atau stack spec berubah), tapi **data selamat** lewat volume + AOF (`--appendonly yes`, kehilangan max 1 detik). `docker stack rm` tidak menghapus volume — manual delete via `docker volume rm sellon_redis-data` kalau benar-benar mau bersih-bersih.
 - **Migrations**: API otomatis jalankan `golang-migrate` di startup (`embed.FS`). Tidak perlu script terpisah.
 - **Logs**: `docker service logs sellon_api --tail 200 -f`. Untuk persistent log, pasang Loki/Promtail atau pipe ke CloudWatch/Datadog.
-- **Deploy gap (~3-5 detik)**: stack file pakai `mode: host` + `replicas: 1` supaya port api/web cuma reachable di `127.0.0.1` (tidak bocor ke publik). Trade-off: saat deploy ada gap singkat antara kill task lama + start task baru — nginx return 502 selama window itu. Untuk **true zero-downtime**, ada dua opsi:
+- **Deploy gap (~3-5 detik)**: stack file pakai `mode: host` + `replicas: 1` supaya port api/web cuma reachable di `127.0.0.1` (tidak bocor ke publik). Trade-off: saat deploy ada gap singkat antara kill task lama + start task baru — Caddy return 502 selama window itu. Untuk **true zero-downtime**, ada dua opsi:
   1. Tambahkan `HEALTHCHECK` di Dockerfile, Swarm akan tunggu sampai task baru healthy sebelum hapus lama — gap berkurang ke ~1-2 detik (masih bukan "0").
-  2. Pindahkan nginx jadi Swarm service di overlay network, lalu balik `replicas: 2` + `mode: ingress`. Ini textbook Swarm prod setup tapi butuh refactor: nginx config + SSL cert harus di-mount via Docker config/secret, certbot lebih ribet. Worth it kalau Anda tumbuh ke multi-node Swarm.
+  2. Pindahkan Caddy jadi Swarm service di overlay network, lalu balik `replicas: 2` + `mode: ingress`. Ini textbook Swarm prod setup tapi butuh refactor: Caddy config + cert storage harus di-mount via Docker config/volume. Worth it kalau Anda tumbuh ke multi-node Swarm.
