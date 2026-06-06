@@ -227,32 +227,42 @@ export function PrinterSettingsForm({ initial }: { initial: Config }) {
           Teks Tambahan Struk
         </h3>
         <p className="mt-1 text-sm text-neutral-500">
-          Opsional. Muncul di atas (header) dan bawah (footer) struk.
+          Opsional. Header muncul di atas (di bawah nama toko), footer di paling
+          bawah struk. Boleh beberapa baris — tiap baris (Enter) tercetak
+          terpisah dan rata tengah.
         </p>
         <div className="mt-4 flex flex-col gap-3">
           <div>
             <label className="text-xs font-medium text-neutral-600">
-              Header (mis. alamat / promo)
+              Header (mis. alamat, telepon, promo)
             </label>
-            <Input
+            <textarea
               value={header}
-              maxLength={200}
+              maxLength={500}
+              rows={3}
               onChange={(e) => setHeader(e.target.value)}
-              placeholder="Jl. Merdeka No. 1, Jakarta"
-              className="mt-1"
+              placeholder={"Jl. Merdeka No. 1, Jakarta\nTelp 0812-3456-7890\nFollow IG @tokokami"}
+              className="mt-1 w-full resize-y rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
             />
+            <p className="mt-1 text-right text-[11px] tabular-nums text-neutral-400">
+              {header.length}/500
+            </p>
           </div>
           <div>
             <label className="text-xs font-medium text-neutral-600">
-              Footer (mis. kebijakan retur)
+              Footer (mis. kebijakan retur, ucapan, sosial media)
             </label>
-            <Input
+            <textarea
               value={footer}
-              maxLength={200}
+              maxLength={500}
+              rows={3}
               onChange={(e) => setFooter(e.target.value)}
-              placeholder="Barang yang sudah dibeli tidak dapat ditukar."
-              className="mt-1"
+              placeholder={"Barang yang sudah dibeli tidak dapat ditukar.\nSampai jumpa lagi!"}
+              className="mt-1 w-full resize-y rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
             />
+            <p className="mt-1 text-right text-[11px] tabular-nums text-neutral-400">
+              {footer.length}/500
+            </p>
           </div>
         </div>
       </Card>
@@ -352,6 +362,14 @@ function browserTestPrint(paperWidth: string, header: string, footer: string) {
   if (!win) return;
   const safe = (s: string) =>
     s.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  // Render a multi-line header/footer as one centered <div> per non-empty line.
+  const lines = (s: string) =>
+    s
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l !== "")
+      .map((l) => `<div class="c">${safe(l)}</div>`)
+      .join("");
   win.document.write(`<!doctype html><html><head><meta charset="utf-8">
     <title>Test Print</title>
     <style>
@@ -364,13 +382,13 @@ function browserTestPrint(paperWidth: string, header: string, footer: string) {
     <body>
       <div class="c b" style="font-size:14px;">TEST PRINT</div>
       <div class="c">SellOn Kasir</div>
-      ${header ? `<div class="c">${safe(header)}</div>` : ""}
+      ${lines(header)}
       <hr/>
       <div>Printer dialog berfungsi.</div>
       <div>Lebar kertas: ${w}</div>
       <hr/>
       <div class="c">Siap dipakai!</div>
-      ${footer ? `<div class="c">${safe(footer)}</div>` : ""}
+      ${lines(footer)}
     </body></html>`);
   win.document.close();
   win.focus();

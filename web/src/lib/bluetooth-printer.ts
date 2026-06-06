@@ -252,7 +252,9 @@ export function buildReceiptEscPos(
   if (store?.tagline) e.line(store.tagline);
   if (store?.city) e.line(store.city);
   if (store?.whatsapp_number) e.line("WA: " + store.whatsapp_number);
-  if (cfg.header.trim()) e.line(cfg.header.trim());
+  for (const line of cfg.header.split("\n")) {
+    if (line.trim()) e.line(line.trim());
+  }
 
   e.align("left").divider();
   e.line("No : #" + order.order_number);
@@ -290,7 +292,9 @@ export function buildReceiptEscPos(
 
   e.align("center").line("Terima kasih sudah berbelanja!");
   if (store?.footer_text) e.line(store.footer_text);
-  if (cfg.footer.trim()) e.line(cfg.footer.trim());
+  for (const line of cfg.footer.split("\n")) {
+    if (line.trim()) e.line(line.trim());
+  }
 
   e.feed(3).cut();
   return e.bytes();

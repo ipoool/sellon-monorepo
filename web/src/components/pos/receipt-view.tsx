@@ -92,7 +92,11 @@ export function ReceiptView({
             {store?.whatsapp_number && (
               <p className="text-[10px]">WA: {store.whatsapp_number}</p>
             )}
-            {headerText && <p className="text-[10px]">{headerText}</p>}
+            {splitLines(headerText).map((line, i) => (
+              <p key={i} className="text-[10px]">
+                {line}
+              </p>
+            ))}
           </div>
 
           <Divider />
@@ -173,9 +177,11 @@ export function ReceiptView({
             {store?.footer_text && (
               <p className="mt-1 text-[9px] text-neutral-600">{store.footer_text}</p>
             )}
-            {footerText && (
-              <p className="mt-1 text-[9px] text-neutral-600">{footerText}</p>
-            )}
+            {splitLines(footerText).map((line, i) => (
+              <p key={i} className="mt-1 text-[9px] text-neutral-600">
+                {line}
+              </p>
+            ))}
           </div>
         </div>
 
@@ -198,6 +204,15 @@ function Row({ label, value, bold }: { label: string; value: string; bold?: bool
 
 function Divider() {
   return <div className="my-1 border-t border-dashed border-neutral-400" />;
+}
+
+// Split a multi-line header/footer into printable lines, dropping blank ones.
+function splitLines(text?: string): string[] {
+  if (!text) return [];
+  return text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l !== "");
 }
 
 function paymentLabel(method: string): string {
