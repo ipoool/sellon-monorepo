@@ -147,9 +147,11 @@ Authenticated seller dashboard (under `(dashboard)` route group):
 /reports                  laporan (overview, top products, top customers — locked for Free)
 /settings/toko            profil toko + jam buka
 /settings/storefront      tampilan storefront (logo, banner, theme hue, product layout)
-/settings/payment         midtrans + bank accounts (manual transfer + QRIS statis)
+/settings/payment         midtrans (production-only, "Connect" Snap-popup verify) + bank accounts (manual transfer + QRIS statis)
+/settings/domain          custom domain (CNAME → cname.sellon.id, "Verifikasi DNS", Bisnis-only)
 /settings/shipping        pengiriman + origin city + free shipping threshold
-/settings/whatsapp        WA templates + notification number
+/settings/whatsapp        WA templates + notification number (new-order notif section temporarily disabled via NOTIFICATIONS_DISABLED flag)
+/settings/offline         Mode Offline POS toggle (Bisnis-only)
 /settings/subscription    plan + invoices + upgrade dialog
 /settings/team            staff + invites
 /settings/activity        audit log (action filter + detail accordion)
@@ -170,21 +172,23 @@ Platform admin (under `/platform/*`):
 API summary (current — full list di `internal/server/server.go`):
 ```
 auth:        /auth/google, /auth/logout, /auth/me, /auth/exit-impersonation
-store:       /store, /store/storefront, /store/shipping
-products:    CRUD, /bulk (template/upload/jobs/active/stream), /bulk-delete, /{id}/duplicate
+store:       /store, /store/storefront, /store/shipping, /store/offline (POS offline toggle), /store/custom-domain (set/verify/delete)
+products:    CRUD, /bulk (template/upload/jobs/active/stream), /bulk-delete, /{id}/duplicate, list ?include_variants=1 (POS embeds variants for offline)
 orders:      list/detail/stream, /{id}/status, /{id}/payment-link, /{id}/wa-log
+pos:         /pos/orders (idempotent create — client UUID; offline=true relaxes stock/payment guard + flags needs_review), /pos/printer/config (multi-line header/footer)
 customers:   list/detail/export
 promos:      CRUD
 reports:     overview, top-products, top-customers (Free tier locked)
 plans:       /plans (public), /admin/plans (CRUD marketing meta + limits)
-payments:    /payments/midtrans (CRUD + verify + rotate-webhook with "GENERATE" confirm)
+payments:    /payments/midtrans (CRUD + connect[Snap-popup verify] + rotate-webhook with "GENERATE" confirm) — production-only, no sandbox
 uploads:     /uploads/image, /uploads/delete
-storefront:  /storefront/{slug}, /storefront/{slug}/orders (create/get/mark-paid/payment-proof)
-subscription:/subscription, /subscription/request-upgrade, /subscription/cancel
+storefront:  /storefront/{slug}, /storefront/{slug}/orders (create/get/mark-paid/payment-proof), /storefront/domain-lookup (Host→slug)
+internal:    /internal/tls-check (public — Caddy on-demand-TLS "ask"; 200 only for active custom domains)
+subscription:/subscription, /subscription/request-upgrade, /subscription/cancel, /subscription/checkout (platform Snap, production-only)
 audit-log:   tenant-scoped activity feed
 admin:       /admin/users (ban/unban/delete/impersonate), /admin/stores, /admin/plans,
              /admin/subscriptions, /admin/audit, /admin/stats
-webhooks:    /webhooks/midtrans/{token} (per-store; rotate via dashboard)
+webhooks:    /webhooks/midtrans/{token} (per-store), /webhooks/platform/midtrans (subscription billing)
 SSE:         /orders/stream, /products/bulk/jobs/stream
 ```
 
@@ -229,6 +233,9 @@ The codebase ships with **placeholder content** that's intentionally not product
 - **`forceMobile` prop pattern in storefront-catalog.** Tailwind `sm:`/`lg:` responsive classes trigger on viewport (browser width), not container width. Inside the layout-preview dialog's mobile frame (`max-w-sm`), viewport is still desktop — so `sm:grid-cols-3` etc. activate and the preview is wrong. Components in `storefront/storefront-catalog.tsx` accept a `forceMobile` boolean that overrides responsive classes to hard mobile counts. Real storefront page calls without this prop, so its responsive behavior unchanged.
 - **Buyer-side endpoints scoped by `{store_slug}/{order_number}` — public (no auth).** Examples: `/storefront/{slug}/orders/{number}/payment-proof`, `/mark-paid`. Guards: order belongs to slug's store + single-shot 409 conflict for proof upload + multipart validated.
 - **Admin actions log to `platform_audit_log`, store actions log to `audit_log`.** Different tables, different scopes. Admin views: `/platform/audit`. Seller view: `/settings/activity`. Don't cross-write.
+- **Midtrans is production-only (no sandbox).** Sandbox was removed from both the seller integration AND platform billing. The `payments.MidtransClient` always hits production hosts (no `IsSandbox` param). Seller key verification = "Connect" button → backend creates a real Rp 1.000 dummy Snap transaction (`/payments/midtrans/connect`) → frontend opens the Snap.js popup (`lib/load-snap.ts`); popup rendering confirms both server + client key (seller just closes it, no payment). The dormant `is_sandbox`/`*_sandbox` DB columns remain (no migration) but are always written false/ignored. Don't reintroduce sandbox UI/branches.
+- **Offline-first POS (Fase 1, Bisnis-only).** Hand-rolled service worker (`web/public/sw.js`, network-first, **production-only** — disabled in `next dev` via `register-sw.ts`) serves the cached `/pos` shell. IndexedDB (`web/src/lib/offline/`) caches catalog + cart + an order queue. Each offline order carries a client `crypto.randomUUID()` idempotency_key — backend partial UNIQUE index makes replay a no-op (no double-charge). Sync conflict = flag, not block: stock shortfall or payment-short (after a config change) still records the order + sets `needs_review`. **Global** `OfflineSyncWatcher` (mounted in `(dashboard)/layout.tsx`) flushes the queue in batches on every page (survives navigation). Active shift persisted under its own IndexedDB key (cart writes can't null it). Offline ⇒ cash-only in the payment modal (`cashOnly = offlineEnabled && !online`). NEVER run `pnpm build` against the dev container — it clobbers `next dev`'s `.next` and breaks HMR; use `tsc`/`eslint` to verify.
+- **Custom-domain edge = Caddy on-demand TLS (NOT nginx).** `scripts/server-setup.sh setup_caddy` installs Caddy (replaced nginx + certbot): automatic HTTPS for the platform domain + `on_demand_tls` for seller custom domains, gated by the public `/api/v1/internal/tls-check` "ask" endpoint (200 only for `domain_status='active'`). Sellers CNAME to `cname.sellon.id` (must be a **terminal A record, DNS-only** in Cloudflare). Platform domain behind Cloudflare proxy needs a **Cloudflare Origin Certificate** at `/etc/caddy/origin/{tls.pem,tls.key}` + CF SSL mode "Full (strict)". `server-setup.sh` is run manually on the host — the deploy pipeline (`deploy.sh`) only ships api/web images.
 
 ## Things to Avoid
 
