@@ -16,6 +16,10 @@ import type { Store } from "@/lib/types";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
+// Temporarily disable the new-order WhatsApp notification section. Flip back to
+// false to re-enable the live form below.
+const NOTIFICATIONS_DISABLED: boolean = true;
+
 type Plan = "free" | "pro" | "bisnis";
 
 type Props = {
@@ -43,6 +47,43 @@ export function WhatsAppNotificationForm({ store, plan }: Props) {
     () => store?.notification_whatsapp_number ?? "",
   );
   const [pending, setPending] = useState(false);
+
+  // Temporarily disabled — show the section grayed out with controls off.
+  if (NOTIFICATIONS_DISABLED) {
+    return (
+      <Card>
+        <header className="flex items-start justify-between gap-3">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="font-semibold text-neutral-900">
+                Notifikasi Pesanan Baru
+              </h2>
+              <Badge variant="default">Segera hadir</Badge>
+            </div>
+            <p className="mt-1 text-sm text-neutral-600">
+              Otomatis kirim WhatsApp ke owner setiap ada pesanan baru. Fitur
+              ini sementara dinonaktifkan.
+            </p>
+          </div>
+        </header>
+        <div className="mt-4 flex flex-col gap-1.5 opacity-60">
+          <Label htmlFor="notification_whatsapp_number">Nomor WhatsApp tujuan</Label>
+          <Input
+            id="notification_whatsapp_number"
+            type="tel"
+            disabled
+            placeholder="62812-3456-7890"
+          />
+        </div>
+        <div className="mt-4 flex items-center justify-end border-t border-neutral-200 pt-4">
+          <Button size="md" disabled>
+            <Save className="size-4" aria-hidden />
+            Simpan
+          </Button>
+        </div>
+      </Card>
+    );
+  }
 
   if (!store) {
     return (
