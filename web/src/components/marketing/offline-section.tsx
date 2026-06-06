@@ -123,15 +123,15 @@ export function OfflineSection() {
             </ul>
 
             <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
-              <Link href="/login">
-                <Button size="lg">
+              <Link href="/login" className="shrink-0">
+                <Button size="lg" className="w-full justify-center whitespace-nowrap sm:w-auto">
                   Aktifkan Mode Offline
                   <ArrowRight className="size-4" aria-hidden />
                 </Button>
               </Link>
-              <p className="inline-flex items-center gap-1.5 text-xs text-neutral-500">
-                <Banknote className="size-3.5" aria-hidden />
-                Saat offline pembayaran tunai · Tersedia di plan Bisnis
+              <p className="flex items-start gap-1.5 text-xs leading-relaxed text-neutral-500">
+                <Banknote className="size-3.5 shrink-0 translate-y-0.5" aria-hidden />
+                <span>Saat offline pembayaran tunai · Tersedia di plan Bisnis</span>
               </p>
             </div>
           </div>
