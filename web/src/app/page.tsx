@@ -12,6 +12,7 @@ import { BlogPreview } from "@/components/marketing/blog-preview";
 import { ResellerSection } from "@/components/marketing/reseller-section";
 import { BeforeAfter } from "@/components/marketing/before-after";
 import { PosSection } from "@/components/marketing/pos-section";
+import { OfflineSection } from "@/components/marketing/offline-section";
 import { MetaSection } from "@/components/marketing/meta-section";
 import { getMe } from "@/lib/server-auth";
 import { publicServerApi } from "@/lib/server-api";
@@ -145,6 +146,7 @@ export default async function Home() {
         <BeforeAfter />
         <Features />
         <PosSection />
+        <OfflineSection />
         <ResellerSection />
         <MetaSection />
         <HowItWorks />
