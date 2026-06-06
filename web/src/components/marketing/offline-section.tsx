@@ -122,9 +122,9 @@ export function OfflineSection() {
               ))}
             </ul>
 
-            <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
-              <Link href="/login" className="shrink-0">
-                <Button size="lg" className="w-full justify-center whitespace-nowrap sm:w-auto">
+            <div className="mt-8 flex flex-col items-start gap-3">
+              <Link href="/login">
+                <Button size="lg" className="whitespace-nowrap">
                   Aktifkan Mode Offline
                   <ArrowRight className="size-4" aria-hidden />
                 </Button>
