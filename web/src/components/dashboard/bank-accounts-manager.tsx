@@ -217,7 +217,6 @@ export function BankAccountsManager({
             </h3>
             <p className="mt-0.5 text-sm text-neutral-600">
               Untuk pembeli yang transfer manual atau scan QRIS dari foto.
-              Cocok untuk free tier yang belum pakai Midtrans.
             </p>
           </div>
           <Button type="button" size="sm" variant="outline" onClick={add}>

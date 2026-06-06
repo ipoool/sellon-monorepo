@@ -114,7 +114,7 @@ type publicShippingDTO struct {
 func (h *StorefrontHandler) buildPaymentDTO(ctx context.Context, storeID uuid.UUID) publicPaymentDTO {
 	out := publicPaymentDTO{}
 	if gw, err := h.gateways.Get(ctx, storeID, "midtrans"); err == nil && gw != nil {
-		out.HasMidtrans = len(gw.ServerKeySandboxEncrypted) > 0 || len(gw.ServerKeyProdEncrypted) > 0
+		out.HasMidtrans = len(gw.ServerKeyProdEncrypted) > 0
 		out.MidtransMethods = append(out.MidtransMethods, gw.EnabledMethods...)
 	}
 	banks, _ := h.banks.ListByStore(ctx, storeID)
@@ -1625,12 +1625,7 @@ func (h *StorefrontHandler) GeneratePaymentLink(w http.ResponseWriter, r *http.R
 		response.Error(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	var encryptedKey []byte
-	if gateway.IsSandbox {
-		encryptedKey = gateway.ServerKeySandboxEncrypted
-	} else {
-		encryptedKey = gateway.ServerKeyProdEncrypted
-	}
+	encryptedKey := gateway.ServerKeyProdEncrypted
 	if len(encryptedKey) == 0 || h.encryptor == nil || h.midtrans == nil {
 		response.Error(w, http.StatusBadRequest, "pembayaran online belum tersedia")
 		return
@@ -1667,7 +1662,6 @@ func (h *StorefrontHandler) GeneratePaymentLink(w http.ResponseWriter, r *http.R
 		CustomerName:  order.CustomerName,
 		CustomerPhone: order.CustomerWhatsApp,
 		Items:         snapItems,
-		IsSandbox:     gateway.IsSandbox,
 		ServerKey:     string(keyBytes),
 	})
 	if err != nil {
@@ -1745,4 +1739,28 @@ func (h *StorefrontHandler) DomainLookup(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	response.JSON(w, http.StatusOK, map[string]string{"slug": store.Slug})
+}
+
+// GET /api/v1/internal/tls-check?domain=toko.brand.com
+// Public — Caddy's on_demand_tls "ask" endpoint. Returns 200 ONLY for a domain
+// SellOn may obtain a TLS cert for (an active custom domain). Any other host
+// returns 403 so Caddy refuses the cert request — this is what stops an
+// attacker pointing arbitrary domains at the server IP from exhausting the
+// Let's Encrypt rate limit. The platform domain is served by an explicit Caddy
+// site block (cert obtained at startup), so it never reaches this endpoint.
+func (h *StorefrontHandler) TLSCheck(w http.ResponseWriter, r *http.Request) {
+	domain := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("domain")))
+	if domain == "" {
+		http.Error(w, "domain required", http.StatusBadRequest)
+		return
+	}
+	if i := strings.LastIndex(domain, ":"); i > 0 {
+		domain = domain[:i]
+	}
+	store, err := h.stores.FindByDomain(r.Context(), domain)
+	if err == nil && store != nil && store.DomainStatus == "active" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	http.Error(w, "not allowed", http.StatusForbidden)
 }

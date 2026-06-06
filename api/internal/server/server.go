@@ -129,7 +129,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	reportsHandler := handler.NewReportsHandler(stores, reports, orders, subscriptions, anthropicClient, logger)
 	subscriptionHandler := handler.NewSubscriptionHandler(
 		subscriptions, stores, products, orders, users, planRepo,
-		midtransClient, cfg.PlatformMidtransServerKey, cfg.PlatformMidtransSandbox,
+		midtransClient, cfg.PlatformMidtransServerKey,
 		auditLogger, logger,
 	)
 	plansHandler := handler.NewPlansHandler(planRepo, logger)
@@ -181,6 +181,10 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 		// Must be registered BEFORE /storefront/{slug} so chi resolves
 		// the static segment "domain-lookup" before the wildcard {slug}.
 		r.Get("/storefront/domain-lookup", storefrontHandler.DomainLookup)
+
+		// Public Caddy on_demand_tls "ask" endpoint — returns 200 only for an
+		// active custom domain so Caddy will obtain a cert for it.
+		r.Get("/internal/tls-check", storefrontHandler.TLSCheck)
 
 		// Public table QR resolution (scan a table → store + table).
 		r.Get("/tables/resolve/{token}", tableHandler.Resolve)
@@ -376,7 +380,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 				r.Route("/payments/midtrans", func(r chi.Router) {
 					r.Get("/", paymentHandler.Get)
 					r.Put("/", paymentHandler.Save)
-					r.Post("/verify", paymentHandler.Verify)
+					r.Post("/connect", paymentHandler.Connect)
 					r.Post("/rotate-webhook", paymentHandler.RotateWebhook)
 				})
 

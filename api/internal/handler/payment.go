@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -41,19 +43,17 @@ func NewPaymentHandler(
 	}
 }
 
+// gatewayDTO is production-only (sandbox removed from the seller integration).
+// The DB still has the dormant sandbox columns, but they're never surfaced.
 type gatewayDTO struct {
-	Provider               string   `json:"provider"`
-	IsConfigured           bool     `json:"is_configured"`
-	IsSandbox              bool     `json:"is_sandbox"`
-	HasSandboxServerKey    bool     `json:"has_sandbox_server_key"`
-	HasProdServerKey       bool     `json:"has_prod_server_key"`
-	SandboxServerKeyMasked string   `json:"sandbox_server_key_masked"`
-	ProdServerKeyMasked    string   `json:"prod_server_key_masked"`
-	ClientKeySandbox       string   `json:"client_key_sandbox"`
-	ClientKeyProd          string   `json:"client_key_prod"`
-	EnabledMethods         []string `json:"enabled_methods"`
-	LastVerifyStatus       string   `json:"last_verify_status,omitempty"`
-	WebhookURL             string   `json:"webhook_url"`
+	Provider         string   `json:"provider"`
+	IsConfigured     bool     `json:"is_configured"`
+	HasServerKey     bool     `json:"has_server_key"`
+	ServerKeyMasked  string   `json:"server_key_masked"`
+	ClientKey        string   `json:"client_key"`
+	EnabledMethods   []string `json:"enabled_methods"`
+	LastVerifyStatus string   `json:"last_verify_status,omitempty"`
+	WebhookURL       string   `json:"webhook_url"`
 }
 
 // GET /api/v1/payments/midtrans
@@ -67,7 +67,6 @@ func (h *PaymentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	if errors.Is(err, repository.ErrGatewayNotFound) {
 		response.JSON(w, http.StatusOK, gatewayDTO{
 			Provider:       "midtrans",
-			IsSandbox:      true,
 			IsConfigured:   false,
 			EnabledMethods: []string{},
 			WebhookURL:     "",
@@ -80,18 +79,14 @@ func (h *PaymentHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response.JSON(w, http.StatusOK, gatewayDTO{
-		Provider:               g.Provider,
-		IsConfigured:           len(g.ServerKeySandboxEncrypted) > 0 || len(g.ServerKeyProdEncrypted) > 0,
-		IsSandbox:              g.IsSandbox,
-		HasSandboxServerKey:    len(g.ServerKeySandboxEncrypted) > 0,
-		HasProdServerKey:       len(g.ServerKeyProdEncrypted) > 0,
-		SandboxServerKeyMasked: maskKey(len(g.ServerKeySandboxEncrypted)),
-		ProdServerKeyMasked:    maskKey(len(g.ServerKeyProdEncrypted)),
-		ClientKeySandbox:       g.ClientKeySandbox,
-		ClientKeyProd:          g.ClientKeyProd,
-		EnabledMethods:         g.EnabledMethods,
-		LastVerifyStatus:       g.LastVerifyStatus,
-		WebhookURL:             h.webhookBaseURL + "/webhooks/midtrans/" + g.WebhookToken,
+		Provider:         g.Provider,
+		IsConfigured:     len(g.ServerKeyProdEncrypted) > 0,
+		HasServerKey:     len(g.ServerKeyProdEncrypted) > 0,
+		ServerKeyMasked:  maskKey(len(g.ServerKeyProdEncrypted)),
+		ClientKey:        g.ClientKeyProd,
+		EnabledMethods:   g.EnabledMethods,
+		LastVerifyStatus: g.LastVerifyStatus,
+		WebhookURL:       h.webhookBaseURL + "/webhooks/midtrans/" + g.WebhookToken,
 	})
 }
 
@@ -153,16 +148,13 @@ func (h *PaymentHandler) RotateWebhook(w http.ResponseWriter, r *http.Request) {
 }
 
 type savePaymentReq struct {
-	// Empty = don't change. Non-empty = encrypt + store as that env's key.
-	SandboxServerKey string   `json:"sandbox_server_key"`
-	ProdServerKey    string   `json:"prod_server_key"`
-	SandboxClientKey string   `json:"sandbox_client_key"`
-	ProdClientKey    string   `json:"prod_client_key"`
-	IsSandbox        bool     `json:"is_sandbox"`
-	EnabledMethods   []string `json:"enabled_methods"`
+	// Empty server_key = don't change (keep the stored one).
+	ServerKey      string   `json:"server_key"`
+	ClientKey      string   `json:"client_key"`
+	EnabledMethods []string `json:"enabled_methods"`
 }
 
-// PUT /api/v1/payments/midtrans
+// PUT /api/v1/payments/midtrans — production keys only (sandbox removed).
 func (h *PaymentHandler) Save(w http.ResponseWriter, r *http.Request) {
 	store, err := h.storeFor(r)
 	if err != nil {
@@ -175,63 +167,44 @@ func (h *PaymentHandler) Save(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req.SandboxServerKey = strings.TrimSpace(req.SandboxServerKey)
-	req.ProdServerKey = strings.TrimSpace(req.ProdServerKey)
+	req.ServerKey = strings.TrimSpace(req.ServerKey)
 
-	// Encrypt only the keys that were provided. Empty -> nil = don't touch.
-	var sandboxBlob, prodBlob []byte
-	if req.SandboxServerKey != "" {
-		sandboxBlob, err = h.encryptor.Encrypt([]byte(req.SandboxServerKey))
+	// Encrypt the server key only if provided. Empty -> nil = keep existing.
+	var prodBlob []byte
+	if req.ServerKey != "" {
+		prodBlob, err = h.encryptor.Encrypt([]byte(req.ServerKey))
 		if err != nil {
-			h.logger.Error("encrypt sandbox", "err", err)
-			response.Error(w, http.StatusInternalServerError, "gagal enkripsi sandbox key")
-			return
-		}
-	}
-	if req.ProdServerKey != "" {
-		prodBlob, err = h.encryptor.Encrypt([]byte(req.ProdServerKey))
-		if err != nil {
-			h.logger.Error("encrypt prod", "err", err)
-			response.Error(w, http.StatusInternalServerError, "gagal enkripsi production key")
+			h.logger.Error("encrypt server key", "err", err)
+			response.Error(w, http.StatusInternalServerError, "gagal enkripsi server key")
 			return
 		}
 	}
 
-	// Need at least one server key configured (existing OR new) to keep moving.
-	// If first-time save, must provide the key for whichever mode is currently selected.
+	// Need a server key configured (existing OR new).
 	existing, _ := h.gateways.Get(r.Context(), store.ID, "midtrans")
-	if existing == nil {
-		if req.IsSandbox && sandboxBlob == nil {
-			response.Error(w, http.StatusBadRequest, "Server Key Sandbox wajib diisi")
-			return
-		}
-		if !req.IsSandbox && prodBlob == nil {
-			response.Error(w, http.StatusBadRequest, "Server Key Production wajib diisi")
-			return
-		}
-	} else {
-		if req.IsSandbox && sandboxBlob == nil && len(existing.ServerKeySandboxEncrypted) == 0 {
-			response.Error(w, http.StatusBadRequest, "Mode sandbox aktif tapi Server Key Sandbox belum tersimpan — isi terlebih dahulu")
-			return
-		}
-		if !req.IsSandbox && prodBlob == nil && len(existing.ServerKeyProdEncrypted) == 0 {
-			response.Error(w, http.StatusBadRequest, "Mode produksi aktif tapi Server Key Production belum tersimpan — isi terlebih dahulu")
-			return
-		}
+	if prodBlob == nil && (existing == nil || len(existing.ServerKeyProdEncrypted) == 0) {
+		response.Error(w, http.StatusBadRequest, "Server Key wajib diisi")
+		return
 	}
 
 	if req.EnabledMethods == nil {
 		req.EnabledMethods = []string{}
 	}
 
+	// Preserve the dormant sandbox columns as-is; only write the prod key/client
+	// key and force is_sandbox=false (seller integration is production-only).
+	var keepSandboxClient string
+	if existing != nil {
+		keepSandboxClient = existing.ClientKeySandbox
+	}
 	if err := h.gateways.Upsert(r.Context(), repository.SaveGatewayInput{
 		StoreID:                   store.ID,
 		Provider:                  "midtrans",
-		ServerKeySandboxEncrypted: sandboxBlob,
+		ServerKeySandboxEncrypted: nil, // COALESCE preserves existing
 		ServerKeyProdEncrypted:    prodBlob,
-		ClientKeySandbox:          req.SandboxClientKey,
-		ClientKeyProd:             req.ProdClientKey,
-		IsSandbox:                 req.IsSandbox,
+		ClientKeySandbox:          keepSandboxClient,
+		ClientKeyProd:             req.ClientKey,
+		IsSandbox:                 false,
 		EnabledMethods:            req.EnabledMethods,
 	}); err != nil {
 		h.logger.Error("upsert gateway", "err", err)
@@ -239,77 +212,70 @@ func (h *PaymentHandler) Save(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mode := "production"
-	if req.IsSandbox {
-		mode = "sandbox"
-	}
 	h.audit.Log(r.Context(), store.ID, audit.Event{
 		Action:     "payment_gateway.updated",
 		EntityType: "payment_gateway",
-		Summary:    "Update Midtrans (mode " + mode + ")",
+		Summary:    "Update Midtrans",
 		Metadata: map[string]any{
-			"provider":          "midtrans",
-			"is_sandbox":        req.IsSandbox,
-			"enabled_methods":   req.EnabledMethods,
-			"sandbox_key_set":   sandboxBlob != nil,
-			"prod_key_set":      prodBlob != nil,
+			"provider":        "midtrans",
+			"enabled_methods": req.EnabledMethods,
+			"server_key_set":  prodBlob != nil,
 		},
 	})
 
 	response.JSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-// POST /api/v1/payments/midtrans/verify
+// POST /api/v1/payments/midtrans/connect
 //
-// Tests connectivity to Midtrans for the requested tab (sandbox or production).
-// Body: { "tab": "sandbox" | "production" } — defaults to the active DB mode.
-func (h *PaymentHandler) Verify(w http.ResponseWriter, r *http.Request) {
+// Verifies the seller's production Midtrans keys by creating a real (but tiny,
+// Rp 1.000) Snap transaction for a dummy product and returning the snap token +
+// client key. The frontend opens the Snap popup with snap.js — the popup showing
+// up confirms both keys: the server key created the token (Midtrans rejects an
+// invalid key with 401), and the client key renders snap.js. The seller just
+// closes the popup; no payment is needed. We mark verified on token creation.
+func (h *PaymentHandler) Connect(w http.ResponseWriter, r *http.Request) {
 	store, err := h.storeFor(r)
 	if err != nil {
 		response.Error(w, http.StatusBadRequest, "toko belum dibuat")
 		return
 	}
 	g, err := h.gateways.Get(r.Context(), store.ID, "midtrans")
-	if err != nil {
-		response.Error(w, http.StatusBadRequest, "gateway belum dikonfigurasi — simpan kunci terlebih dahulu")
+	if err != nil || len(g.ServerKeyProdEncrypted) == 0 {
+		response.Error(w, http.StatusBadRequest, "Server Key belum tersimpan — simpan kunci terlebih dahulu")
+		return
+	}
+	if strings.TrimSpace(g.ClientKeyProd) == "" {
+		response.Error(w, http.StatusBadRequest, "Client Key belum tersimpan — simpan kunci terlebih dahulu")
 		return
 	}
 
-	var body struct {
-		Tab string `json:"tab"` // "sandbox" | "production"
-	}
-	_ = json.NewDecoder(r.Body).Decode(&body)
-
-	// Determine which environment to test: use requested tab, fall back to active mode.
-	testSandbox := g.IsSandbox
-	if body.Tab == "sandbox" {
-		testSandbox = true
-	} else if body.Tab == "production" {
-		testSandbox = false
-	}
-
-	var encryptedKey []byte
-	if testSandbox {
-		encryptedKey = g.ServerKeySandboxEncrypted
-	} else {
-		encryptedKey = g.ServerKeyProdEncrypted
-	}
-
-	envLabel := map[bool]string{true: "Sandbox", false: "Production"}[testSandbox]
-
-	if len(encryptedKey) == 0 {
-		response.Error(w, http.StatusBadRequest,
-			"Server Key "+envLabel+" belum tersimpan — simpan kunci terlebih dahulu")
-		return
-	}
-	keyBytes, err := h.encryptor.Decrypt(encryptedKey)
+	keyBytes, err := h.encryptor.Decrypt(g.ServerKeyProdEncrypted)
 	if err != nil {
 		h.logger.Error("decrypt server key", "err", err)
 		response.Error(w, http.StatusInternalServerError, "gagal decrypt key")
 		return
 	}
 
-	if err := h.midtrans.Ping(string(keyBytes), testSandbox); err != nil {
+	orderID, err := connectOrderID()
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "gagal membuat id transaksi")
+		return
+	}
+
+	snap, err := h.midtrans.CreateSnapTransaction(payments.SnapTransactionInput{
+		OrderID:      orderID,
+		GrossAmount:  100000, // cents → Rp 1.000 (CreateSnapTransaction divides by 100)
+		CustomerName: store.Name,
+		Items: []payments.SnapItem{{
+			ID:       "connect-test",
+			Name:     "Tes Koneksi SellOn",
+			Price:    100000,
+			Quantity: 1,
+		}},
+		ServerKey: string(keyBytes),
+	})
+	if err != nil {
 		_ = h.gateways.MarkVerified(r.Context(), store.ID, "midtrans", "failed")
 		response.Error(w, http.StatusBadRequest, err.Error())
 		return
@@ -319,9 +285,19 @@ func (h *PaymentHandler) Verify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response.JSON(w, http.StatusOK, map[string]any{
-		"ok":      true,
-		"message": "Koneksi Midtrans " + envLabel + " berhasil diverifikasi.",
+		"token":      snap.Token,
+		"client_key": g.ClientKeyProd,
 	})
+}
+
+// connectOrderID returns a unique dummy order id for a connection test.
+// Midtrans rejects duplicate order_ids, so each call must be unique.
+func connectOrderID() (string, error) {
+	buf := make([]byte, 8)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return "CONNECT-" + strings.ToUpper(hex.EncodeToString(buf)), nil
 }
 
 func (h *PaymentHandler) storeFor(r *http.Request) (*repository.Store, error) {

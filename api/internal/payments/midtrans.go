@@ -16,11 +16,11 @@ import (
 	"time"
 )
 
+// Production endpoints only — sandbox has been removed across the whole
+// platform (seller integration + SaaS billing).
 const (
-	snapSandboxBase = "https://app.sandbox.midtrans.com/snap/v1"
-	snapProdBase    = "https://app.midtrans.com/snap/v1"
-	coreSandboxBase = "https://api.sandbox.midtrans.com/v2"
-	coreProdBase    = "https://api.midtrans.com/v2"
+	snapBase = "https://app.midtrans.com/snap/v1"
+	coreBase = "https://api.midtrans.com/v2"
 )
 
 type MidtransClient struct {
@@ -40,7 +40,6 @@ type SnapTransactionInput struct {
 	CustomerEmail string
 	CustomerPhone string
 	Items         []SnapItem
-	IsSandbox     bool
 	ServerKey     string
 }
 
@@ -59,10 +58,7 @@ type SnapResponse struct {
 // CreateSnapTransaction calls Snap /transactions and returns the redirect URL
 // the buyer is sent to.
 func (c *MidtransClient) CreateSnapTransaction(in SnapTransactionInput) (*SnapResponse, error) {
-	base := snapSandboxBase
-	if !in.IsSandbox {
-		base = snapProdBase
-	}
+	base := snapBase
 
 	body := map[string]any{
 		"transaction_details": map[string]any{
@@ -104,7 +100,7 @@ func (c *MidtransClient) CreateSnapTransaction(in SnapTransactionInput) (*SnapRe
 		// Translate Midtrans HTTP errors to user-friendly messages.
 		switch resp.StatusCode {
 		case http.StatusUnauthorized, http.StatusForbidden:
-			return nil, fmt.Errorf("kunci API Midtrans tidak valid atau tidak sesuai mode aktif (sandbox/production) — periksa Pengaturan Pembayaran")
+			return nil, fmt.Errorf("kunci API Midtrans tidak valid — periksa Server Key di Pengaturan Pembayaran")
 		case http.StatusBadRequest:
 			return nil, fmt.Errorf("data pesanan ditolak Midtrans — pastikan informasi pesanan lengkap")
 		default:
@@ -153,43 +149,6 @@ func defaultEmail(email, phone string) string {
 	return phone + "@buyer.sellon.id"
 }
 
-// Ping verifies that the server key is valid by hitting Core /v2/{id}/status
-// with a fake order ID. Midtrans authenticates the request before checking
-// whether the order exists, so:
-//   - 404 "Transaction doesn't exist" → auth passed → key is valid
-//   - 401 / 403 → key is invalid or wrong environment
-func (c *MidtransClient) Ping(serverKey string, isSandbox bool) error {
-	base := coreSandboxBase
-	if !isSandbox {
-		base = coreProdBase
-	}
-	// Fake order ID — guaranteed to not exist, but Midtrans checks auth first.
-	req, err := http.NewRequest(http.MethodGet, base+"/sellon-verify-00000000/status", nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Accept", "application/json")
-	req.SetBasicAuth(serverKey, "")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("tidak dapat terhubung ke Midtrans: %w", err)
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-
-	switch resp.StatusCode {
-	case http.StatusOK, http.StatusNotFound:
-		// 404 = order not found but auth passed → key valid.
-		return nil
-	case http.StatusUnauthorized, http.StatusForbidden:
-		return fmt.Errorf("server key ditolak Midtrans — pastikan key benar dan sesuai mode (%s)",
-			map[bool]string{true: "sandbox", false: "production"}[isSandbox])
-	default:
-		return fmt.Errorf("Midtrans membalas %d: %s", resp.StatusCode, string(body))
-	}
-}
-
 // RefundInput captures the fields Midtrans needs for a direct-refund call.
 // AmountCents is converted to rupiah at the boundary so the rest of the
 // codebase keeps using cents consistently.
@@ -198,7 +157,6 @@ type RefundInput struct {
 	AmountCents int64
 	Reason      string
 	RefundKey   string // idempotency key, must be unique per refund attempt
-	IsSandbox   bool
 	ServerKey   string
 }
 
@@ -224,10 +182,7 @@ type RefundResponse struct {
 //     so the seller knows to try the manual route.
 //   - We always send `amount` in rupiah (Midtrans's native unit).
 func (c *MidtransClient) Refund(in RefundInput) (*RefundResponse, error) {
-	base := coreSandboxBase
-	if !in.IsSandbox {
-		base = coreProdBase
-	}
+	base := coreBase
 
 	body := map[string]any{
 		"refund_key": in.RefundKey,

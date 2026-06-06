@@ -443,15 +443,10 @@ func (h *OrderHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 				response.Error(w, http.StatusInternalServerError, "internal error")
 				return
 			}
-			var encryptedKey []byte
-			if gateway.IsSandbox {
-				encryptedKey = gateway.ServerKeySandboxEncrypted
-			} else {
-				encryptedKey = gateway.ServerKeyProdEncrypted
-			}
+			encryptedKey := gateway.ServerKeyProdEncrypted
 			if len(encryptedKey) == 0 {
 				response.Error(w, http.StatusBadRequest,
-					"Server Key Midtrans untuk mode aktif belum diisi - tidak bisa proses refund otomatis")
+					"Server Key Midtrans belum diisi - tidak bisa proses refund otomatis")
 				return
 			}
 			keyBytes, err := h.encryptor.Decrypt(encryptedKey)
@@ -466,7 +461,6 @@ func (h *OrderHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 				AmountCents: req.RefundAmountCents,
 				Reason:      req.RefundReason,
 				RefundKey:   refundKey,
-				IsSandbox:   gateway.IsSandbox,
 				ServerKey:   string(keyBytes),
 			}); err != nil {
 				h.logger.Warn("midtrans refund failed",
@@ -851,15 +845,10 @@ func (h *OrderHandler) GeneratePaymentLink(w http.ResponseWriter, r *http.Reques
 		response.Error(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	var encryptedKey []byte
-	if gateway.IsSandbox {
-		encryptedKey = gateway.ServerKeySandboxEncrypted
-	} else {
-		encryptedKey = gateway.ServerKeyProdEncrypted
-	}
+	encryptedKey := gateway.ServerKeyProdEncrypted
 	if len(encryptedKey) == 0 {
 		response.Error(w, http.StatusBadRequest,
-			"Server Key untuk mode aktif belum diisi")
+			"Server Key Midtrans belum diisi")
 		return
 	}
 	keyBytes, err := h.encryptor.Decrypt(encryptedKey)
@@ -894,7 +883,6 @@ func (h *OrderHandler) GeneratePaymentLink(w http.ResponseWriter, r *http.Reques
 		CustomerName:  order.CustomerName,
 		CustomerPhone: order.CustomerWhatsApp,
 		Items:         snapItems,
-		IsSandbox:     gateway.IsSandbox,
 		ServerKey:     string(keyBytes),
 	})
 	if err != nil {
@@ -914,7 +902,6 @@ func (h *OrderHandler) GeneratePaymentLink(w http.ResponseWriter, r *http.Reques
 		Summary:    "Buat link pembayaran Midtrans untuk #" + order.OrderNumber,
 		Metadata: map[string]any{
 			"order_number": order.OrderNumber,
-			"is_sandbox":   gateway.IsSandbox,
 		},
 	})
 

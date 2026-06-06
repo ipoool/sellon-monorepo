@@ -78,9 +78,7 @@ export default async function OrderDetailPage({
   const store = storeRes?.store ?? null;
   const paymentGateway: PaymentGatewayStatus = gatewayRes ?? {
     is_configured: false,
-    is_sandbox: true,
-    has_sandbox_server_key: false,
-    has_prod_server_key: false,
+    has_server_key: false,
   };
 
   return (

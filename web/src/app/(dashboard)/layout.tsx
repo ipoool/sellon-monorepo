@@ -9,11 +9,10 @@ import { OfflineSyncWatcher } from "@/components/dashboard/offline-sync-watcher"
 import { KdsProvider } from "@/components/dashboard/kds-context";
 import { PlanProvider } from "@/components/dashboard/plan-context";
 import { BisnisGateProvider } from "@/components/dashboard/bisnis-gate";
-import { SandboxBanner } from "@/components/dashboard/sandbox-banner";
 import { SubscriptionExpiryBanner } from "@/components/dashboard/subscription-expiry-banner";
 import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
-import type { DineInSettings, GatewayInfo, Store, Subscription } from "@/lib/types";
+import type { DineInSettings, Store, Subscription } from "@/lib/types";
 
 // Seller dashboard is private — never index any /(dashboard) route (in
 // addition to the robots.txt disallow).
@@ -37,16 +36,12 @@ export default async function DashboardLayout({
 
   const isAdminMode = me.role === "admin" && !me.is_impersonated;
 
-  const [data, subData, gateway, dinein] = await Promise.all([
+  const [data, subData, dinein] = await Promise.all([
     serverApi<{ store: Store | null }>("/api/v1/store"),
     // Subscription is nullable — admins without a store get null and we
     // skip the expiry banner entirely. Errors fall through to undefined,
     // also handled by the banner's null guard.
     serverApi<{ subscription: Subscription }>("/api/v1/subscription"),
-    // Midtrans gateway info — kalau seller pakai sandbox keys, banner
-    // sandbox di-render di atas dasbor. serverApi balas null kalau
-    // gateway endpoint error / belum configure.
-    serverApi<GatewayInfo>("/api/v1/payments/midtrans"),
     // Dine-in/KDS settings — surfaced to the sidebar so the "Kitchen
     // Display" link is hidden when the seller doesn't run a KDS.
     serverApi<DineInSettings>("/api/v1/store/dinein"),
@@ -77,10 +72,9 @@ export default async function DashboardLayout({
   const expClass = showExpiry
     ? "[--exp-h:5rem] sm:[--exp-h:3rem]"
     : "[--exp-h:0px]";
-  const showSandbox = !!gateway && gateway.is_sandbox;
-  const sbxClass = showSandbox
-    ? "[--sbx-h:5rem] sm:[--sbx-h:3rem]"
-    : "[--sbx-h:0px]";
+  // --sbx-h kept at 0px (sandbox banner removed) so sidebar/topbar offset calcs
+  // that reference it still resolve.
+  const sbxClass = "[--sbx-h:0px]";
 
   return (
     <div className={`${impClass} ${expClass} ${sbxClass}`}>
@@ -88,7 +82,6 @@ export default async function DashboardLayout({
       <BannersWrapper>
         <ImpersonationBanner me={me} />
         <SubscriptionExpiryBanner subscription={sub ?? null} />
-        <SandboxBanner visible={showSandbox} />
       </BannersWrapper>
       {/* OrderNotifier subscribes to a per-store SSE stream — no point
           mounting it for an admin who has no store of their own. */}

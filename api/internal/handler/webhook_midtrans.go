@@ -98,16 +98,11 @@ func (h *WebhookHandler) Midtrans(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Pick the env's server key — Midtrans signs with the same key the seller used.
-	var encryptedKey []byte
-	if gateway.IsSandbox {
-		encryptedKey = gateway.ServerKeySandboxEncrypted
-	} else {
-		encryptedKey = gateway.ServerKeyProdEncrypted
-	}
+	// Midtrans signs with the seller's (production) server key.
+	encryptedKey := gateway.ServerKeyProdEncrypted
 	if len(encryptedKey) == 0 {
-		h.logger.Warn("webhook: gateway has no server key for active env",
-			"gateway_id", gateway.ID, "is_sandbox", gateway.IsSandbox)
+		h.logger.Warn("webhook: gateway has no server key",
+			"gateway_id", gateway.ID)
 		response.Error(w, http.StatusUnprocessableEntity, "gateway not fully configured")
 		return
 	}

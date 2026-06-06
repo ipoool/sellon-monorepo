@@ -26,7 +26,6 @@ type SubscriptionHandler struct {
 	plans             *repository.PlanRepo
 	midtrans          *payments.MidtransClient
 	platformServerKey string
-	platformSandbox   bool
 	audit             *audit.Logger
 	logger            *slog.Logger
 }
@@ -40,7 +39,6 @@ func NewSubscriptionHandler(
 	plans *repository.PlanRepo,
 	midtrans *payments.MidtransClient,
 	platformServerKey string,
-	platformSandbox bool,
 	audit *audit.Logger,
 	logger *slog.Logger,
 ) *SubscriptionHandler {
@@ -50,7 +48,6 @@ func NewSubscriptionHandler(
 		plans:             plans,
 		midtrans:          midtrans,
 		platformServerKey: platformServerKey,
-		platformSandbox:   platformSandbox,
 		audit:             audit,
 		logger:            logger,
 	}
@@ -458,7 +455,6 @@ func (h *SubscriptionHandler) Checkout(w http.ResponseWriter, r *http.Request) {
 		CustomerName:  customerName,
 		CustomerEmail: customerEmail,
 		CustomerPhone: store.WhatsAppNumber,
-		IsSandbox:     h.platformSandbox,
 		ServerKey:     h.platformServerKey,
 		Items: []payments.SnapItem{
 			{

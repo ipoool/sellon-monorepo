@@ -57,7 +57,6 @@ type Config struct {
 	// and the frontend falls back to manual-transfer.
 	PlatformMidtransServerKey string
 	PlatformMidtransClientKey string
-	PlatformMidtransSandbox   bool
 
 	// Mailtrap — transactional email via the Send API (HTTP, not SMTP).
 	// All three required for sending; when API key is empty the email
@@ -100,7 +99,6 @@ func Load() (*Config, error) {
 	v.SetDefault("webhook_base_url", "http://localhost:8080")
 	v.SetDefault("supabase_bucket", "stores")
 	v.SetDefault("rajaongkir_tier", "starter")
-	v.SetDefault("platform_midtrans_sandbox", true)
 	v.SetDefault("from_name", "SellOn")
 	v.SetDefault("postgres_sslmode", "disable")
 	v.SetDefault("cname_target", "cname.sellon.id")
@@ -135,7 +133,6 @@ func Load() (*Config, error) {
 		RajaOngkirTier:            v.GetString("rajaongkir_tier"),
 		PlatformMidtransServerKey: v.GetString("platform_midtrans_server_key"),
 		PlatformMidtransClientKey: v.GetString("platform_midtrans_client_key"),
-		PlatformMidtransSandbox:   v.GetBool("platform_midtrans_sandbox"),
 		MailtrapAPIKey:            v.GetString("mailtrap_api_key"),
 		FromEmail:                 v.GetString("from_email"),
 		FromName:                  v.GetString("from_name"),

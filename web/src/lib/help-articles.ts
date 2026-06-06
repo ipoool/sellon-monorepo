@@ -143,7 +143,7 @@ export const helpArticles: HelpArticle[] = [
       {
         type: "ul",
         items: [
-          "Akun Midtrans (sandbox dulu untuk testing, lalu production saat siap live).",
+          "Akun Midtrans yang sudah aktif (production).",
           "Server Key dan Client Key dari dashboard Midtrans → Settings → Access Keys.",
         ],
       },
@@ -152,18 +152,17 @@ export const helpArticles: HelpArticle[] = [
         type: "ol",
         items: [
           "Buka Dasbor → Pengaturan → Pembayaran.",
-          "Pilih mode (Sandbox / Production) sesuai key yang Anda punya.",
           "Tempel Server Key di field 'Server Key'. Server Key disimpan terenkripsi (AES-GCM).",
-          "Tempel Client Key di field opsional bila ingin pakai Snap inline.",
-          "Pilih metode pembayaran (QRIS, VA, GoPay, ShopeePay, Kartu Kredit) sesuai yang sudah di-enable di dashboard Midtrans.",
-          "Klik Simpan, lalu klik 'Tes Koneksi' untuk verifikasi.",
+          "Tempel Client Key di field 'Client Key'.",
+          "Klik Simpan.",
+          "Klik 'Connect' — popup pembayaran tes Rp 1.000 akan muncul. Cukup tutup popup-nya; tidak perlu menyelesaikan pembayaran. Munculnya popup memastikan kedua key valid.",
         ],
       },
       {
         type: "callout",
         tone: "warning",
         text:
-          "Saat pindah dari Sandbox ke Production, akan muncul dialog konfirmasi. Pastikan key production Anda valid sebelum pindah, karena pesanan production akan langsung memproses uang asli.",
+          "Tombol Connect membuat transaksi tes nyata (Rp 1.000) di akun Midtrans Anda. Cukup tutup popup-nya tanpa membayar — kalau Anda menyelesaikan pembayaran, Anda benar-benar terdebit.",
       },
       {
         type: "p",
@@ -258,37 +257,37 @@ export const helpArticles: HelpArticle[] = [
   {
     slug: "cara-menggunakan-mode-sandbox",
     category: "memulai",
-    title: "Cara menggunakan mode sandbox sebelum go live",
+    title: "Cara cek koneksi Midtrans dengan tombol Connect",
     excerpt:
-      "Uji semua alur pembayaran tanpa uang asli sebelum aktifkan production.",
-    readingTime: "3 menit",
+      "Pastikan Server Key & Client Key Midtrans valid lewat popup pembayaran tes.",
+    readingTime: "2 menit",
     body: [
       {
         type: "p",
         text:
-          "Mode sandbox Midtrans memungkinkan Anda menguji seluruh alur checkout — dari halaman pembayaran, webhook, sampai update status pesanan — tanpa memproses uang asli.",
+          "Setelah menyimpan Server Key dan Client Key Midtrans, gunakan tombol Connect untuk memastikan keduanya valid. SellOn akan membuat transaksi tes kecil (Rp 1.000) dan membuka popup pembayaran Midtrans (Snap) langsung di halaman.",
       },
-      { type: "h2", text: "Setup sandbox" },
+      { type: "h2", text: "Langkah cek koneksi" },
       {
         type: "ol",
         items: [
-          "Buka dashboard.sandbox.midtrans.com dan login.",
-          "Dapatkan Sandbox Server Key dari Settings → Access Keys.",
-          "Di SellOn: Pengaturan → Pembayaran → pilih mode 'Sandbox', tempel key.",
-          "Simpan dan klik 'Tes Koneksi' — harus muncul konfirmasi hijau.",
+          "Buka dashboard.midtrans.com → Settings → Access Keys.",
+          "Salin Server Key dan Client Key (production).",
+          "Di SellOn: Pengaturan → Pembayaran → tempel kedua key → Simpan.",
+          "Klik 'Connect'. Popup pembayaran tes Rp 1.000 akan muncul.",
+          "Cukup tutup popup-nya — status berubah jadi 'Terkoneksi'.",
         ],
-      },
-      { type: "h2", text: "Melakukan test pembayaran" },
-      {
-        type: "p",
-        text:
-          "Buka halaman publik toko Anda di browser lain, buat pesanan, dan bayar menggunakan nomor kartu/QRIS test yang tersedia di dokumentasi Midtrans (docs.midtrans.com → Testing Payment). Webhook akan otomatis update status pesanan di SellOn.",
       },
       {
         type: "callout",
         tone: "warning",
         text:
-          "Saat siap go live, ganti ke mode Production dan masukkan key production. Jangan pakai key production di sandbox — dua environment ini tidak saling kenal.",
+          "Transaksi tes ini nyata (production). Munculnya popup sudah cukup membuktikan kedua key valid — tutup saja tanpa membayar. Kalau Anda menyelesaikan pembayaran, Anda benar-benar terdebit Rp 1.000.",
+      },
+      {
+        type: "p",
+        text:
+          "Kalau Connect gagal: server key salah ditandai error saat membuat transaksi; client key salah membuat popup Snap menolak — periksa kembali kedua key di dashboard Midtrans.",
       },
     ],
   },
@@ -600,7 +599,7 @@ export const helpArticles: HelpArticle[] = [
       {
         type: "ol",
         items: [
-          "Buka dashboard.midtrans.com (atau dashboard.sandbox.midtrans.com untuk testing).",
+          "Buka dashboard.midtrans.com.",
           "Pilih transaksi → Refund.",
           "Refund akan diproses sesuai metode pembayaran asal (1–7 hari kerja).",
         ],

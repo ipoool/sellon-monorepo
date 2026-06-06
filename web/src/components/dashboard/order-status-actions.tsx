@@ -56,7 +56,6 @@ type ConfirmState =
   | { kind: "refund"; refund_amount_cents: number; refund_reason: string }
   | { kind: "payment_link" }
   | { kind: "payment_link_blocked" }
-  | { kind: "payment_link_sandbox" }
   | null;
 
 const refundReasons = [
@@ -158,22 +157,12 @@ export function OrderStatusActions({ order, paymentGateway, className }: Props) 
     }
   }
 
-  // Preflight check: payment-link button has 3 outcomes —
-  //   1. Midtrans not configured (no server keys) → blocked dialog.
-  //   2. Configured but active env is sandbox → warning dialog.
-  //   3. Configured + production → straight to confirm.
-  // The active env's server key must exist; otherwise the API would 400
-  // with "Server Key untuk mode aktif belum diisi".
+  // Preflight check: payment-link button has 2 outcomes —
+  //   1. Midtrans not configured (no server key) → blocked dialog.
+  //   2. Configured → straight to confirm.
   function startPaymentLinkFlow() {
-    const activeKeyMissing = paymentGateway.is_sandbox
-      ? !paymentGateway.has_sandbox_server_key
-      : !paymentGateway.has_prod_server_key;
-    if (!paymentGateway.is_configured || activeKeyMissing) {
+    if (!paymentGateway.is_configured || !paymentGateway.has_server_key) {
       setConfirm({ kind: "payment_link_blocked" });
-      return;
-    }
-    if (paymentGateway.is_sandbox) {
-      setConfirm({ kind: "payment_link_sandbox" });
       return;
     }
     setConfirm({ kind: "payment_link" });
@@ -213,9 +202,6 @@ export function OrderStatusActions({ order, paymentGateway, className }: Props) 
         });
         break;
       case "payment_link":
-        await generatePaymentLink();
-        break;
-      case "payment_link_sandbox":
         await generatePaymentLink();
         break;
       case "payment_link_blocked":
@@ -313,7 +299,7 @@ export function OrderStatusActions({ order, paymentGateway, className }: Props) 
               {c.courier_service ? ` (${c.courier_service})` : ""} · Resi:{" "}
               <code className="font-mono text-xs">{c.tracking_number}</code>.
               <br />
-              Status berubah ke 'dikirim' dan tidak bisa di-undo dari sini.
+              {"Status berubah ke 'dikirim' dan tidak bisa di-undo dari sini."}
             </>
           ),
           confirmLabel: "Ya, kirim",
@@ -358,8 +344,7 @@ export function OrderStatusActions({ order, paymentGateway, className }: Props) 
                 </>
               ) : (
                 <>
-                  Mode aktif ({paymentGateway.is_sandbox ? "Sandbox" : "Production"}){" "}
-                  belum punya Server Key. Lengkapi dulu di Pengaturan -
+                  Server Key Midtrans belum diisi. Lengkapi dulu di Pengaturan -
                   Pembayaran.
                 </>
               )}
@@ -372,24 +357,6 @@ export function OrderStatusActions({ order, paymentGateway, className }: Props) 
             </>
           ),
           confirmLabel: "Buka Pengaturan Pembayaran",
-          kind: "warning",
-        };
-      case "payment_link_sandbox":
-        return {
-          title: "Midtrans masih dalam mode Sandbox",
-          description: (
-            <>
-              Mode aktif toko-mu masih <strong>Sandbox (testing)</strong> -
-              link yang dibuat hanya untuk uji coba dan{" "}
-              <strong>tidak akan minta uang sungguhan</strong> dari pembeli.
-              <br />
-              <span className="mt-2 block text-xs text-neutral-600">
-                Untuk pembayaran asli, ganti ke mode Production di Pengaturan -
-                Pembayaran setelah Server Key Production aktif.
-              </span>
-            </>
-          ),
-          confirmLabel: "Lanjut, ini cuma test",
           kind: "warning",
         };
       case "refund": {
@@ -921,13 +888,9 @@ export function OrderStatusActions({ order, paymentGateway, className }: Props) 
                   <span className="rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-warning">
                     Belum aktif
                   </span>
-                ) : paymentGateway.is_sandbox ? (
-                  <span className="rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-warning">
-                    Sandbox
-                  </span>
                 ) : (
                   <span className="rounded bg-success/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-success">
-                    Production
+                    Aktif
                   </span>
                 )}
               </p>
