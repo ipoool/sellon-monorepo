@@ -3,7 +3,6 @@ import {
   WifiOff,
   RefreshCw,
   ShieldCheck,
-  Banknote,
   CloudOff,
   CheckCircle2,
   ArrowRight,
@@ -129,9 +128,8 @@ export function OfflineSection() {
                   <ArrowRight className="size-4" aria-hidden />
                 </Button>
               </Link>
-              <p className="flex items-center gap-1.5 text-xs leading-relaxed text-neutral-500">
-                <Banknote className="size-3.5 shrink-0" aria-hidden />
-                <span>Saat offline pembayaran tunai · Tersedia di plan Bisnis</span>
+              <p className="text-xs leading-relaxed text-neutral-500">
+                Saat offline pembayaran tunai · Tersedia di plan Bisnis
               </p>
             </div>
           </div>
