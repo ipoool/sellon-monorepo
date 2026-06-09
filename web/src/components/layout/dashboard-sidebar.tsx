@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -50,6 +50,89 @@ type NavItem = {
   external?: boolean;
   bisnisOnly?: boolean;
 };
+
+// isItemActive: a nav item is active when the path matches exactly, or (for
+// non-root entries) when the path is nested under it. "Home" roots
+// (/dashboard, /platform, /pos) match exactly only so they don't stay lit on
+// every sub-page. Shared by item highlight + group auto-expand so they agree.
+function isItemActive(href: string, pathname: string): boolean {
+  const isHome = href === "/dashboard" || href === "/platform" || href === "/pos";
+  return pathname === href || (!isHome && pathname.startsWith(href + "/"));
+}
+
+function groupHasActive(items: NavItem[], pathname: string): boolean {
+  return items.some((i) => isItemActive(i.href, pathname));
+}
+
+// useGroupToggles persists which collapsible sidebar groups the seller has
+// opened/closed, keyed by group label. Read via useSyncExternalStore so it's
+// SSR-safe (server snapshot = empty → no hydration mismatch, no
+// setState-in-effect) while a power seller's opened sections reappear on reload
+// and a new user's untouched groups stay tidy and collapsed.
+const SIDEBAR_GROUPS_KEY = "sellon:sidebar:groups";
+
+type GroupState = Record<string, boolean>;
+const EMPTY_GROUPS: GroupState = {};
+
+// Cache so getSnapshot returns a stable reference until the stored value
+// changes (useSyncExternalStore requires referential stability or it loops).
+let groupsCache: { raw: string | null; parsed: GroupState } = { raw: null, parsed: EMPTY_GROUPS };
+const groupListeners = new Set<() => void>();
+
+function getGroupsSnapshot(): GroupState {
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(SIDEBAR_GROUPS_KEY);
+  } catch {
+    return EMPTY_GROUPS;
+  }
+  if (raw !== groupsCache.raw) {
+    let parsed: GroupState = EMPTY_GROUPS;
+    try {
+      parsed = raw ? (JSON.parse(raw) as GroupState) : EMPTY_GROUPS;
+    } catch {
+      parsed = EMPTY_GROUPS;
+    }
+    groupsCache = { raw, parsed };
+  }
+  return groupsCache.parsed;
+}
+
+function subscribeGroups(cb: () => void): () => void {
+  groupListeners.add(cb);
+  const onStorage = (e: StorageEvent) => {
+    if (e.key === SIDEBAR_GROUPS_KEY) cb();
+  };
+  window.addEventListener("storage", onStorage);
+  return () => {
+    groupListeners.delete(cb);
+    window.removeEventListener("storage", onStorage);
+  };
+}
+
+function writeGroups(next: GroupState) {
+  groupsCache = { raw: JSON.stringify(next), parsed: next };
+  try {
+    localStorage.setItem(SIDEBAR_GROUPS_KEY, groupsCache.raw!);
+  } catch {
+    // ignore
+  }
+  groupListeners.forEach((cb) => cb());
+}
+
+function useGroupToggles(): {
+  get: (label: string) => boolean | undefined;
+  toggle: (label: string) => void;
+} {
+  const groups = useSyncExternalStore(subscribeGroups, getGroupsSnapshot, () => EMPTY_GROUPS);
+  const toggle = useCallback(
+    (label: string) => {
+      writeGroups({ ...groups, [label]: !(groups[label] ?? false) });
+    },
+    [groups],
+  );
+  return { get: (label) => groups[label], toggle };
+}
 
 const primaryNav: NavItem[] = [
   { label: "Dasbor", href: "/dashboard", icon: LayoutDashboard },
@@ -141,6 +224,8 @@ function SidebarContent({
   // Which optional menu groups the owner enabled during profiling. Only used in
   // the seller-owner branch below; admin/staff branches ignore it.
   const caps = useMenuCapabilities();
+  // Persisted open/closed state for collapsible groups (accordion).
+  const groupToggles = useGroupToggles();
   // The core "Menu" group, minus the items the owner hid. Digital downloads is
   // one item; Bahan Baku + Pembelian are two items behind a single toggle.
   const ownerNav = primaryNav.filter((item) => {
@@ -284,6 +369,9 @@ function SidebarContent({
             {caps.pos && (
               <NavGroup
                 bisnisOnly
+                collapsible
+                isOpen={groupToggles.get("Kasir POS")}
+                onToggle={() => groupToggles.toggle("Kasir POS")}
                 label="Kasir POS"
                 labelHref="/pos"
                 items={[
@@ -302,6 +390,9 @@ function SidebarContent({
             )}
             {caps.reseller && (
               <NavGroup
+                collapsible
+                isOpen={groupToggles.get("Program Reseller")}
+                onToggle={() => groupToggles.toggle("Program Reseller")}
                 label="Program Reseller"
                 labelHref="/reseller/program"
                 items={[
@@ -313,7 +404,14 @@ function SidebarContent({
                 pathname={pathname}
               />
             )}
-            <NavGroup label="Lainnya" items={secondaryNav} pathname={pathname} />
+            <NavGroup
+              collapsible
+              isOpen={groupToggles.get("Lainnya")}
+              onToggle={() => groupToggles.toggle("Lainnya")}
+              label="Lainnya"
+              items={secondaryNav}
+              pathname={pathname}
+            />
           </>
         )}
       </nav>
@@ -381,6 +479,9 @@ function NavGroup({
   items,
   pathname,
   bisnisOnly,
+  collapsible,
+  isOpen,
+  onToggle,
 }: {
   label: string;
   labelHref?: string;
@@ -390,46 +491,57 @@ function NavGroup({
   // tier, but non-Bisnis sellers get the upgrade dialog on click instead of
   // navigating.
   bisnisOnly?: boolean;
+  // Collapsible groups show a chevron toggle and hide their items when closed.
+  // The group that contains the active route always force-expands so the user
+  // never lands on a page whose nav item is hidden. isOpen is the persisted
+  // toggle (undefined = never touched → collapsed by default).
+  collapsible?: boolean;
+  isOpen?: boolean;
+  onToggle?: () => void;
 }) {
   const { locked, openGate } = useBisnisGate();
   const groupLocked = !!bisnisOnly && locked;
+  const containsActive = groupHasActive(items, pathname);
+  const open = !collapsible || containsActive || (isOpen ?? false);
+  const labelClass =
+    "text-xs font-semibold uppercase tracking-wider text-neutral-500 hover:text-neutral-700";
   return (
     <div>
-      {groupLocked ? (
-        <button
-          type="button"
-          onClick={() => openGate("Kasir POS")}
-          className="block w-full px-3 pb-2 text-left text-xs font-semibold uppercase tracking-wider text-neutral-500 hover:text-neutral-700"
-        >
-          {label}
-        </button>
-      ) : labelHref ? (
-        <Link
-          href={labelHref}
-          className="block px-3 pb-2 text-xs font-semibold uppercase tracking-wider text-neutral-500 hover:text-neutral-700"
-        >
-          {label}
-        </Link>
-      ) : (
-        <p className="px-3 pb-2 text-xs font-semibold uppercase tracking-wider text-neutral-500">
-          {label}
-        </p>
-      )}
+      <div className="flex items-center justify-between gap-1 pb-2 pl-3 pr-2">
+        {groupLocked ? (
+          <button
+            type="button"
+            onClick={() => openGate("Kasir POS")}
+            className={cn("text-left", labelClass)}
+          >
+            {label}
+          </button>
+        ) : labelHref ? (
+          <Link href={labelHref} className={labelClass}>
+            {label}
+          </Link>
+        ) : (
+          <p className={labelClass}>{label}</p>
+        )}
+        {collapsible && (
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-expanded={open}
+            aria-label={open ? `Tutup ${label}` : `Buka ${label}`}
+            className="flex size-5 shrink-0 items-center justify-center rounded text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700"
+          >
+            <ChevronDown
+              className={cn("size-4 transition-transform", open && "rotate-180")}
+              aria-hidden
+            />
+          </button>
+        )}
+      </div>
+      {open && (
       <ul className="flex flex-col gap-0.5">
         {items.map((item) => {
-          // "Home" entries match exactly only — otherwise the seller
-          // /dashboard link stays highlighted on every /dashboard/* sub-page,
-          // and the admin /platform link does the same on
-          // /platform/users etc. /pos is also a section root whose
-          // siblings (Riwayat Shift, Laporan POS) live under /pos/*.
-          // Anything deeper still highlights when its prefix matches.
-          const isHome =
-            item.href === "/dashboard" ||
-            item.href === "/platform" ||
-            item.href === "/pos";
-          const active =
-            pathname === item.href ||
-            (!isHome && pathname.startsWith(item.href + "/"));
+          const active = isItemActive(item.href, pathname);
           const Icon = item.icon;
 
           if (item.disabled) {
@@ -507,6 +619,7 @@ function NavGroup({
           );
         })}
       </ul>
+      )}
     </div>
   );
 }
