@@ -295,8 +295,8 @@ Selamat belajar!
 
 // RenderBuyerOTP emails the buyer a one-time code to unlock a course viewer.
 func RenderBuyerOTP(storeName, code string, expiryMinutes int) (subject, text, htmlBody string) {
-	subject = fmt.Sprintf("[%s] Kode akses kelas: %s", storeName, code)
-	text = fmt.Sprintf(`Kode akses kelasmu di %s:
+	subject = fmt.Sprintf("[%s] Kode akses: %s", storeName, code)
+	text = fmt.Sprintf(`Kode akses pesananmu di %s:
 
 %s
 
@@ -304,8 +304,8 @@ Berlaku %d menit. Jangan bagikan kode ini ke siapa pun.
 Kalau kamu tidak meminta kode ini, abaikan email ini.
 `, storeName, code, expiryMinutes)
 	htmlBody = wrapHTML(fmt.Sprintf(`
-<h2 style="margin:0 0 8px;font-size:20px;color:#0f172a;">Kode akses kelas</h2>
-<p style="margin:0 0 16px;color:#475569;">Masukkan kode ini untuk membuka kelasmu di <strong>%s</strong>:</p>
+<h2 style="margin:0 0 8px;font-size:20px;color:#0f172a;">Kode akses</h2>
+<p style="margin:0 0 16px;color:#475569;">Masukkan kode ini untuk membuka akses pesananmu di <strong>%s</strong>:</p>
 <p style="margin:0 0 16px;font-size:32px;font-weight:700;letter-spacing:6px;color:#0f172a;text-align:center;">%s</p>
 <p style="margin:0;color:#475569;font-size:13px;">Berlaku %d menit. Jangan bagikan kode ini. Kalau kamu tidak memintanya, abaikan email ini.</p>`,
 		html.EscapeString(storeName),

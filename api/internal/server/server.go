@@ -174,9 +174,15 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 		r.Get("/info", handler.Info(cfg))
 		// Pricing — public so the landing page can fetch without auth.
 		r.Get("/plans", plansHandler.ListPublic)
-		// Public digital-download link — no auth, token in URL is the
-		// secret. Random 256-bit token = unguessable.
-		r.Get("/download/{token}", downloadHandler.Get)
+		// Digital-download access is now email-OTP gated (like courses) so the
+		// link can't simply be shared + every access is tracked. Public: request
+		// + verify OTP; the delivery info itself sits behind RequireBuyer.
+		r.Post("/download/{token}/request-otp", buyerCourseHandler.RequestOTP)
+		r.Post("/download/{token}/verify-otp", buyerCourseHandler.VerifyOTP)
+		r.Group(func(r chi.Router) {
+			r.Use(requireBuyer)
+			r.Get("/download/{token}", downloadHandler.Get)
+		})
 		// City autocomplete — public so both buyer checkout and seller
 		// settings can reach it.
 		r.Get("/cities/search", citiesHandler.Search)

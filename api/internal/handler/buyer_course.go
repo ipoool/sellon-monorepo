@@ -49,12 +49,12 @@ func NewBuyerCourseHandler(
 	}
 }
 
-// resolveCourseToken loads + validates the token for a course link. Returns a
-// generic 404 (written to w) and ok=false on any miss so token existence isn't
-// leaked. Verifies the token belongs to {slug}'s store, is a course, and isn't
-// revoked.
-func (h *BuyerCourseHandler) resolveCourseToken(w http.ResponseWriter, r *http.Request) (*repository.DownloadInfo, bool) {
-	slug := chi.URLParam(r, "slug")
+// resolveToken loads + validates a download token for ANY buyer-OTP flow (course
+// or digital). Returns a generic 404 (written to w) on any miss so token
+// existence isn't leaked. When the route carries a {slug} (course link) it must
+// match the token's store; the digital /download/{token} route has no slug, so
+// the token alone is the key. Rejects revoked (403) / expired (410) links.
+func (h *BuyerCourseHandler) resolveToken(w http.ResponseWriter, r *http.Request) (*repository.DownloadInfo, bool) {
 	token := chi.URLParam(r, "token")
 	if token == "" || len(token) < 20 {
 		response.Error(w, http.StatusNotFound, "link tidak valid")
@@ -66,16 +66,20 @@ func (h *BuyerCourseHandler) resolveCourseToken(w http.ResponseWriter, r *http.R
 		return nil, false
 	}
 	if err != nil {
-		h.logger.Error("course token lookup", "err", err)
+		h.logger.Error("buyer token lookup", "err", err)
 		response.Error(w, http.StatusInternalServerError, "internal error")
 		return nil, false
 	}
-	if !strings.EqualFold(info.StoreSlug, slug) || info.ProductType != "course" {
+	if slug := chi.URLParam(r, "slug"); slug != "" && !strings.EqualFold(info.StoreSlug, slug) {
 		response.Error(w, http.StatusNotFound, "link tidak valid")
 		return nil, false
 	}
 	if info.Token.RevokedAt != nil {
-		response.Error(w, http.StatusForbidden, "akses kelas telah dinonaktifkan oleh penjual")
+		response.Error(w, http.StatusForbidden, "akses telah dinonaktifkan oleh penjual")
+		return nil, false
+	}
+	if info.Token.ExpiresAt != nil && info.Token.ExpiresAt.Before(time.Now()) {
+		response.Error(w, http.StatusGone, "link sudah kedaluwarsa")
 		return nil, false
 	}
 	return info, true
@@ -88,7 +92,7 @@ type otpRequest struct {
 
 // POST /storefront/{slug}/course/{token}/request-otp  (public)
 func (h *BuyerCourseHandler) RequestOTP(w http.ResponseWriter, r *http.Request) {
-	info, ok := h.resolveCourseToken(w, r)
+	info, ok := h.resolveToken(w, r)
 	if !ok {
 		return
 	}
@@ -100,6 +104,10 @@ func (h *BuyerCourseHandler) RequestOTP(w http.ResponseWriter, r *http.Request) 
 	buyerEmail := strings.ToLower(strings.TrimSpace(req.Email))
 	if buyerEmail == "" {
 		response.Error(w, http.StatusBadRequest, "email wajib diisi")
+		return
+	}
+	if strings.TrimSpace(info.CustomerEmail) == "" {
+		response.Error(w, http.StatusBadRequest, "pesanan ini tidak punya email terdaftar — hubungi penjual")
 		return
 	}
 	// The buyer must know the email used at checkout — this is the proof of
@@ -144,7 +152,7 @@ func (h *BuyerCourseHandler) RequestOTP(w http.ResponseWriter, r *http.Request) 
 
 // POST /storefront/{slug}/course/{token}/verify-otp  (public)
 func (h *BuyerCourseHandler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
-	info, ok := h.resolveCourseToken(w, r)
+	info, ok := h.resolveToken(w, r)
 	if !ok {
 		return
 	}
@@ -157,6 +165,10 @@ func (h *BuyerCourseHandler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 	code := strings.TrimSpace(req.Code)
 	if buyerEmail == "" || code == "" {
 		response.Error(w, http.StatusBadRequest, "email dan kode wajib diisi")
+		return
+	}
+	if strings.TrimSpace(info.CustomerEmail) == "" {
+		response.Error(w, http.StatusBadRequest, "pesanan ini tidak punya email terdaftar — hubungi penjual")
 		return
 	}
 	if !strings.EqualFold(buyerEmail, strings.TrimSpace(info.CustomerEmail)) {
@@ -201,6 +213,28 @@ func (h *BuyerCourseHandler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 		Secure:   h.cookieSecure,
 		SameSite: http.SameSiteLaxMode,
 	})
+
+	// Record the access ONCE per successful OTP login (not on every content
+	// fetch) so the Unduhan Digital audit reflects real sessions, not refreshes.
+	// Best-effort, detached from the request.
+	ip, ua := clientIP(r), clientUA(r)
+	go func(in repository.DownloadInfo) {
+		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := h.logs.Create(bgCtx, repository.DownloadLog{
+			TokenID:     in.Token.ID,
+			StoreID:     in.Token.StoreID,
+			OrderID:     in.Token.OrderID,
+			OrderItemID: in.Token.OrderItemID,
+			CustomerID:  in.CustomerID,
+			IPAddress:   ip,
+			UserAgent:   ua,
+			Blocked:     false,
+		}); err != nil {
+			h.logger.Error("course: audit log", "err", err, "token", in.Token.ID)
+		}
+	}(*info)
+
 	response.JSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -211,9 +245,10 @@ type courseVideoOut struct {
 }
 
 // GET /storefront/{slug}/course/{token}/content  (RequireBuyer)
-// Returns the course playlist and records the open in download_logs.
+// Returns the course playlist. Access is logged once at OTP verify time (not
+// here) so page refreshes don't spam the Unduhan Digital audit.
 func (h *BuyerCourseHandler) Content(w http.ResponseWriter, r *http.Request) {
-	info, ok := h.resolveCourseToken(w, r)
+	info, ok := h.resolveToken(w, r)
 	if !ok {
 		return
 	}
@@ -236,26 +271,6 @@ func (h *BuyerCourseHandler) Content(w http.ResponseWriter, r *http.Request) {
 			DescriptionMD: v.DescriptionMD,
 		})
 	}
-
-	// Record the access (best-effort, detached) so it surfaces on the seller's
-	// Unduhan Digital page with IP/share signals — mirrors DownloadHandler.
-	ip, ua := clientIP(r), clientUA(r)
-	go func(in repository.DownloadInfo) {
-		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := h.logs.Create(bgCtx, repository.DownloadLog{
-			TokenID:     in.Token.ID,
-			StoreID:     in.Token.StoreID,
-			OrderID:     in.Token.OrderID,
-			OrderItemID: in.Token.OrderItemID,
-			CustomerID:  in.CustomerID,
-			IPAddress:   ip,
-			UserAgent:   ua,
-			Blocked:     false,
-		}); err != nil {
-			h.logger.Error("course: audit log", "err", err, "token", in.Token.ID)
-		}
-	}(*info)
 
 	response.JSON(w, http.StatusOK, map[string]any{
 		"product_name": info.ProductName,

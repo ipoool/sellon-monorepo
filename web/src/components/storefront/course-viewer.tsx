@@ -1,16 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { Lock, Loader2, Info } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Loader2, Info } from "lucide-react";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
+import { BuyerOtpGate } from "@/components/storefront/buyer-otp-gate";
 import { CoursePlayer } from "@/components/storefront/course-player";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
 type Video = { title: string; youtube_id: string; description_md: string };
-type Phase = "loading" | "email" | "code" | "ready";
+type Phase = "loading" | "gate" | "ready";
 
 export function CourseViewer({ slug, token }: { slug: string; token: string }) {
   const base = `${apiBase}/api/v1/storefront/${encodeURIComponent(slug)}/course/${encodeURIComponent(token)}`;
@@ -18,11 +17,6 @@ export function CourseViewer({ slug, token }: { slug: string; token: string }) {
   const [phase, setPhase] = useState<Phase>("loading");
   const [productName, setProductName] = useState("");
   const [videos, setVideos] = useState<Video[]>([]);
-  const [email, setEmail] = useState("");
-  const [maskedEmail, setMaskedEmail] = useState("");
-  const [code, setCode] = useState("");
-  const [err, setErr] = useState("");
-  const [busy, setBusy] = useState(false);
   const [notFound, setNotFound] = useState(false);
 
   // Try the gated content; returns true if the buyer is already authed.
@@ -46,60 +40,9 @@ export function CourseViewer({ slug, token }: { slug: string; token: string }) {
   useEffect(() => {
     void (async () => {
       const ok = await loadContent();
-      setPhase(ok ? "ready" : "email");
+      setPhase(ok ? "ready" : "gate");
     })();
   }, [loadContent]);
-
-  async function requestOtp(e?: FormEvent) {
-    e?.preventDefault();
-    setErr("");
-    setBusy(true);
-    try {
-      const res = await fetch(`${base}/request-otp`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim() }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setErr(data.error || "Gagal mengirim kode");
-        return;
-      }
-      setMaskedEmail(data.email_masked || email.trim());
-      setCode("");
-      setPhase("code");
-    } catch {
-      setErr("Gagal mengirim kode. Coba lagi.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function verifyOtp(e?: FormEvent) {
-    e?.preventDefault();
-    setErr("");
-    setBusy(true);
-    try {
-      const res = await fetch(`${base}/verify-otp`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), code: code.trim() }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setErr(data.error || "Kode salah");
-        return;
-      }
-      const ok = await loadContent();
-      setPhase(ok ? "ready" : "email");
-    } catch {
-      setErr("Gagal verifikasi. Coba lagi.");
-    } finally {
-      setBusy(false);
-    }
-  }
 
   if (notFound) {
     return (
@@ -130,68 +73,17 @@ export function CourseViewer({ slug, token }: { slug: string; token: string }) {
     );
   }
 
-  if (phase === "email" || phase === "code") {
+  if (phase === "gate") {
     return (
       <Shell>
-        <Card>
-          <div className="flex flex-col items-center gap-2 text-center">
-            <div className="flex size-12 items-center justify-center rounded-full bg-brand-50 text-brand-700">
-              <Lock className="size-6" aria-hidden />
-            </div>
-            <h1 className="font-display text-xl font-semibold text-neutral-900">Akses Kelas</h1>
-            <p className="max-w-sm text-sm text-neutral-600">
-              {phase === "email"
-                ? "Masukkan email yang kamu pakai saat pesan. Kami kirim kode verifikasi ke email itu."
-                : `Kami kirim kode 6 digit ke ${maskedEmail}. Masukkan di bawah.`}
-            </p>
-          </div>
-
-          {phase === "email" ? (
-            <form onSubmit={requestOtp} className="mt-5 flex flex-col gap-3">
-              <Input
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="email@kamu.com"
-                autoFocus
-              />
-              {err && <p className="text-sm text-danger">{err}</p>}
-              <Button type="submit" disabled={busy || !email.trim()}>
-                {busy ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
-                Kirim kode
-              </Button>
-            </form>
-          ) : (
-            <form onSubmit={verifyOtp} className="mt-5 flex flex-col gap-3">
-              <Input
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                required
-                value={code}
-                onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                placeholder="123456"
-                className="text-center text-lg tracking-[0.4em]"
-                autoFocus
-              />
-              {err && <p className="text-sm text-danger">{err}</p>}
-              <Button type="submit" disabled={busy || code.length < 6}>
-                {busy ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
-                Verifikasi & buka kelas
-              </Button>
-              <button
-                type="button"
-                onClick={() => {
-                  setErr("");
-                  setPhase("email");
-                }}
-                className="text-xs font-medium text-neutral-500 hover:text-neutral-800"
-              >
-                ← Ganti email / kirim ulang
-              </button>
-            </form>
-          )}
-        </Card>
+        <BuyerOtpGate
+          base={base}
+          title="Akses Kelas"
+          onVerified={async () => {
+            const ok = await loadContent();
+            setPhase(ok ? "ready" : "gate");
+          }}
+        />
       </Shell>
     );
   }
@@ -201,5 +93,9 @@ export function CourseViewer({ slug, token }: { slug: string; token: string }) {
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
-  return <div className="mx-auto w-full max-w-md px-4 py-10">{children}</div>;
+  return (
+    <div className="flex min-h-svh items-center justify-center px-4 py-10">
+      <div className="w-full max-w-md">{children}</div>
+    </div>
+  );
 }
