@@ -894,11 +894,13 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 	if in.CustomerWA != "" {
 		var cid uuid.UUID
 		if err := tx.QueryRow(ctx, `
-			INSERT INTO customers (store_id, name, whatsapp_number, address, city,
+			INSERT INTO customers (store_id, name, whatsapp_number, email, address, city,
 			                       total_orders, total_spent_cents, last_order_at)
-			VALUES ($1, $2, $3, $4, $5, 1, $6, now())
+			VALUES ($1, $2, $3, $4, $5, $6, 1, $7, now())
 			ON CONFLICT (store_id, whatsapp_number) DO UPDATE SET
 			    name = EXCLUDED.name,
+			    -- keep a previously-known email if this order didn't supply one
+			    email = COALESCE(NULLIF(EXCLUDED.email, ''), customers.email),
 			    address = EXCLUDED.address,
 			    city = EXCLUDED.city,
 			    total_orders = customers.total_orders + 1,
@@ -906,7 +908,7 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 			    last_order_at = now(),
 			    updated_at = now()
 			RETURNING id
-		`, in.StoreID, in.CustomerName, in.CustomerWA, in.CustomerAddress, in.CustomerCity, total).Scan(&cid); err != nil {
+		`, in.StoreID, in.CustomerName, in.CustomerWA, in.CustomerEmail, in.CustomerAddress, in.CustomerCity, total).Scan(&cid); err != nil {
 			return nil, fmt.Errorf("upsert customer: %w", err)
 		}
 		customerID = &cid

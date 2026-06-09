@@ -537,6 +537,7 @@ export type OrderDetail = {
   tracking_number: string;
   customer_name: string;
   customer_whatsapp: string;
+  customer_email?: string;
   customer_address: string;
   customer_city: string;
   notes: string;

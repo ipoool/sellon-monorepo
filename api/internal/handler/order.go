@@ -152,6 +152,7 @@ type orderDetailDTO struct {
 	TrackingNumber     string         `json:"tracking_number"`
 	CustomerName       string         `json:"customer_name"`
 	CustomerWhatsApp   string         `json:"customer_whatsapp"`
+	CustomerEmail      string         `json:"customer_email,omitempty"`
 	CustomerAddress    string         `json:"customer_address"`
 	CustomerCity       string         `json:"customer_city"`
 	Notes              string         `json:"notes"`
@@ -381,6 +382,7 @@ func orderDetailToDTO(o *repository.Order, items []orderItemDTO) orderDetailDTO 
 		ChangeAmountCents:     o.ChangeAmountCents,
 		Courier: o.Courier, CourierService: o.CourierService, TrackingNumber: o.TrackingNumber,
 		CustomerName: o.CustomerName, CustomerWhatsApp: o.CustomerWhatsApp,
+		CustomerEmail:   o.CustomerEmail,
 		CustomerAddress: o.CustomerAddress, CustomerCity: o.CustomerCity,
 		Notes: o.Notes, SellerNotes: o.SellerNotes, PaymentURL: o.PaymentURL,
 		PaidAt: paid, ShippedAt: shipped, CompletedAt: completed, CancelledAt: cancelled,

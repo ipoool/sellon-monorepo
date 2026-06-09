@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   User,
   Phone,
+  Mail,
   MapPin,
   Truck,
   CreditCard,
@@ -280,6 +281,16 @@ export default async function OrderDetailPage({
                   {order.customer_whatsapp}
                 </dd>
               </div>
+              {order.customer_email && (
+                <div className="sm:col-span-2">
+                  <dt className="flex items-center gap-1 text-xs font-medium uppercase tracking-wider text-neutral-500">
+                    <Mail className="size-3" aria-hidden /> Email
+                  </dt>
+                  <dd className="mt-0.5 break-all text-neutral-900">
+                    {order.customer_email}
+                  </dd>
+                </div>
+              )}
               {order.customer_address && (
                 <div className="sm:col-span-2">
                   <dt className="flex items-center gap-1 text-xs font-medium uppercase tracking-wider text-neutral-500">
