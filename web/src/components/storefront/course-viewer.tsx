@@ -17,6 +17,7 @@ export function CourseViewer({ slug, token }: { slug: string; token: string }) {
   const [phase, setPhase] = useState<Phase>("loading");
   const [productName, setProductName] = useState("");
   const [videos, setVideos] = useState<Video[]>([]);
+  const [expiresAt, setExpiresAt] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
 
   // Try the gated content; returns true if the buyer is already authed.
@@ -31,6 +32,7 @@ export function CourseViewer({ slug, token }: { slug: string; token: string }) {
       const data = await res.json();
       setProductName(data.product_name ?? "");
       setVideos(Array.isArray(data.videos) ? data.videos : []);
+      setExpiresAt(typeof data.expires_at === "string" ? data.expires_at : null);
       return true;
     } catch {
       return false;
@@ -89,7 +91,17 @@ export function CourseViewer({ slug, token }: { slug: string; token: string }) {
   }
 
   // phase === "ready" — render the shared course layout.
-  return <CoursePlayer productName={productName} videos={videos} />;
+  const accessNote = expiresAt
+    ? `Akses berlaku sampai ${formatAccessDate(expiresAt)}`
+    : "Akses seumur hidup";
+  return <CoursePlayer productName={productName} videos={videos} accessNote={accessNote} />;
+}
+
+// formatAccessDate renders an ISO timestamp as a short Indonesian date.
+function formatAccessDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
 }
 
 function Shell({ children }: { children: React.ReactNode }) {

@@ -130,6 +130,9 @@ export type Product = {
   takeaway_charge_cents: number;
   takeaway_material_id: string;
   takeaway_material_name: string;
+  // Course access validity ("masa aktif"): lifetime (value 0) or N week/month/year.
+  access_validity_value?: number;
+  access_validity_unit?: "lifetime" | "week" | "month" | "year";
   variants?: Variant[];
   // Aggregates surfaced by the list endpoint when has_variants=true so the
   // dashboard "Stok" column reflects per-variant edits. Zero otherwise.

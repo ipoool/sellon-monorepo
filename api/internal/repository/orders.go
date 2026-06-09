@@ -98,6 +98,11 @@ type OrderItem struct {
 	SubtotalCents  int64
 	ProductType    string // "physical" | "digital"
 	ServingType    string // "" | "dine_in" | "takeaway"
+	// Access validity snapshot from the product, populated by
+	// PrepareDigitalFulfillment so the fulfiller can set the token's expires_at.
+	// Unit 'lifetime' (value 0) = no expiry.
+	AccessValidityValue int
+	AccessValidityUnit  string
 }
 
 type OrderItemInput struct {
@@ -802,10 +807,16 @@ func (r *OrderRepo) PrepareDigitalFulfillment(ctx context.Context, orderID uuid.
 	// Non-physical items (digital + course) all need a delivery token minted;
 	// the fulfiller branches on product_type for digital-link vs course-access
 	// email copy.
+	// LEFT JOIN products for the access-validity snapshot (course "masa aktif").
+	// COALESCE guards deleted products → defaults to lifetime (no expiry).
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, product_id, product_name, variant_name,
-		       unit_price_cents, quantity, subtotal_cents, product_type
-		FROM order_items WHERE order_id = $1 AND product_type IN ('digital', 'course')
+		SELECT oi.id, oi.product_id, oi.product_name, oi.variant_name,
+		       oi.unit_price_cents, oi.quantity, oi.subtotal_cents, oi.product_type,
+		       COALESCE(p.access_validity_value, 0),
+		       COALESCE(p.access_validity_unit, 'lifetime')
+		FROM order_items oi
+		LEFT JOIN products p ON p.id = oi.product_id
+		WHERE oi.order_id = $1 AND oi.product_type IN ('digital', 'course')
 	`, orderID)
 	if err != nil {
 		return nil, allDigital, err
@@ -816,6 +827,7 @@ func (r *OrderRepo) PrepareDigitalFulfillment(ctx context.Context, orderID uuid.
 		if err = rows.Scan(
 			&it.ID, &it.ProductID, &it.ProductName, &it.VariantName,
 			&it.UnitPriceCents, &it.Quantity, &it.SubtotalCents, &it.ProductType,
+			&it.AccessValidityValue, &it.AccessValidityUnit,
 		); err != nil {
 			return nil, allDigital, err
 		}

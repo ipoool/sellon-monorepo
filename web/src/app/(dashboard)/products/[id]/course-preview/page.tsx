@@ -34,6 +34,16 @@ export default async function CoursePreviewPage({
     description_md: v.description_md,
   }));
 
+  // Buyers will see "berlaku sampai <date>"; in preview there's no purchase
+  // date yet, so show the configured masa aktif as a duration.
+  const unitLabel: Record<string, string> = { week: "minggu", month: "bulan", year: "tahun" };
+  const av = product.access_validity_value ?? 0;
+  const au = product.access_validity_unit ?? "lifetime";
+  const accessNote =
+    au !== "lifetime" && av > 0
+      ? `Masa aktif: ${av} ${unitLabel[au] ?? au} sejak pembelian`
+      : "Akses seumur hidup";
+
   return (
     <div className="min-h-svh bg-neutral-50">
       <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2.5">
@@ -49,7 +59,7 @@ export default async function CoursePreviewPage({
           Edit kursus
         </Link>
       </div>
-      <CoursePlayer productName={product.name} videos={videos} />
+      <CoursePlayer productName={product.name} videos={videos} accessNote={accessNote} />
     </div>
   );
 }

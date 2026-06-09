@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { GraduationCap, PlayCircle } from "lucide-react";
+import { GraduationCap, PlayCircle, Clock } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Markdown } from "@/components/ui/markdown";
 import { cn } from "@/lib/utils";
@@ -18,20 +18,32 @@ export type CourseVideoView = {
 export function CoursePlayer({
   productName,
   videos,
+  accessNote,
 }: {
   productName: string;
   videos: CourseVideoView[];
+  // Masa aktif label, e.g. "Akses berlaku sampai 9 Sep 2026" or "Akses seumur
+  // hidup". Optional — hidden when not provided.
+  accessNote?: string;
 }) {
   const [active, setActive] = useState(0);
   const current = videos[active];
 
   return (
     <div className="w-full px-4 py-8 lg:px-8">
-      <header className="mb-6 flex items-center gap-2">
-        <GraduationCap className="size-5 text-brand-600" aria-hidden />
-        <h1 className="font-display text-xl font-semibold text-neutral-900">
-          {productName || "Kelas"}
-        </h1>
+      <header className="mb-6 flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div className="flex items-center gap-2">
+          <GraduationCap className="size-5 text-brand-600" aria-hidden />
+          <h1 className="font-display text-xl font-semibold text-neutral-900">
+            {productName || "Kelas"}
+          </h1>
+        </div>
+        {accessNote && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700">
+            <Clock className="size-3.5" aria-hidden />
+            {accessNote}
+          </span>
+        )}
       </header>
 
       {videos.length === 0 ? (

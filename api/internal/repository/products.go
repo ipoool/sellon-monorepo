@@ -37,6 +37,11 @@ type Product struct {
 	TakeawayEnabled     bool
 	TakeawayChargeCents int64
 	TakeawayMaterialID  *uuid.UUID // plastic/packaging consumed per take-away unit
+	// Access validity (course "masa aktif"): how long buyer access stays valid
+	// after purchase. Unit 'lifetime' (value 0) = no expiry; otherwise value>0
+	// of week/month/year. Applied to the download token's expires_at at mint.
+	AccessValidityValue int
+	AccessValidityUnit  string
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
 }
@@ -69,6 +74,7 @@ const productColumns = `id, store_id, category_id, name, slug, description, pric
 	status, photo_urls, has_variants, is_featured,
 	product_type, digital_delivery_url, digital_file_url, digital_instructions, gtin,
 	takeaway_enabled, takeaway_charge_cents, takeaway_material_id,
+	access_validity_value, access_validity_unit,
 	created_at, updated_at`
 
 func scanProduct(row pgx.Row, p *Product) error {
@@ -79,6 +85,7 @@ func scanProduct(row pgx.Row, p *Product) error {
 		&p.Status, &p.PhotoURLs, &p.HasVariants, &p.IsFeatured,
 		&p.ProductType, &p.DigitalDeliveryURL, &p.DigitalFileURL, &p.DigitalInstructions, &p.GTIN,
 		&p.TakeawayEnabled, &p.TakeawayChargeCents, &p.TakeawayMaterialID,
+		&p.AccessValidityValue, &p.AccessValidityUnit,
 		&p.CreatedAt, &p.UpdatedAt,
 	)
 }
@@ -211,6 +218,8 @@ type SaveProductInput struct {
 	TakeawayEnabled     bool
 	TakeawayChargeCents int64
 	TakeawayMaterialID  *uuid.UUID
+	AccessValidityValue int
+	AccessValidityUnit  string
 }
 
 func (r *ProductRepo) Create(ctx context.Context, in SaveProductInput) (*Product, error) {
@@ -220,9 +229,10 @@ func (r *ProductRepo) Create(ctx context.Context, in SaveProductInput) (*Product
 		                     low_stock_threshold,
 		                     weight_g, length_cm, width_cm, height_cm, status, photo_urls, is_featured,
 		                     product_type, digital_delivery_url, digital_file_url, digital_instructions, gtin,
-		                     takeaway_enabled, takeaway_charge_cents, takeaway_material_id)
+		                     takeaway_enabled, takeaway_charge_cents, takeaway_material_id,
+		                     access_validity_value, access_validity_unit)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-		        $16, $17, $18, $19, $20, $21, $22, $23)
+		        $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
 		RETURNING ` + productColumns
 	var p Product
 	if err := scanProduct(r.pool.QueryRow(ctx, q,
@@ -231,6 +241,7 @@ func (r *ProductRepo) Create(ctx context.Context, in SaveProductInput) (*Product
 		in.WeightG, in.LengthCm, in.WidthCm, in.HeightCm, in.Status, in.PhotoURLs, in.IsFeatured,
 		in.ProductType, in.DigitalDeliveryURL, in.DigitalFileURL, in.DigitalInstructions, in.GTIN,
 		in.TakeawayEnabled, in.TakeawayChargeCents, in.TakeawayMaterialID,
+		in.AccessValidityValue, in.AccessValidityUnit,
 	), &p); err != nil {
 		return nil, err
 	}
@@ -254,6 +265,8 @@ func (r *ProductRepo) Update(ctx context.Context, id uuid.UUID, in SaveProductIn
 		    takeaway_enabled = $22,
 		    takeaway_charge_cents = $23,
 		    takeaway_material_id = $24,
+		    access_validity_value = $25,
+		    access_validity_unit = $26,
 		    updated_at = now()
 		WHERE id = $1 AND store_id = $2
 		RETURNING ` + productColumns
@@ -264,6 +277,7 @@ func (r *ProductRepo) Update(ctx context.Context, id uuid.UUID, in SaveProductIn
 		in.WeightG, in.LengthCm, in.WidthCm, in.HeightCm, in.Status, in.PhotoURLs, in.IsFeatured,
 		in.ProductType, in.DigitalDeliveryURL, in.DigitalFileURL, in.DigitalInstructions, in.GTIN,
 		in.TakeawayEnabled, in.TakeawayChargeCents, in.TakeawayMaterialID,
+		in.AccessValidityValue, in.AccessValidityUnit,
 	), &p); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrProductNotFound

@@ -26,6 +26,29 @@ type Fulfiller struct {
 	logger         *slog.Logger
 }
 
+// accessExpiry turns a product's access-validity snapshot into a download-token
+// expiry. Lifetime (value<=0) or any unrecognized unit → nil = no expiry.
+// week/month/year use calendar math (AddDate) from now, so "3 bulan" is exactly
+// three calendar months rather than 90 fixed days.
+func accessExpiry(value int, unit string) *time.Time {
+	if value <= 0 {
+		return nil
+	}
+	now := time.Now()
+	var t time.Time
+	switch unit {
+	case "week":
+		t = now.AddDate(0, 0, 7*value)
+	case "month":
+		t = now.AddDate(0, value, 0)
+	case "year":
+		t = now.AddDate(value, 0, 0)
+	default:
+		return nil
+	}
+	return &t
+}
+
 func New(
 	orders *repository.OrderRepo,
 	stores *repository.StoreRepo,
@@ -76,9 +99,11 @@ func (f *Fulfiller) OnPaymentPaid(ctx context.Context, storeID, orderID uuid.UUI
 		return
 	}
 
-	// Mint a token per digital item. We use no expiry here — the
-	// founder said "no auto-expire". Sellers worried about stale
-	// tokens can manually invalidate later via a future admin tool.
+	// Mint a token per digital item. Expiry comes from the product's access
+	// validity ("masa aktif"): lifetime → no expiry; week/month/year → a
+	// calendar-correct expires_at from now (the OTP/download gate then returns
+	// "link sudah kedaluwarsa" once past it). Today only course products expose
+	// a control, so digital items stay lifetime.
 	type minted struct {
 		token       string
 		productType string
@@ -91,6 +116,7 @@ func (f *Fulfiller) OnPaymentPaid(ctx context.Context, storeID, orderID uuid.UUI
 			OrderID:     orderID,
 			OrderItemID: it.ID,
 			StoreID:     storeID,
+			ExpiresAt:   accessExpiry(it.AccessValidityValue, it.AccessValidityUnit),
 		})
 		if err != nil {
 			f.logger.Error("fulfillment: create token",

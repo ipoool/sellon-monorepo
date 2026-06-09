@@ -149,6 +149,8 @@ type productDTO struct {
 	TakeawayChargeCents  int64  `json:"takeaway_charge_cents"`
 	TakeawayMaterialID   string `json:"takeaway_material_id"`
 	TakeawayMaterialName string `json:"takeaway_material_name"`
+	AccessValidityValue  int    `json:"access_validity_value"`
+	AccessValidityUnit   string `json:"access_validity_unit"`
 	Variants            []variantDTO `json:"variants"`
 	// VariantsCount + VariantsStock are list-only aggregates so the dashboard
 	// "Stok" column can show "N varian · stok M" instead of the parent's
@@ -248,6 +250,8 @@ func toProductDTO(p *repository.Product, variants []repository.Variant) productD
 		TakeawayEnabled:     p.TakeawayEnabled,
 		TakeawayChargeCents: p.TakeawayChargeCents,
 		TakeawayMaterialID:  uuidPtrString(p.TakeawayMaterialID),
+		AccessValidityValue: p.AccessValidityValue,
+		AccessValidityUnit:  p.AccessValidityUnit,
 		Variants:            vDTOs,
 		CreatedAt:           p.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
@@ -608,6 +612,8 @@ type productInput struct {
 	TakeawayEnabled     bool           `json:"takeaway_enabled"`
 	TakeawayChargeCents int64          `json:"takeaway_charge_cents"`
 	TakeawayMaterialID  string         `json:"takeaway_material_id"`
+	AccessValidityValue int            `json:"access_validity_value"`
+	AccessValidityUnit  string         `json:"access_validity_unit"`
 	Variants            []variantInput `json:"variants"`
 	CourseVideos        []courseVideoInput `json:"course_videos"`
 }
@@ -778,6 +784,27 @@ func (in productInput) sanitize() (repository.SaveProductInput, error) {
 		in.HeightCm = 0
 	}
 
+	// Access validity ("masa aktif"): only courses expose a control today.
+	// Default is lifetime (no expiry); a week/month/year unit caps access to a
+	// positive range. Anything unrecognized collapses to lifetime so we never
+	// store a half-set validity.
+	validityValue := 0
+	validityUnit := "lifetime"
+	if productType == "course" {
+		switch strings.ToLower(strings.TrimSpace(in.AccessValidityUnit)) {
+		case "week", "month", "year":
+			v := in.AccessValidityValue
+			if v < 1 {
+				v = 1
+			}
+			if v > 999 {
+				v = 999
+			}
+			validityValue = v
+			validityUnit = strings.ToLower(strings.TrimSpace(in.AccessValidityUnit))
+		}
+	}
+
 	return repository.SaveProductInput{
 		CategoryID: categoryID,
 		Name: in.Name, Slug: in.Slug, Description: in.Description,
@@ -794,6 +821,8 @@ func (in productInput) sanitize() (repository.SaveProductInput, error) {
 		TakeawayEnabled:     in.TakeawayEnabled,
 		TakeawayChargeCents: in.TakeawayChargeCents,
 		TakeawayMaterialID:  takeawayMaterialID,
+		AccessValidityValue: validityValue,
+		AccessValidityUnit:  validityUnit,
 	}, nil
 }
 

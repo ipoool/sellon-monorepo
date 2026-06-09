@@ -4,7 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { Trash2, Save, ArrowLeft, Plus, X, Download, GraduationCap, Video, Star } from "lucide-react";
+import { Trash2, Save, ArrowLeft, Plus, X, Download, GraduationCap, Video, Star, Clock } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -63,6 +63,25 @@ export function NonPhysicalProductForm({
       description_md: v.description_md ?? "",
     })),
   );
+
+  // Course access validity ("masa aktif"). Default seumur hidup (lifetime);
+  // the seller can cap it to N weeks/months/years.
+  type AccessUnit = "lifetime" | "week" | "month" | "year";
+  const [accessUnit, setAccessUnit] = useState<AccessUnit>(
+    initial?.access_validity_unit && initial.access_validity_unit !== "lifetime"
+      ? initial.access_validity_unit
+      : "lifetime",
+  );
+  const [accessValue, setAccessValue] = useState<number>(
+    initial?.access_validity_value && initial.access_validity_value > 0
+      ? initial.access_validity_value
+      : 1,
+  );
+  const accessUnitLabel: Record<Exclude<AccessUnit, "lifetime">, string> = {
+    week: "minggu",
+    month: "bulan",
+    year: "tahun",
+  };
 
   useEffect(() => {
     void (async () => {
@@ -155,6 +174,10 @@ export function NonPhysicalProductForm({
       digital_instructions: productType === "digital" ? digitalInstructions.trim() : "",
       variants: [],
       course_videos: isCourse ? cleanCourseVideos : [],
+      // Access validity: only courses set it; lifetime sends value 0.
+      access_validity_unit: isCourse ? accessUnit : "lifetime",
+      access_validity_value:
+        isCourse && accessUnit !== "lifetime" ? Math.max(1, Math.round(accessValue)) : 0,
     };
 
     try {
@@ -485,6 +508,54 @@ export function NonPhysicalProductForm({
               Tambah Video
             </Button>
           </div>
+        </Card>
+      )}
+
+      {isCourse && (
+        <Card>
+          <div className="mb-4">
+            <h2 className="flex items-center gap-2 font-semibold text-neutral-900">
+              <Clock className="size-4 text-brand-600" aria-hidden />
+              Masa Aktif Kursus
+            </h2>
+            <p className="mt-0.5 text-sm text-neutral-500">
+              Berapa lama pembeli bisa mengakses kursus setelah membeli. Default
+              seumur hidup.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="min-w-[180px] flex-1">
+              <Label className="mb-1 block text-xs text-neutral-500">Durasi akses</Label>
+              <Select
+                value={accessUnit}
+                onChange={(e) => setAccessUnit(e.target.value as AccessUnit)}
+              >
+                <option value="lifetime">Seumur hidup</option>
+                <option value="week">Minggu</option>
+                <option value="month">Bulan</option>
+                <option value="year">Tahun</option>
+              </Select>
+            </div>
+            {accessUnit !== "lifetime" && (
+              <div className="w-28">
+                <Label className="mb-1 block text-xs text-neutral-500">Jumlah</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={999}
+                  value={accessValue}
+                  onChange={(e) =>
+                    setAccessValue(Math.max(1, Math.min(999, Math.round(Number(e.target.value) || 1))))
+                  }
+                />
+              </div>
+            )}
+          </div>
+          <p className="mt-2 text-xs text-neutral-500">
+            {accessUnit === "lifetime"
+              ? "Akses tidak akan kedaluwarsa."
+              : `Akses berlaku ${accessValue} ${accessUnitLabel[accessUnit]} sejak pembelian.`}
+          </p>
         </Card>
       )}
 

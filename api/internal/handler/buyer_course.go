@@ -272,10 +272,16 @@ func (h *BuyerCourseHandler) Content(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	response.JSON(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"product_name": info.ProductName,
 		"videos":       out,
-	})
+	}
+	// Surface the access validity ("masa aktif") so the viewer can show the buyer
+	// when their access ends. Nil = seumur hidup (no expiry).
+	if info.Token.ExpiresAt != nil {
+		resp["expires_at"] = info.Token.ExpiresAt.Format(time.RFC3339)
+	}
+	response.JSON(w, http.StatusOK, resp)
 }
 
 // maskEmail turns "andi@gmail.com" into "an***@gmail.com" for safe display.
