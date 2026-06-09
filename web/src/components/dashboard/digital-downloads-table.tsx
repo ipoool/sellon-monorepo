@@ -104,6 +104,9 @@ function DownloadRow({
           </span>
           <span className="min-w-0">
             <span className="block truncate font-medium text-neutral-900">
+              {link.product_type === "course" && (
+                <Badge variant="brand" className="mr-1.5 align-middle">Kursus</Badge>
+              )}
               {link.product_name}
               {link.variant_name ? <span className="text-neutral-500"> · {link.variant_name}</span> : null}
             </span>

@@ -69,6 +69,12 @@ type storeDTO struct {
 	TaxInclusive               bool            `json:"tax_inclusive"`
 	TaxLabel                   string          `json:"tax_label"`
 	OfflineEnabled             bool            `json:"offline_enabled"`
+	CapPOS                     bool            `json:"cap_pos"`
+	CapReseller                bool            `json:"cap_reseller"`
+	CapDigital                 bool            `json:"cap_digital"`
+	CapMaterials               bool            `json:"cap_materials"`
+	SellerTypes                string          `json:"seller_types"`
+	ProfilingCompletedAt       *string         `json:"profiling_completed_at"`
 }
 
 func toStoreDTO(s *repository.Store) storeDTO {
@@ -114,6 +120,12 @@ func toStoreDTO(s *repository.Store) storeDTO {
 		TaxInclusive:     s.TaxInclusive,
 		TaxLabel:         s.TaxLabel,
 		OfflineEnabled:   s.OfflineEnabled,
+		CapPOS:               s.CapPOS,
+		CapReseller:          s.CapReseller,
+		CapDigital:           s.CapDigital,
+		CapMaterials:         s.CapMaterials,
+		SellerTypes:          s.SellerTypes,
+		ProfilingCompletedAt: formatTimePtr(s.ProfilingCompletedAt),
 	}
 }
 
@@ -550,6 +562,100 @@ func (h *StoreHandler) UpdateOffline(w http.ResponseWriter, r *http.Request) {
 		EntityID:   store.ID.String(),
 		Summary:    "Update setting mode offline",
 		Metadata:   map[string]any{"offline_enabled": store.OfflineEnabled},
+	})
+	response.JSON(w, http.StatusOK, map[string]any{"store": toStoreDTO(store)})
+}
+
+type updateProfilingReq struct {
+	CapPOS       bool   `json:"cap_pos"`
+	CapReseller  bool   `json:"cap_reseller"`
+	CapDigital   bool   `json:"cap_digital"`
+	CapMaterials bool   `json:"cap_materials"`
+	SellerTypes  string `json:"seller_types"`
+}
+
+// PUT /api/v1/store/profiling — set sidebar menu caps + seller types and mark
+// profiling complete (clears the forced onboarding dialog).
+func (h *StoreHandler) UpdateProfiling(w http.ResponseWriter, r *http.Request) {
+	uid, _ := auth.UserIDFromContext(r.Context())
+	existing, err := h.stores.FindByOwnerID(r.Context(), uid)
+	if errors.Is(err, repository.ErrStoreNotFound) {
+		response.Error(w, http.StatusNotFound, "toko belum dibuat")
+		return
+	}
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	var req updateProfilingReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	store, err := h.stores.UpdateProfiling(r.Context(), existing.ID, repository.MenuCaps{
+		POS: req.CapPOS, Reseller: req.CapReseller, Digital: req.CapDigital, Materials: req.CapMaterials,
+	}, req.SellerTypes)
+	if err != nil {
+		h.logger.Error("update profiling", "err", err)
+		response.Error(w, http.StatusInternalServerError, "gagal simpan")
+		return
+	}
+	h.audit.Log(r.Context(), store.ID, audit.Event{
+		Action:     "store.profiling_completed",
+		EntityType: "store",
+		EntityID:   store.ID.String(),
+		Summary:    "Profiling toko selesai",
+		Metadata: map[string]any{
+			"cap_pos": store.CapPOS, "cap_reseller": store.CapReseller,
+			"cap_digital": store.CapDigital, "cap_materials": store.CapMaterials,
+			"seller_types": store.SellerTypes,
+		},
+	})
+	response.JSON(w, http.StatusOK, map[string]any{"store": toStoreDTO(store)})
+}
+
+type updateMenuCapsReq struct {
+	CapPOS       bool `json:"cap_pos"`
+	CapReseller  bool `json:"cap_reseller"`
+	CapDigital   bool `json:"cap_digital"`
+	CapMaterials bool `json:"cap_materials"`
+}
+
+// PUT /api/v1/store/menu-caps — toggle sidebar menu visibility (settings page).
+// Does NOT touch profiling_completed_at.
+func (h *StoreHandler) UpdateMenuCaps(w http.ResponseWriter, r *http.Request) {
+	uid, _ := auth.UserIDFromContext(r.Context())
+	existing, err := h.stores.FindByOwnerID(r.Context(), uid)
+	if errors.Is(err, repository.ErrStoreNotFound) {
+		response.Error(w, http.StatusNotFound, "toko belum dibuat")
+		return
+	}
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	var req updateMenuCapsReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	store, err := h.stores.UpdateMenuCaps(r.Context(), existing.ID, repository.MenuCaps{
+		POS: req.CapPOS, Reseller: req.CapReseller, Digital: req.CapDigital, Materials: req.CapMaterials,
+	})
+	if err != nil {
+		h.logger.Error("update menu caps", "err", err)
+		response.Error(w, http.StatusInternalServerError, "gagal simpan")
+		return
+	}
+	h.audit.Log(r.Context(), store.ID, audit.Event{
+		Action:     "store.menu_caps_updated",
+		EntityType: "store",
+		EntityID:   store.ID.String(),
+		Summary:    "Update tampilan menu sidebar",
+		Metadata: map[string]any{
+			"cap_pos": store.CapPOS, "cap_reseller": store.CapReseller,
+			"cap_digital": store.CapDigital, "cap_materials": store.CapMaterials,
+		},
 	})
 	response.JSON(w, http.StatusOK, map[string]any{"store": toStoreDTO(store)})
 }

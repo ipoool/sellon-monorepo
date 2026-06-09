@@ -423,7 +423,32 @@ func (h *MaterialHandler) ExportReportCSV(w http.ResponseWriter, r *http.Request
 	}
 }
 
-// GET /api/v1/materials/{id}/movements?limit=50
+// GET /api/v1/materials/{id} — single material (for the detail page header).
+func (h *MaterialHandler) Get(w http.ResponseWriter, r *http.Request) {
+	store, err := h.requireStore(r)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "toko belum dibuat")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "id invalid")
+		return
+	}
+	m, err := h.materials.FindByID(r.Context(), store.ID, id)
+	if errors.Is(err, repository.ErrMaterialNotFound) {
+		response.Error(w, http.StatusNotFound, "bahan tidak ditemukan")
+		return
+	}
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]any{"material": toMaterialDTO(*m)})
+}
+
+// GET /api/v1/materials/{id}/movements?from=&to=&limit=&offset=
+// Per-material ledger history (newest first), date-windowed + paginated.
 func (h *MaterialHandler) ListMovements(w http.ResponseWriter, r *http.Request) {
 	store, err := h.requireStore(r)
 	if err != nil {
@@ -435,8 +460,12 @@ func (h *MaterialHandler) ListMovements(w http.ResponseWriter, r *http.Request) 
 		response.Error(w, http.StatusBadRequest, "id invalid")
 		return
 	}
+	from, to := reportRange(r)
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	moves, err := h.materials.ListMovements(r.Context(), store.ID, id, limit)
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	moves, total, err := h.materials.ListMovements(r.Context(), repository.MovementFilter{
+		StoreID: store.ID, MaterialID: id, From: &from, To: &to, Limit: limit, Offset: offset,
+	})
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "internal error")
 		return
@@ -454,9 +483,42 @@ func (h *MaterialHandler) ListMovements(w http.ResponseWriter, r *http.Request) 
 			"quantity":        m.Quantity,
 			"unit_cost_cents": m.UnitCostCents,
 			"order_id":        orderID,
+			"order_number":    m.OrderNumber,
 			"note":            m.Note,
 			"created_at":      m.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		})
 	}
-	response.JSON(w, http.StatusOK, map[string]any{"movements": out})
+	response.JSON(w, http.StatusOK, map[string]any{"movements": out, "total": total})
+}
+
+// GET /api/v1/materials/{id}/movement-series?from=&to= — daily in/out for the chart.
+func (h *MaterialHandler) MovementSeries(w http.ResponseWriter, r *http.Request) {
+	store, err := h.requireStore(r)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "toko belum dibuat")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "id invalid")
+		return
+	}
+	from, to := reportRange(r)
+	pts, err := h.materials.GetMovementSeries(r.Context(), store.ID, id, from, to)
+	if err != nil {
+		h.logger.Error("material movement series", "err", err)
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	out := make([]map[string]any, 0, len(pts))
+	for _, p := range pts {
+		out = append(out, map[string]any{
+			"date":           p.Date,
+			"in_qty":         p.InQty,
+			"out_qty":        p.OutQty,
+			"in_cost_cents":  p.InCostCents,
+			"out_cost_cents": p.OutCostCents,
+		})
+	}
+	response.JSON(w, http.StatusOK, map[string]any{"series": out})
 }

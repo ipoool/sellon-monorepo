@@ -36,6 +36,7 @@ import { Badge } from "@/components/ui/badge";
 import { LogoutButton } from "@/components/auth/logout-button";
 import { usePlan } from "@/components/dashboard/plan-context";
 import { useKdsEnabled } from "@/components/dashboard/kds-context";
+import { useMenuCapabilities } from "@/components/dashboard/menu-capabilities-context";
 import { useBisnisGate } from "@/components/dashboard/bisnis-gate";
 import { cn } from "@/lib/utils";
 import type { Me } from "@/lib/auth-types";
@@ -137,6 +138,16 @@ function SidebarContent({
 }) {
   const plan = usePlan();
   const kdsEnabled = useKdsEnabled();
+  // Which optional menu groups the owner enabled during profiling. Only used in
+  // the seller-owner branch below; admin/staff branches ignore it.
+  const caps = useMenuCapabilities();
+  // The core "Menu" group, minus the items the owner hid. Digital downloads is
+  // one item; Bahan Baku + Pembelian are two items behind a single toggle.
+  const ownerNav = primaryNav.filter((item) => {
+    if (item.href === "/digital-downloads") return caps.digital;
+    if (item.href === "/materials" || item.href === "/purchase-orders") return caps.materials;
+    return true;
+  });
   const tierLabel =
     plan === "pro" ? "Pro" : plan === "bisnis" ? "Bisnis" : "Free";
   // Badge variants: paid tiers get visual emphasis ("brand" for Pro,
@@ -265,34 +276,43 @@ function SidebarContent({
           </>
         ) : (
           <>
-            <NavGroup label="Menu" items={primaryNav} pathname={pathname} />
-            <NavGroup
-              bisnisOnly
-              label="Kasir POS"
-              labelHref="/pos"
-              items={[
-                { label: "Buka Kasir", href: "/pos", icon: ShoppingCart },
-                // Kitchen Display only when the seller runs a KDS — otherwise
-                // dine-in orders skip the kitchen pipeline and the board is empty.
-                ...(kdsEnabled
-                  ? [{ label: "Kitchen Display", href: "/kds", icon: ChefHat }]
-                  : []),
-                { label: "Riwayat Shift", href: "/pos/sessions", icon: Clock },
-                { label: "Laporan POS", href: "/pos/reports", icon: BarChart3 },
-              ]}
-              pathname={pathname}
-            />
-            <NavGroup
-              label="Program Reseller"
-              labelHref="/reseller/program"
-              items={[
-                { label: "Program Supplier", href: "/reseller/program", icon: Store },
-                { label: "Order Dropship", href: "/reseller/orders", icon: Truck },
-                { label: "Supplier Saya", href: "/reseller/suppliers", icon: Users },
-                { label: "Katalog Reseller", href: "/reseller/catalog", icon: Package },
-              ]}
-              pathname={pathname}
-            />
+            <NavGroup label="Menu" items={ownerNav} pathname={pathname} />
+            {/* Optional groups: rendered only when the owner enabled them during
+                profiling. Tier still gates ACCESS — cap_pos on a Free seller
+                shows the group locked (Crown → upgrade dialog); cap off hides it
+                entirely. */}
+            {caps.pos && (
+              <NavGroup
+                bisnisOnly
+                label="Kasir POS"
+                labelHref="/pos"
+                items={[
+                  { label: "Buka Kasir", href: "/pos", icon: ShoppingCart },
+                  // Kitchen Display only when the seller runs a KDS — otherwise
+                  // dine-in orders skip the kitchen pipeline and the board is empty.
+                  ...(kdsEnabled
+                    ? [{ label: "Kitchen Display", href: "/kds", icon: ChefHat }]
+                    : []),
+                  { label: "Riwayat Shift", href: "/pos/sessions", icon: Clock },
+                  { label: "Riwayat Transaksi", href: "/pos/transactions", icon: Receipt },
+                  { label: "Laporan POS", href: "/pos/reports", icon: BarChart3 },
+                ]}
+                pathname={pathname}
+              />
+            )}
+            {caps.reseller && (
+              <NavGroup
+                label="Program Reseller"
+                labelHref="/reseller/program"
+                items={[
+                  { label: "Program Supplier", href: "/reseller/program", icon: Store },
+                  { label: "Order Dropship", href: "/reseller/orders", icon: Truck },
+                  { label: "Supplier Saya", href: "/reseller/suppliers", icon: Users },
+                  { label: "Katalog Reseller", href: "/reseller/catalog", icon: Package },
+                ]}
+                pathname={pathname}
+              />
+            )}
             <NavGroup label="Lainnya" items={secondaryNav} pathname={pathname} />
           </>
         )}

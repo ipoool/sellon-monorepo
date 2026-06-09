@@ -38,8 +38,20 @@ type MaterialMovement struct {
 	Quantity      int64  // signed: +restock, -consume
 	UnitCostCents int64
 	OrderID       *uuid.UUID
+	OrderNumber   string // resolved order number for consume rows ("" otherwise)
 	Note          string
 	CreatedAt     time.Time
+}
+
+// MaterialMovementPoint is one WIB day of in/out aggregates for the per-material
+// movement chart. In = positive quantities (restock + positive adjust); Out =
+// magnitude of negative quantities (consume + negative adjust).
+type MaterialMovementPoint struct {
+	Date        string // YYYY-MM-DD (WIB)
+	InQty       int64
+	OutQty      int64
+	InCostCents int64
+	OutCostCents int64
 }
 
 type MaterialInput struct {
@@ -414,30 +426,104 @@ func (r *MaterialRepo) GetConsumptionReport(ctx context.Context, storeID uuid.UU
 	return out, daily.Err()
 }
 
-// ListMovements returns the recent ledger for one material (newest first).
-func (r *MaterialRepo) ListMovements(ctx context.Context, storeID, materialID uuid.UUID, limit int) ([]MaterialMovement, error) {
+type MovementFilter struct {
+	StoreID    uuid.UUID
+	MaterialID uuid.UUID
+	From       *time.Time // optional [from, to) WIB-agnostic bounds (created_at)
+	To         *time.Time
+	Limit      int
+	Offset     int
+}
+
+// ListMovements returns the ledger for one material (newest first), optionally
+// windowed by [from, to), with the total row count for pagination. order_number
+// is resolved for consume rows via a LEFT JOIN (NULL→"" for non-sale rows).
+func (r *MaterialRepo) ListMovements(ctx context.Context, f MovementFilter) ([]MaterialMovement, int, error) {
+	clauses := []string{"mm.store_id = $1", "mm.material_id = $2"}
+	args := []any{f.StoreID, f.MaterialID}
+	pos := 3
+	if f.From != nil {
+		clauses = append(clauses, fmt.Sprintf("mm.created_at >= $%d", pos))
+		args = append(args, *f.From)
+		pos++
+	}
+	if f.To != nil {
+		clauses = append(clauses, fmt.Sprintf("mm.created_at < $%d", pos))
+		args = append(args, *f.To)
+		pos++
+	}
+	where := strings.Join(clauses, " AND ")
+
+	var total int
+	if err := r.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM material_movements mm WHERE `+where, args...,
+	).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	limit := f.Limit
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	rows, err := r.pool.Query(ctx, `
-		SELECT id, material_id, movement_type, quantity, unit_cost_cents, order_id, note, created_at
-		FROM material_movements
-		WHERE store_id = $1 AND material_id = $2
-		ORDER BY created_at DESC
-		LIMIT $3
-	`, storeID, materialID, limit)
+	offset := f.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	q := fmt.Sprintf(`
+		SELECT mm.id, mm.material_id, mm.movement_type, mm.quantity, mm.unit_cost_cents,
+		       mm.order_id, COALESCE(o.order_number, ''), mm.note, mm.created_at
+		FROM material_movements mm
+		LEFT JOIN orders o ON o.id = mm.order_id
+		WHERE %s
+		ORDER BY mm.created_at DESC
+		LIMIT $%d OFFSET $%d
+	`, where, pos, pos+1)
+	args = append(args, limit, offset)
+
+	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 	var out []MaterialMovement
 	for rows.Next() {
 		var m MaterialMovement
 		if err := rows.Scan(&m.ID, &m.MaterialID, &m.MovementType, &m.Quantity,
-			&m.UnitCostCents, &m.OrderID, &m.Note, &m.CreatedAt); err != nil {
-			return nil, err
+			&m.UnitCostCents, &m.OrderID, &m.OrderNumber, &m.Note, &m.CreatedAt); err != nil {
+			return nil, 0, err
 		}
 		out = append(out, m)
+	}
+	return out, total, rows.Err()
+}
+
+// GetMovementSeries returns per-WIB-day in/out aggregates (qty + cost) for one
+// material over [from, to), for the in/out chart. Mirrors GetConsumptionReport's
+// daily bucketing but splits by sign across ALL movement types.
+func (r *MaterialRepo) GetMovementSeries(ctx context.Context, storeID, materialID uuid.UUID, from, to time.Time) ([]MaterialMovementPoint, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT TO_CHAR(date_trunc('day', mm.created_at AT TIME ZONE 'Asia/Jakarta'), 'YYYY-MM-DD') AS day,
+		       COALESCE(SUM(mm.quantity) FILTER (WHERE mm.quantity > 0), 0)  AS in_qty,
+		       COALESCE(SUM(-mm.quantity) FILTER (WHERE mm.quantity < 0), 0) AS out_qty,
+		       COALESCE(SUM(mm.quantity * mm.unit_cost_cents) FILTER (WHERE mm.quantity > 0), 0)  AS in_cost,
+		       COALESCE(SUM(-mm.quantity * mm.unit_cost_cents) FILTER (WHERE mm.quantity < 0), 0) AS out_cost
+		FROM material_movements mm
+		WHERE mm.store_id = $1 AND mm.material_id = $2
+		  AND mm.created_at >= $3 AND mm.created_at < $4
+		GROUP BY day
+		ORDER BY day ASC
+	`, storeID, materialID, from, to)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []MaterialMovementPoint
+	for rows.Next() {
+		var p MaterialMovementPoint
+		if err := rows.Scan(&p.Date, &p.InQty, &p.OutQty, &p.InCostCents, &p.OutCostCents); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
 	}
 	return out, rows.Err()
 }

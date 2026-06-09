@@ -23,7 +23,7 @@ type StorefrontProduct = {
   stock: number;
   photo_urls: string[];
   is_featured: boolean;
-  product_type?: "physical" | "digital";
+  product_type?: "physical" | "digital" | "course";
   // Populated by GetStore for the kiosk fast-checkout option sheet.
   has_variants?: boolean;
   variants?: KioskVariant[];
@@ -36,7 +36,7 @@ type StorefrontProduct = {
 // "Stok habis" so buyers can plan.
 const UNLIMITED_STOCK_THRESHOLD = 9999;
 function shouldHideStock(p: { product_type?: string; stock: number }): boolean {
-  return p.product_type === "digital" || p.stock >= UNLIMITED_STOCK_THRESHOLD;
+  return p.product_type !== "physical" || p.stock >= UNLIMITED_STOCK_THRESHOLD;
 }
 
 type StorefrontCategory = {
@@ -93,11 +93,12 @@ export function StorefrontCatalog({
   const [activeCategoryId, setActiveCategoryId] = useState<string>("");
 
   // Real kiosk storefront (not the dashboard layout preview) gets the in-page
-  // fast-checkout. Digital products are hidden from the kiosk — an anonymous
-  // in-store buyer has no email to receive a digital-delivery link.
+  // fast-checkout. Digital + course products are hidden from the kiosk — an
+  // anonymous in-store buyer has no email to receive a digital/course-access
+  // link.
   const kioskMode = layout === "kiosk" && !forceMobile;
   const products = useMemo(
-    () => (kioskMode ? allProducts.filter((p) => p.product_type !== "digital") : allProducts),
+    () => (kioskMode ? allProducts.filter((p) => p.product_type === "physical") : allProducts),
     [allProducts, kioskMode],
   );
 

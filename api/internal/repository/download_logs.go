@@ -32,6 +32,7 @@ type DownloadLink struct {
 	OrderNumber    string
 	ProductName    string
 	VariantName    string
+	ProductType    string // "digital" | "course" — drives the UI badge
 	CustomerID     *uuid.UUID
 	CustomerName   string
 	DownloadCount  int        // distinct access events logged
@@ -71,7 +72,7 @@ func (r *DownloadLogRepo) Create(ctx context.Context, in DownloadLog) error {
 // token is a fallback total but distinct IPs is the share signal.
 const linkSelect = `
 	SELECT dt.id, dt.order_id, o.order_number,
-	       oi.product_name, oi.variant_name,
+	       oi.product_name, oi.variant_name, oi.product_type,
 	       o.customer_id, o.customer_name,
 	       COALESCE(agg.cnt, 0)   AS download_count,
 	       COALESCE(agg.ips, 0)   AS distinct_ips,
@@ -97,7 +98,7 @@ func scanLink(rows interface {
 	var l DownloadLink
 	err := rows.Scan(
 		&l.TokenID, &l.OrderID, &l.OrderNumber,
-		&l.ProductName, &l.VariantName,
+		&l.ProductName, &l.VariantName, &l.ProductType,
 		&l.CustomerID, &l.CustomerName,
 		&l.DownloadCount, &l.DistinctIPs, &l.LastDownloadAt,
 		&l.RevokedAt, &l.CreatedAt,

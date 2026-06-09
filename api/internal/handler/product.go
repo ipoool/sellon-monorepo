@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -32,6 +33,7 @@ type ProductHandler struct {
 	modifiers  *repository.ModifierRepo
 	materials  *repository.MaterialRepo
 	categories *repository.CategoryRepo
+	courseVideos *repository.CourseVideoRepo
 	storage    *storage.SupabaseClient
 	broker    *events.Broker
 	audit     *audit.Logger
@@ -53,6 +55,7 @@ func NewProductHandler(
 	modifiers *repository.ModifierRepo,
 	materials *repository.MaterialRepo,
 	categories *repository.CategoryRepo,
+	courseVideos *repository.CourseVideoRepo,
 	storageCli *storage.SupabaseClient,
 	broker *events.Broker,
 	audit *audit.Logger,
@@ -67,6 +70,7 @@ func NewProductHandler(
 		modifiers:  modifiers,
 		materials:  materials,
 		categories: categories,
+		courseVideos: courseVideos,
 		storage:    storageCli,
 		broker:    broker,
 		audit:     audit,
@@ -154,7 +158,23 @@ type productDTO struct {
 	Discounts     []map[string]any `json:"discounts,omitempty"`
 	BaseRecipe    []map[string]any `json:"base_recipe,omitempty"`
 	Modifiers     []map[string]any `json:"modifiers,omitempty"`
+	CourseVideos  []map[string]any `json:"course_videos,omitempty"`
 	CreatedAt     string `json:"created_at"`
+}
+
+func courseVideosToDTO(videos []repository.CourseVideo) []map[string]any {
+	out := make([]map[string]any, 0, len(videos))
+	for _, v := range videos {
+		out = append(out, map[string]any{
+			"id":             v.ID.String(),
+			"title":          v.Title,
+			"youtube_url":    v.YouTubeURL,
+			"youtube_id":     youtubeID(v.YouTubeURL),
+			"description_md": v.DescriptionMD,
+			"sort_order":     v.SortOrder,
+		})
+	}
+	return out
 }
 
 func modifiersToDTO(groups []repository.ModifierGroup) []map[string]any {
@@ -369,6 +389,10 @@ func (h *ProductHandler) Get(w http.ResponseWriter, r *http.Request) {
 	dto.Discounts = discountsToDTO(discounts)
 	dto.BaseRecipe = baseRecipeToDTO(baseRecipe)
 	dto.Modifiers = modifiersToDTO(groups)
+	if p.ProductType == "course" {
+		videos, _ := h.courseVideos.ListByProduct(r.Context(), p.ID)
+		dto.CourseVideos = courseVideosToDTO(videos)
+	}
 	if p.TakeawayMaterialID != nil {
 		if names, err := h.materials.NamesByIDs(r.Context(), store.ID, []uuid.UUID{*p.TakeawayMaterialID}); err == nil {
 			dto.TakeawayMaterialName = names[*p.TakeawayMaterialID]
@@ -585,6 +609,55 @@ type productInput struct {
 	TakeawayChargeCents int64          `json:"takeaway_charge_cents"`
 	TakeawayMaterialID  string         `json:"takeaway_material_id"`
 	Variants            []variantInput `json:"variants"`
+	CourseVideos        []courseVideoInput `json:"course_videos"`
+}
+
+type courseVideoInput struct {
+	Title         string `json:"title"`
+	YouTubeURL    string `json:"youtube_url"`
+	DescriptionMD string `json:"description_md"`
+}
+
+// youtubeID extracts the 11-char video id from the common YouTube URL forms
+// (youtu.be/, watch?v=, embed/, shorts/, live/) or a bare pasted id. Returns ""
+// when the input isn't a recognizable YouTube reference.
+var (
+	ytIDRe   = regexp.MustCompile(`(?:youtu\.be/|youtube\.com/(?:watch\?(?:.*&)?v=|embed/|shorts/|live/))([A-Za-z0-9_-]{11})`)
+	ytBareRe = regexp.MustCompile(`^[A-Za-z0-9_-]{11}$`)
+)
+
+func youtubeID(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if ytBareRe.MatchString(raw) {
+		return raw
+	}
+	if m := ytIDRe.FindStringSubmatch(raw); len(m) == 2 {
+		return m[1]
+	}
+	return ""
+}
+
+// cleanCourseVideos normalizes the submitted course videos: it skips rows
+// without a valid YouTube reference and rewrites youtube_url to the canonical
+// watch URL (so the buyer viewer can reliably extract the id to embed). Pure —
+// safe to call from both sanitize() (count check) and the create/update path.
+func (in productInput) cleanCourseVideos() []repository.CourseVideoInput {
+	out := make([]repository.CourseVideoInput, 0, len(in.CourseVideos))
+	for _, v := range in.CourseVideos {
+		id := youtubeID(v.YouTubeURL)
+		if id == "" {
+			continue
+		}
+		out = append(out, repository.CourseVideoInput{
+			Title:         strings.TrimSpace(v.Title),
+			YouTubeURL:    "https://www.youtube.com/watch?v=" + id,
+			DescriptionMD: strings.TrimSpace(v.DescriptionMD),
+		})
+	}
+	return out
 }
 
 func (in productInput) sanitize() (repository.SaveProductInput, error) {
@@ -662,7 +735,10 @@ func (in productInput) sanitize() (repository.SaveProductInput, error) {
 	}
 
 	productType := strings.ToLower(strings.TrimSpace(in.ProductType))
-	if productType != "digital" {
+	switch productType {
+	case "digital", "course":
+		// valid non-physical types
+	default:
 		productType = "physical"
 	}
 
@@ -677,11 +753,25 @@ func (in productInput) sanitize() (repository.SaveProductInput, error) {
 			return repository.SaveProductInput{}, errors.New(
 				"produk digital butuh minimal salah satu dari: link, file upload, atau instruksi pengiriman")
 		}
-		// Stock for digital is meaningless; pin to a generous value so
-		// the existing stock decrement code is fully short-circuited
-		// by ProductType=digital but the DB still has a sensible value.
+	}
+
+	if productType == "course" {
+		// A course needs at least one valid video; digital_* channels are
+		// unused (content comes from course_videos + the OTP-gated viewer).
+		if len(in.cleanCourseVideos()) == 0 {
+			return repository.SaveProductInput{}, errors.New(
+				"produk kursus butuh minimal satu video dengan link YouTube yang valid")
+		}
+		in.DigitalDeliveryURL = ""
+		in.DigitalFileURL = ""
+		in.DigitalInstructions = ""
+	}
+
+	if productType == "digital" || productType == "course" {
+		// Stock + physical dimensions are meaningless for non-physical
+		// products; zero them so the stock-decrement / shipping paths
+		// (short-circuited by product_type) keep sane DB values.
 		in.Stock = 0
-		// Ditto physical dimensions — zero them out.
 		in.WeightG = 0
 		in.LengthCm = 0
 		in.WidthCm = 0
@@ -739,6 +829,11 @@ func (h *ProductHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.syncVariants(r, p, in.Variants); err != nil {
 		h.logger.Error("sync variants on create", "err", err)
+	}
+	if p.ProductType == "course" {
+		if err := h.courseVideos.ReplaceForProduct(r.Context(), p.ID, in.cleanCourseVideos()); err != nil {
+			h.logger.Error("sync course videos on create", "err", err)
+		}
 	}
 	variants, _ := h.variants.ListByProduct(r.Context(), p.ID)
 	// Re-fetch product to pick up has_variants flag mutation
@@ -798,6 +893,15 @@ func (h *ProductHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.syncVariants(r, p, in.Variants); err != nil {
 		h.logger.Error("sync variants on update", "err", err)
+	}
+	// Replace course videos when course (clears them otherwise so a type
+	// switch away from course doesn't orphan rows).
+	if p.ProductType == "course" {
+		if err := h.courseVideos.ReplaceForProduct(r.Context(), p.ID, in.cleanCourseVideos()); err != nil {
+			h.logger.Error("sync course videos on update", "err", err)
+		}
+	} else {
+		_ = h.courseVideos.ReplaceForProduct(r.Context(), p.ID, nil)
 	}
 	variants, _ := h.variants.ListByProduct(r.Context(), p.ID)
 	p2, _ := h.products.FindByID(r.Context(), store.ID, p.ID)
@@ -1093,6 +1197,23 @@ func (h *ProductHandler) Duplicate(w http.ResponseWriter, r *http.Request) {
 				h.logger.Error("duplicate: clone variants", "err", err)
 				// Parent saved already — return success but log; seller can fix
 				// via the edit page.
+			}
+		}
+	}
+
+	// Clone course videos if any (otherwise a duplicated course loses content).
+	if src.ProductType == "course" {
+		if vids, err := h.courseVideos.ListByProduct(r.Context(), src.ID); err == nil && len(vids) > 0 {
+			inputs := make([]repository.CourseVideoInput, 0, len(vids))
+			for _, v := range vids {
+				inputs = append(inputs, repository.CourseVideoInput{
+					Title:         v.Title,
+					YouTubeURL:    v.YouTubeURL,
+					DescriptionMD: v.DescriptionMD,
+				})
+			}
+			if err := h.courseVideos.ReplaceForProduct(r.Context(), created.ID, inputs); err != nil {
+				h.logger.Error("duplicate: clone course videos", "err", err)
 			}
 		}
 	}

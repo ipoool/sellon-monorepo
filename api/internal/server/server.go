@@ -59,6 +59,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	resellerRepo := repository.NewResellerRepo(pool)
 	posRepo := repository.NewPOSRepo(pool)
 	productDiscounts := repository.NewProductDiscountRepo(pool)
+	courseVideos := repository.NewCourseVideoRepo(pool)
 	materialRepo := repository.NewMaterialRepo(pool)
 	membershipTierRepo := repository.NewMembershipTierRepo(pool)
 	supplierRepo := repository.NewSupplierRepo(pool)
@@ -98,7 +99,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	authHandler := handler.NewAuthHandler(users, memberships, googleVerifier, jwtSvc, mailer, publicWebURL, logger, cfg.IsProd())
 	storeHandler := handler.NewStoreHandler(stores, subscriptions, auditLogger, logger)
 	metaHandler := handler.NewMetaHandler(stores, encryptor, cfg.WebhookBaseURL, auditLogger, logger)
-	productHandler := handler.NewProductHandler(products, variants, stores, subscriptions, planRepo, bulkJobs, productDiscounts, modifierRepo, materialRepo, categories, storageClient, broker, auditLogger, logger)
+	productHandler := handler.NewProductHandler(products, variants, stores, subscriptions, planRepo, bulkJobs, productDiscounts, modifierRepo, materialRepo, categories, courseVideos, storageClient, broker, auditLogger, logger)
 	uploadHandler := handler.NewUploadHandler(stores, storageClient, logger)
 	orderHandler := handler.NewOrderHandler(orders, stores, gateways, encryptor, midtransClient, auditLogger, fulfiller, metaNotifier, mailer, publicWebURL, logger)
 	customerHandler := handler.NewCustomerHandler(customers, orders, stores, auditLogger, logger)
@@ -136,6 +137,8 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	adminPlansHandler := handler.NewAdminPlansHandler(planRepo, platformAuditRepo, users, logger)
 	downloadHandler := handler.NewDownloadHandler(downloadTokens, downloadLogs, logger)
 	digitalDownloadHandler := handler.NewDigitalDownloadHandler(downloadTokens, downloadLogs, stores, logger)
+	buyerOTPs := repository.NewBuyerOTPRepo(pool)
+	buyerCourseHandler := handler.NewBuyerCourseHandler(downloadTokens, buyerOTPs, courseVideos, downloadLogs, mailer, jwtSvc, cfg.IsProd(), logger)
 	platformWebhookHandler := handler.NewPlatformWebhookHandler(
 		subscriptions, cfg.PlatformMidtransServerKey, auditLogger, logger,
 	)
@@ -150,6 +153,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	)
 
 	requireAuth := middleware.RequireAuth(jwtSvc)
+	requireBuyer := middleware.RequireBuyer(jwtSvc)
 
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
@@ -204,6 +208,14 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 			r.Post("/shipping/quote", storefrontHandler.ShippingQuote)
 			r.Post("/promos/validate", storefrontHandler.ValidatePromo)
 			r.Get("/queue", kdsHandler.PublicQueue)
+			// Course viewer: public OTP request/verify, then RequireBuyer-gated
+			// content (which also records the access into download_logs).
+			r.Post("/course/{token}/request-otp", buyerCourseHandler.RequestOTP)
+			r.Post("/course/{token}/verify-otp", buyerCourseHandler.VerifyOTP)
+			r.Group(func(r chi.Router) {
+				r.Use(requireBuyer)
+				r.Get("/course/{token}/content", buyerCourseHandler.Content)
+			})
 		})
 
 		r.Route("/auth", func(r chi.Router) {
@@ -243,6 +255,8 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 					r.Put("/shipping", storeHandler.UpdateShipping)
 					r.Put("/tax", storeHandler.UpdateTax)
 					r.Put("/offline", storeHandler.UpdateOffline)
+					r.Put("/profiling", storeHandler.UpdateProfiling)
+					r.Put("/menu-caps", storeHandler.UpdateMenuCaps)
 					r.Put("/storefront", storeHandler.UpdateStorefront)
 					r.With(feat(feature.CheckoutFields)).Put("/checkout-config", storeHandler.UpdateCheckoutConfig)
 					r.Put("/custom-domain", domainHandler.Set)
@@ -341,6 +355,8 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 					r.Post("/{id}/restock", materialHandler.Restock)
 					r.Post("/{id}/adjust", materialHandler.Adjust)
 					r.Get("/{id}/movements", materialHandler.ListMovements)
+					r.Get("/{id}/movement-series", materialHandler.MovementSeries)
+					r.Get("/{id}", materialHandler.Get)
 				})
 
 				r.Post("/uploads/image", uploadHandler.Image)
@@ -476,6 +492,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 					r.Post("/sessions/{id}/cash-movements", posHandler.AddCashMovement)
 					r.Get("/sessions/{id}/cash-movements", posHandler.ListCashMovements)
 					// Orders
+					r.Get("/orders", posHandler.ListPOSOrders)
 					r.Post("/orders", posHandler.CreatePOSOrder)
 					r.Post("/orders/{id}/void", posHandler.VoidOrder)
 					r.Post("/orders/{id}/return", posHandler.ReturnOrder)

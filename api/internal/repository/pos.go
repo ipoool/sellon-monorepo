@@ -1030,6 +1030,10 @@ type POSSessionOrder struct {
 	Payments        []POSPayment
 	RefundedAt      *time.Time
 	RefundReason    string
+	// Populated only by the cross-shift ListPOSOrders query (nil/empty for the
+	// per-session ListOrdersBySession view, where the session is already known).
+	SessionID   *uuid.UUID
+	CashierName string
 }
 
 func (r *POSRepo) ListOrdersBySession(ctx context.Context, sessionID, storeID uuid.UUID) ([]POSSessionOrder, error) {
@@ -1081,6 +1085,114 @@ func (r *POSRepo) ListOrdersBySession(ctx context.Context, sessionID, storeID uu
 		out[i].Payments, _ = r.GetOrderPayments(ctx, out[i].OrderID)
 	}
 	return out, nil
+}
+
+// ListPOSOrdersFilter drives the cross-shift POS transaction history page.
+type ListPOSOrdersFilter struct {
+	StoreID       uuid.UUID
+	CashierID     *uuid.UUID // pos_sessions.opened_by
+	From          *time.Time
+	To            *time.Time // exclusive upper bound (caller passes next-day)
+	PaymentMethod string
+	Status        string
+	Search        string // order_number / customer_name
+	Limit         int
+	Offset        int
+}
+
+// ListPOSOrders lists POS orders (source='pos') across all shifts with optional
+// filters + pagination, returning the page and the total count. Cashier is the
+// session opener (pos_sessions.opened_by), so per-cashier filtering joins
+// through pos_session_id. Mirrors ListSessionsFiltered's dynamic-WHERE pattern.
+func (r *POSRepo) ListPOSOrders(ctx context.Context, f ListPOSOrdersFilter) ([]POSSessionOrder, int, error) {
+	clauses := []string{"o.store_id = $1", "o.source = 'pos'"}
+	args := []any{f.StoreID}
+	pos := 2
+	if f.CashierID != nil {
+		clauses = append(clauses, fmt.Sprintf("ps.opened_by = $%d", pos))
+		args = append(args, *f.CashierID)
+		pos++
+	}
+	if f.From != nil {
+		clauses = append(clauses, fmt.Sprintf("o.created_at >= $%d", pos))
+		args = append(args, *f.From)
+		pos++
+	}
+	if f.To != nil {
+		clauses = append(clauses, fmt.Sprintf("o.created_at < $%d", pos))
+		args = append(args, *f.To)
+		pos++
+	}
+	if f.PaymentMethod != "" {
+		clauses = append(clauses, fmt.Sprintf("o.payment_method = $%d", pos))
+		args = append(args, f.PaymentMethod)
+		pos++
+	}
+	if f.Status != "" {
+		clauses = append(clauses, fmt.Sprintf("o.status = $%d", pos))
+		args = append(args, f.Status)
+		pos++
+	}
+	if f.Search != "" {
+		clauses = append(clauses, fmt.Sprintf("(o.order_number ILIKE $%d OR o.customer_name ILIKE $%d)", pos, pos))
+		args = append(args, "%"+f.Search+"%")
+		pos++
+	}
+	where := strings.Join(clauses, " AND ")
+
+	q := fmt.Sprintf(`
+		SELECT o.id, o.order_number, o.status, o.payment_method,
+		       o.subtotal_cents, o.discount_cents, o.total_cents, o.change_amount_cents,
+		       o.customer_name, o.customer_whatsapp, o.notes, o.created_at,
+		       o.refunded_at, COALESCE(o.refund_reason, ''),
+		       o.pos_session_id, COALESCE(u.name, u.email, ''),
+		       (SELECT COUNT(*) FROM order_items WHERE order_id = o.id) AS item_count
+		FROM orders o
+		LEFT JOIN pos_sessions ps ON ps.id = o.pos_session_id
+		LEFT JOIN users u ON u.id = ps.opened_by
+		WHERE %s
+		ORDER BY o.created_at DESC
+		LIMIT $%d OFFSET $%d
+	`, where, pos, pos+1)
+	args = append(args, f.Limit, f.Offset)
+
+	rows, err := r.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var out []POSSessionOrder
+	for rows.Next() {
+		var x POSSessionOrder
+		if err := rows.Scan(
+			&x.OrderID, &x.OrderNumber, &x.Status, &x.PaymentMethod,
+			&x.SubtotalCents, &x.DiscountCents, &x.TotalCents, &x.ChangeCents,
+			&x.CustomerName, &x.CustomerWA, &x.Notes, &x.CreatedAt,
+			&x.RefundedAt, &x.RefundReason,
+			&x.SessionID, &x.CashierName, &x.ItemCount,
+		); err != nil {
+			return nil, 0, err
+		}
+		out = append(out, x)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	var total int
+	countQ := fmt.Sprintf(`
+		SELECT COUNT(*) FROM orders o
+		LEFT JOIN pos_sessions ps ON ps.id = o.pos_session_id
+		WHERE %s
+	`, where)
+	countArgs := args[:len(args)-2] // drop limit + offset
+	_ = r.pool.QueryRow(ctx, countQ, countArgs...).Scan(&total)
+
+	// Hydrate payments per order (bounded by page size).
+	for i := range out {
+		out[i].Payments, _ = r.GetOrderPayments(ctx, out[i].OrderID)
+	}
+	return out, total, nil
 }
 
 // ReturnOrder fully cancels a previously-completed POS order. Restores stock,

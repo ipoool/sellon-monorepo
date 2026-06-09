@@ -38,7 +38,7 @@ type Product = {
   stock: number;
   photo_urls: string[];
   has_variants: boolean;
-  product_type?: "physical" | "digital";
+  product_type?: "physical" | "digital" | "course";
 };
 
 type StorefrontVariant = {
@@ -141,7 +141,7 @@ export default async function ProductDetailPage({
   // sellers using a sentinel "unlimited" stock (>= 9999) — buyers don't
   // need a count there. Physical products still see "Stok N" / "Stok habis".
   const hideStockBadge =
-    product.product_type === "digital" || totalStock >= 9999;
+    product.product_type !== "physical" || totalStock >= 9999;
   const minPrice = product.has_variants && variants.length > 0
     ? Math.min(...variants.map((v) => v.price_cents))
     : product.price_cents;

@@ -259,7 +259,7 @@ export function buildReceiptEscPos(
   e.align("left").divider();
   e.line("No : #" + order.order_number);
   e.line("Tgl: " + fmtDateTime(order.created_at ?? new Date().toISOString()));
-  e.line("Kasir: " + cashierName);
+  e.line("Kasir: " + (order.cashier_name || cashierName));
   e.divider();
 
   for (const it of order.items) {
@@ -287,7 +287,23 @@ export function buildReceiptEscPos(
     e.leftRight("Ongkir", formatRupiah(order.shipping_cents));
   e.bold(true).leftRight("TOTAL", formatRupiah(order.total_cents)).bold(false);
   e.divider();
-  e.leftRight(paymentLabel(order.payment_method), formatRupiah(order.total_cents));
+  // Per-method tender breakdown (split/EDC/QRIS) when available, else one line.
+  // Cash amount is the tendered amount, so a "Kembali" line follows change.
+  const pays = order.payments ?? [];
+  if (pays.length > 0) {
+    for (const p of pays) {
+      e.leftRight(paymentLabel(p.method), formatRupiah(p.amount_cents));
+      if (p.card_last4)
+        e.line("  " + (p.card_brand ? p.card_brand + " " : "") + "**** " + p.card_last4);
+      if (p.reference_number) e.line("  Ref: " + p.reference_number);
+      if (p.approval_code) e.line("  Approval: " + p.approval_code);
+    }
+  } else {
+    e.leftRight(paymentLabel(order.payment_method), formatRupiah(order.total_cents));
+  }
+  if ((order.change_amount_cents ?? 0) > 0) {
+    e.leftRight("Kembali", formatRupiah(order.change_amount_cents ?? 0));
+  }
   e.divider();
 
   e.align("center").line("Terima kasih sudah berbelanja!");

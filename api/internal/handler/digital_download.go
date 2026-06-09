@@ -53,6 +53,7 @@ func linkDTO(l repository.DownloadLink) map[string]any {
 		"order_number":     l.OrderNumber,
 		"product_name":     l.ProductName,
 		"variant_name":     l.VariantName,
+		"product_type":     l.ProductType,
 		"customer_id":      cid,
 		"customer_name":    l.CustomerName,
 		"download_count":   l.DownloadCount,

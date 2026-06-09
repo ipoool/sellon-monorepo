@@ -95,13 +95,24 @@ export default async function OrderDetailPage({
           <ArrowLeft className="size-4" aria-hidden />
           Kembali ke daftar pesanan
         </Link>
-        <Link
-          href={`/orders/${order.id}/print`}
-          className="inline-flex items-center gap-1.5 rounded-md border border-neutral-200 bg-white px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
-        >
-          <Printer className="size-4" aria-hidden />
-          Cetak Nota
-        </Link>
+        <div className="flex items-center gap-2">
+          {order.source === "pos" && (
+            <Link
+              href={`/pos/orders/${order.id}/receipt`}
+              className="inline-flex items-center gap-1.5 rounded-md border border-brand-200 bg-brand-50 px-3 py-1.5 text-sm font-medium text-brand-700 hover:bg-brand-100"
+            >
+              <ShoppingCart className="size-4" aria-hidden />
+              Cetak Struk POS
+            </Link>
+          )}
+          <Link
+            href={`/orders/${order.id}/print`}
+            className="inline-flex items-center gap-1.5 rounded-md border border-neutral-200 bg-white px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
+          >
+            <Printer className="size-4" aria-hidden />
+            Cetak Nota
+          </Link>
+        </div>
       </div>
 
       <div className="grid gap-5 lg:grid-cols-12">
@@ -110,6 +121,9 @@ export default async function OrderDetailPage({
           <Card>
             <div className="flex flex-wrap items-center gap-2">
               <OrderSourceBadge source={order.source} />
+              {order.source === "pos" && order.cashier_name && (
+                <Badge variant="outline">Kasir: {order.cashier_name}</Badge>
+              )}
               <Badge variant={statusBadge[order.status].variant}>
                 {statusBadge[order.status].label}
               </Badge>

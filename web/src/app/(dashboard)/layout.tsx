@@ -7,6 +7,8 @@ import { BannersWrapper } from "@/components/dashboard/banners-wrapper";
 import { OrderNotifier } from "@/components/dashboard/order-notifier";
 import { OfflineSyncWatcher } from "@/components/dashboard/offline-sync-watcher";
 import { KdsProvider } from "@/components/dashboard/kds-context";
+import { MenuCapabilitiesProvider } from "@/components/dashboard/menu-capabilities-context";
+import { ProfilingGate } from "@/components/dashboard/profiling-gate";
 import { PlanProvider } from "@/components/dashboard/plan-context";
 import { BisnisGateProvider } from "@/components/dashboard/bisnis-gate";
 import { SubscriptionExpiryBanner } from "@/components/dashboard/subscription-expiry-banner";
@@ -90,12 +92,33 @@ export default async function DashboardLayout({
           background on every page (not just /pos), so queued POS sales sync
           even after the cashier navigates away or refreshes. */}
       {data?.store && <OfflineSyncWatcher />}
+      {/* Force the one-time profiling step for an existing store owner who
+          predates this feature (profiling_completed_at IS NULL). Staff have a
+          separate sidebar and store-admins shouldn't be blocked on the owner's
+          menu decision; platform admins without a store are already excluded by
+          the data?.store guard. */}
+      {data?.store &&
+        !data.store.profiling_completed_at &&
+        me.store_role !== "staff" &&
+        me.store_role !== "admin" && <ProfilingGate />}
       {/* Surface the active tier to the dashboard sidebar (and any
           other client components that want to gate by plan) without
           prop-drilling through every page. */}
       <PlanProvider value={sub?.plan ?? "free"}>
         <BisnisGateProvider>
-          <KdsProvider value={dinein?.kds_enabled ?? false}>{children}</KdsProvider>
+          {/* Which optional menu groups the seller enabled during profiling —
+              consumed by the sidebar to show/hide groups. Defaults all-true so
+              an admin without a store (no data.store) still sees everything. */}
+          <MenuCapabilitiesProvider
+            value={{
+              pos: data?.store?.cap_pos ?? true,
+              reseller: data?.store?.cap_reseller ?? true,
+              digital: data?.store?.cap_digital ?? true,
+              materials: data?.store?.cap_materials ?? true,
+            }}
+          >
+            <KdsProvider value={dinein?.kds_enabled ?? false}>{children}</KdsProvider>
+          </MenuCapabilitiesProvider>
         </BisnisGateProvider>
       </PlanProvider>
     </div>

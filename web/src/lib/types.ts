@@ -68,6 +68,15 @@ export type Store = {
   // Enables offline-mode capability for the POS (catalog cached + orders
   // queued on the cashier device until reconnect).
   offline_enabled?: boolean;
+  // Menu visibility capabilities chosen during profiling — control which
+  // sidebar groups SHOW (plan tier still gates ACCESS, independently).
+  cap_pos?: boolean;
+  cap_reseller?: boolean;
+  cap_digital?: boolean;
+  cap_materials?: boolean;
+  seller_types?: string; // comma-joined profiling answers
+  // null/undefined = profiling not done → forced dialog on next dashboard access.
+  profiling_completed_at?: string | null;
 };
 
 export type BankAccount = {
@@ -112,7 +121,7 @@ export type Product = {
   photo_urls: string[];
   has_variants: boolean;
   is_featured: boolean;
-  product_type: "physical" | "digital";
+  product_type: "physical" | "digital" | "course";
   digital_delivery_url: string;
   digital_file_url: string;
   digital_instructions: string;
@@ -129,7 +138,17 @@ export type Product = {
   discounts?: ProductDiscount[];
   base_recipe?: ProductRecipeItem[];
   modifiers?: ModifierGroup[];
+  course_videos?: CourseVideo[];
   created_at: string;
+};
+
+export type CourseVideo = {
+  id?: string;
+  title: string;
+  youtube_url: string;
+  youtube_id?: string;
+  description_md: string;
+  sort_order?: number;
 };
 
 export type ProductRecipeItem = {
@@ -418,8 +437,18 @@ export type MaterialMovement = {
   quantity: number; // signed: + restock, - consume
   unit_cost_cents: number;
   order_id: string | null;
+  order_number?: string; // resolved for consume rows
   note: string;
   created_at: string;
+};
+
+// One WIB day of in/out aggregates for the per-material movement chart.
+export type MaterialMovementPoint = {
+  date: string; // YYYY-MM-DD
+  in_qty: number;
+  out_qty: number;
+  in_cost_cents: number;
+  out_cost_cents: number;
 };
 
 export type OrderStatus =
@@ -471,6 +500,17 @@ type OrderItem = {
   }[];
 };
 
+// One tender line on a POS order (split / EDC / QRIS). EDC fields are present
+// only for card methods.
+export type OrderPaymentLine = {
+  method: string;
+  amount_cents: number;
+  card_brand?: string;
+  card_last4?: string;
+  reference_number?: string;
+  approval_code?: string;
+};
+
 export type OrderDetail = {
   id: string;
   order_number: string;
@@ -488,6 +528,10 @@ export type OrderDetail = {
   total_cents: number;
   loyalty_points_redeemed?: number;
   loyalty_discount_cents?: number;
+  // POS-only receipt fields (empty/undefined for non-POS orders).
+  cashier_name?: string;
+  change_amount_cents?: number;
+  payments?: OrderPaymentLine[];
   courier: string;
   courier_service: string;
   tracking_number: string;
@@ -568,6 +612,7 @@ export type DigitalDownloadLink = {
   order_number: string;
   product_name: string;
   variant_name: string;
+  product_type?: "digital" | "course" | string;
   customer_id: string;
   customer_name: string;
   download_count: number;
@@ -906,7 +951,7 @@ export type POSCartItem = {
   variant_id?: string | null;
   product_name: string;
   variant_name?: string;
-  product_type: "physical" | "digital";
+  product_type: "physical" | "digital" | "course";
   unit_cents: number;
   quantity: number;
   photo_url?: string;
@@ -964,6 +1009,9 @@ export type POSSessionOrder = {
   payments: POSPayment[];
   refunded_at: string | null;
   refund_reason: string;
+  // Populated only by the cross-shift history list (GET /pos/orders).
+  session_id?: string | null;
+  cashier_name?: string;
 };
 
 export type POSCashier = {

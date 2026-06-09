@@ -93,6 +93,27 @@ type orderItemDTO struct {
 	Modifiers      []map[string]any `json:"modifiers,omitempty"`
 }
 
+type orderPaymentDTO struct {
+	Method          string `json:"method"`
+	AmountCents     int64  `json:"amount_cents"`
+	CardBrand       string `json:"card_brand,omitempty"`
+	CardLast4       string `json:"card_last4,omitempty"`
+	ReferenceNumber string `json:"reference_number,omitempty"`
+	ApprovalCode    string `json:"approval_code,omitempty"`
+}
+
+func orderPaymentsToDTO(ps []repository.OrderPayment) []orderPaymentDTO {
+	out := make([]orderPaymentDTO, 0, len(ps))
+	for _, p := range ps {
+		out = append(out, orderPaymentDTO{
+			Method: p.Method, AmountCents: p.AmountCents,
+			CardBrand: p.CardBrand, CardLast4: p.CardLast4,
+			ReferenceNumber: p.ReferenceNumber, ApprovalCode: p.ApprovalCode,
+		})
+	}
+	return out
+}
+
 func optionSnapsToDTO(snaps []repository.OptionSnapshot) []map[string]any {
 	out := make([]map[string]any, 0, len(snaps))
 	for _, s := range snaps {
@@ -122,6 +143,10 @@ type orderDetailDTO struct {
 	TotalCents         int64          `json:"total_cents"`
 	LoyaltyPointsRedeemed int         `json:"loyalty_points_redeemed"`
 	LoyaltyDiscountCents  int64       `json:"loyalty_discount_cents"`
+	// POS-only receipt fields (empty/zero for non-POS orders).
+	CashierName        string            `json:"cashier_name,omitempty"`
+	ChangeAmountCents  int64             `json:"change_amount_cents"`
+	Payments           []orderPaymentDTO `json:"payments,omitempty"`
 	Courier            string         `json:"courier"`
 	CourierService     string         `json:"courier_service"`
 	TrackingNumber     string         `json:"tracking_number"`
@@ -305,6 +330,13 @@ func (h *OrderHandler) Get(w http.ResponseWriter, r *http.Request) {
 	if cf, cfErr := h.orders.GetCustomFields(r.Context(), o.ID); cfErr == nil && len(cf) > 2 {
 		orderDTO.CustomFields = cf
 	}
+	// POS orders carry per-method tender lines (split / EDC / QRIS) — surface
+	// them for a faithful receipt reprint. Storefront orders have none.
+	if o.Source == "pos" {
+		if pays, perr := h.orders.ListOrderPayments(r.Context(), o.ID); perr == nil && len(pays) > 0 {
+			orderDTO.Payments = orderPaymentsToDTO(pays)
+		}
+	}
 	response.JSON(w, http.StatusOK, map[string]any{"order": orderDTO})
 }
 
@@ -345,6 +377,8 @@ func orderDetailToDTO(o *repository.Order, items []orderItemDTO) orderDetailDTO 
 		TotalCents:            o.TotalCents,
 		LoyaltyPointsRedeemed: o.LoyaltyPointsRedeemed,
 		LoyaltyDiscountCents:  o.LoyaltyDiscountCents,
+		CashierName:           o.CashierName,
+		ChangeAmountCents:     o.ChangeAmountCents,
 		Courier: o.Courier, CourierService: o.CourierService, TrackingNumber: o.TrackingNumber,
 		CustomerName: o.CustomerName, CustomerWhatsApp: o.CustomerWhatsApp,
 		CustomerAddress: o.CustomerAddress, CustomerCity: o.CustomerCity,

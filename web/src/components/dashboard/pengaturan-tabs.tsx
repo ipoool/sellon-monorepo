@@ -22,6 +22,7 @@ import {
   Megaphone,
   Receipt,
   WifiOff,
+  SlidersHorizontal,
   ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -31,6 +32,7 @@ import { useBisnisGate } from "@/components/dashboard/bisnis-gate";
 // pages themselves also guard server-side, and the API enforces 402).
 const tabs = [
   { label: "Profil Toko", href: "/settings/store", icon: Store },
+  { label: "Tampilan Menu", href: "/settings/menu", icon: SlidersHorizontal },
   { label: "Storefront", href: "/settings/storefront", icon: Palette },
   { label: "Banner", href: "/settings/banners", icon: ImageIcon },
   { label: "Meta / Facebook", href: "/settings/meta", icon: Megaphone },

@@ -11,7 +11,24 @@ type ctxKey string
 const (
 	userIDKey         ctxKey = "uid"
 	impersonatorIDKey ctxKey = "imp"
+	buyerKey          ctxKey = "buyer"
 )
+
+// WithBuyer / BuyerFromContext carry the verified storefront-buyer claims
+// (course-link scoped). Separate from the seller userIDKey so the two auth
+// realms never cross.
+func WithBuyer(ctx context.Context, c *BuyerClaims) context.Context {
+	return context.WithValue(ctx, buyerKey, c)
+}
+
+func BuyerFromContext(ctx context.Context) (*BuyerClaims, bool) {
+	v := ctx.Value(buyerKey)
+	if v == nil {
+		return nil, false
+	}
+	c, ok := v.(*BuyerClaims)
+	return c, ok && c != nil
+}
 
 func WithUserID(ctx context.Context, id uuid.UUID) context.Context {
 	return context.WithValue(ctx, userIDKey, id)

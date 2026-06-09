@@ -74,6 +74,12 @@ type Order struct {
 	// the portion of discount_cents that came from redeeming points.
 	LoyaltyPointsRedeemed int
 	LoyaltyDiscountCents  int64
+	// POS reprint data: cash given back, the shift this order belongs to, and
+	// the cashier who rang it (resolved via pos_session → opened_by). Zero/nil
+	// for non-POS orders.
+	ChangeAmountCents int64
+	PosSessionID      *uuid.UUID
+	CashierName       string
 	// Dine-in / kitchen pipeline (NULL/empty for non-kitchen orders).
 	QueueNumber   *int
 	KitchenStatus *string
@@ -335,19 +341,26 @@ func (r *OrderRepo) GetCustomFields(ctx context.Context, orderID uuid.UUID) ([]b
 }
 
 func (r *OrderRepo) FindByID(ctx context.Context, storeID, id uuid.UUID) (*Order, error) {
+	// Columns are o.-qualified because of the POS LEFT JOINs (pos_sessions/users
+	// share column names like id/created_at). The joins resolve the original
+	// cashier for POS reprint; they yield at most one row (unique session+user).
 	const q = `
-		SELECT id, store_id, order_number, status, payment_status, payment_method, source,
-		       subtotal_cents, shipping_cents, discount_cents, promo_code, total_cents,
-		       courier, courier_service, tracking_number,
-		       customer_name, customer_whatsapp, customer_email, customer_address, customer_city,
-		       notes, seller_notes, payment_url,
-		       paid_at, shipped_at, completed_at, cancelled_at, cancellation_reason,
-		       refund_amount_cents, refund_reason, refunded_at,
-		       payment_proof_url, payment_proof_note, payment_proof_at,
-		       loyalty_points_redeemed, loyalty_discount_cents,
-		       tax_cents, tax_bps, tax_inclusive,
-		       created_at, updated_at
-		FROM orders WHERE id = $1 AND store_id = $2
+		SELECT o.id, o.store_id, o.order_number, o.status, o.payment_status, o.payment_method, o.source,
+		       o.subtotal_cents, o.shipping_cents, o.discount_cents, o.promo_code, o.total_cents,
+		       o.courier, o.courier_service, o.tracking_number,
+		       o.customer_name, o.customer_whatsapp, o.customer_email, o.customer_address, o.customer_city,
+		       o.notes, o.seller_notes, o.payment_url,
+		       o.paid_at, o.shipped_at, o.completed_at, o.cancelled_at, o.cancellation_reason,
+		       o.refund_amount_cents, o.refund_reason, o.refunded_at,
+		       o.payment_proof_url, o.payment_proof_note, o.payment_proof_at,
+		       o.loyalty_points_redeemed, o.loyalty_discount_cents,
+		       o.tax_cents, o.tax_bps, o.tax_inclusive,
+		       o.change_amount_cents, o.pos_session_id, COALESCE(u.name, u.email, ''),
+		       o.created_at, o.updated_at
+		FROM orders o
+		LEFT JOIN pos_sessions ps ON ps.id = o.pos_session_id
+		LEFT JOIN users u ON u.id = ps.opened_by
+		WHERE o.id = $1 AND o.store_id = $2
 	`
 	var o Order
 	err := r.pool.QueryRow(ctx, q, id, storeID).Scan(
@@ -361,6 +374,7 @@ func (r *OrderRepo) FindByID(ctx context.Context, storeID, id uuid.UUID) (*Order
 		&o.PaymentProofURL, &o.PaymentProofNote, &o.PaymentProofAt,
 		&o.LoyaltyPointsRedeemed, &o.LoyaltyDiscountCents,
 		&o.TaxCents, &o.TaxBps, &o.TaxInclusive,
+		&o.ChangeAmountCents, &o.PosSessionID, &o.CashierName,
 		&o.CreatedAt, &o.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -421,6 +435,43 @@ func (r *OrderRepo) ListModifiersByOrder(ctx context.Context, orderID uuid.UUID)
 			s.OptionID = *optID
 		}
 		out[itemID] = append(out[itemID], s)
+	}
+	return out, rows.Err()
+}
+
+// OrderPayment is one tender line from pos_order_payments (POS split/EDC). Used
+// to render a faithful POS receipt (per-method breakdown). EDC fields are empty
+// for non-card methods.
+type OrderPayment struct {
+	Method          string
+	AmountCents     int64
+	CardBrand       string
+	CardLast4       string
+	ReferenceNumber string
+	ApprovalCode    string
+}
+
+// ListOrderPayments loads the per-method tender lines for a POS order. Returns
+// an empty slice for storefront orders (which have no pos_order_payments rows).
+func (r *OrderRepo) ListOrderPayments(ctx context.Context, orderID uuid.UUID) ([]OrderPayment, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT method, amount_cents,
+		       COALESCE(card_brand, ''), COALESCE(card_last4, ''),
+		       COALESCE(reference_number, ''), COALESCE(approval_code, '')
+		FROM pos_order_payments WHERE order_id = $1 ORDER BY created_at
+	`, orderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []OrderPayment
+	for rows.Next() {
+		var p OrderPayment
+		if err := rows.Scan(&p.Method, &p.AmountCents,
+			&p.CardBrand, &p.CardLast4, &p.ReferenceNumber, &p.ApprovalCode); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
 	}
 	return out, rows.Err()
 }
@@ -748,10 +799,13 @@ func (r *OrderRepo) PrepareDigitalFulfillment(ctx context.Context, orderID uuid.
 		}
 	}
 
+	// Non-physical items (digital + course) all need a delivery token minted;
+	// the fulfiller branches on product_type for digital-link vs course-access
+	// email copy.
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, product_id, product_name, variant_name,
 		       unit_price_cents, quantity, subtotal_cents, product_type
-		FROM order_items WHERE order_id = $1 AND product_type = 'digital'
+		FROM order_items WHERE order_id = $1 AND product_type IN ('digital', 'course')
 	`, orderID)
 	if err != nil {
 		return nil, allDigital, err
@@ -925,11 +979,11 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 	}
 
 	for _, it := range in.Items {
-		isDigital := it.ProductType == "digital"
-
-		// Stock decrement only applies to physical items. Digital items
-		// have unlimited stock semantics — they don't deplete on order.
-		if !isDigital {
+		// Stock decrement only applies to physical items. Non-physical
+		// (digital + course) have unlimited stock semantics — they don't
+		// deplete on order.
+		nonPhysical := it.ProductType != "physical"
+		if !nonPhysical {
 			var rowsAffected int64
 			if it.VariantID != nil {
 				tag, err := tx.Exec(ctx, `
@@ -957,10 +1011,7 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 			}
 		}
 
-		productType := it.ProductType
-		if productType != "digital" {
-			productType = "physical"
-		}
+		productType := normalizeProductType(it.ProductType)
 		var orderItemID uuid.UUID
 		if err := tx.QueryRow(ctx, `
 			INSERT INTO order_items (order_id, product_id, variant_id, product_name, variant_name,

@@ -64,8 +64,19 @@ type Store struct {
 	// OfflineEnabled turns on offline-mode capability for the POS (catalog
 	// cached + orders queued on the cashier device until reconnect).
 	OfflineEnabled bool
-	CreatedAt      time.Time
-	UpdatedAt    time.Time
+	// Menu capabilities chosen during profiling — control which sidebar groups
+	// SHOW (plan tier still gates ACCESS via the Bisnis-gate, orthogonally).
+	CapPOS       bool
+	CapReseller  bool
+	CapDigital   bool
+	CapMaterials bool
+	// SellerTypes = comma-joined profiling answers (jenis usaha), for analytics.
+	SellerTypes string
+	// ProfilingCompletedAt: nil = profiling not done → forced dialog on next
+	// dashboard access. Single source of truth for "needs profiling".
+	ProfilingCompletedAt *time.Time
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }
 
 type StoreRepo struct {
@@ -93,6 +104,7 @@ const storeColumns = `id, owner_id, slug, name, description, logo_url, banner_ur
 	meta_enabled, meta_pixel_id, meta_access_token_encrypted, meta_test_event_code, meta_catalog_id,
 	tax_enabled, tax_bps, tax_inclusive, tax_label,
 	offline_enabled,
+	cap_pos, cap_reseller, cap_digital, cap_materials, seller_types, profiling_completed_at,
 	created_at, updated_at`
 
 // Same column list but qualified with the `s.` alias, used in joins.
@@ -109,6 +121,7 @@ const qualifiedStoreColumns = `s.id, s.owner_id, s.slug, s.name, s.description,
 	s.meta_enabled, s.meta_pixel_id, s.meta_access_token_encrypted, s.meta_test_event_code, s.meta_catalog_id,
 	s.tax_enabled, s.tax_bps, s.tax_inclusive, s.tax_label,
 	s.offline_enabled,
+	s.cap_pos, s.cap_reseller, s.cap_digital, s.cap_materials, s.seller_types, s.profiling_completed_at,
 	s.created_at, s.updated_at`
 
 func scanStore(row pgx.Row, s *Store) error {
@@ -128,6 +141,7 @@ func scanStore(row pgx.Row, s *Store) error {
 		&s.MetaEnabled, &s.MetaPixelID, &s.MetaAccessTokenEnc, &s.MetaTestEventCode, &s.MetaCatalogID,
 		&s.TaxEnabled, &s.TaxBps, &s.TaxInclusive, &s.TaxLabel,
 		&s.OfflineEnabled,
+		&s.CapPOS, &s.CapReseller, &s.CapDigital, &s.CapMaterials, &s.SellerTypes, &s.ProfilingCompletedAt,
 		&s.CreatedAt, &s.UpdatedAt,
 	)
 }
@@ -162,6 +176,46 @@ func (r *StoreRepo) UpdateOffline(ctx context.Context, storeID uuid.UUID, enable
 		RETURNING ` + storeColumns
 	var s Store
 	if err := scanStore(r.pool.QueryRow(ctx, q, storeID, enabled), &s); err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+// MenuCaps holds the four sidebar-visibility capabilities.
+type MenuCaps struct {
+	POS       bool
+	Reseller  bool
+	Digital   bool
+	Materials bool
+}
+
+// UpdateProfiling sets the menu capabilities + seller types and stamps
+// profiling_completed_at = now(). Used by the setup wizard's final step and the
+// forced existing-seller dialog.
+func (r *StoreRepo) UpdateProfiling(ctx context.Context, storeID uuid.UUID, caps MenuCaps, sellerTypes string) (*Store, error) {
+	q := `
+		UPDATE stores
+		SET cap_pos = $2, cap_reseller = $3, cap_digital = $4, cap_materials = $5,
+		    seller_types = $6, profiling_completed_at = now(), updated_at = now()
+		WHERE id = $1
+		RETURNING ` + storeColumns
+	var s Store
+	if err := scanStore(r.pool.QueryRow(ctx, q, storeID, caps.POS, caps.Reseller, caps.Digital, caps.Materials, sellerTypes), &s); err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+// UpdateMenuCaps toggles the menu capabilities only (the /settings/menu page).
+// Leaves profiling_completed_at untouched — re-toggling doesn't reset it.
+func (r *StoreRepo) UpdateMenuCaps(ctx context.Context, storeID uuid.UUID, caps MenuCaps) (*Store, error) {
+	q := `
+		UPDATE stores
+		SET cap_pos = $2, cap_reseller = $3, cap_digital = $4, cap_materials = $5, updated_at = now()
+		WHERE id = $1
+		RETURNING ` + storeColumns
+	var s Store
+	if err := scanStore(r.pool.QueryRow(ctx, q, storeID, caps.POS, caps.Reseller, caps.Digital, caps.Materials), &s); err != nil {
 		return nil, err
 	}
 	return &s, nil

@@ -43,6 +43,17 @@ type Product struct {
 
 func (p *Product) IsDigital() bool { return p != nil && p.ProductType == "digital" }
 
+// normalizeProductType collapses anything unrecognized to "physical" (the safe
+// default). The three valid types: physical, digital, course.
+func normalizeProductType(t string) string {
+	switch t {
+	case "digital", "course":
+		return t
+	default:
+		return "physical"
+	}
+}
+
 type ProductRepo struct {
 	pool *pgxpool.Pool
 }
@@ -203,9 +214,7 @@ type SaveProductInput struct {
 }
 
 func (r *ProductRepo) Create(ctx context.Context, in SaveProductInput) (*Product, error) {
-	if in.ProductType != "digital" {
-		in.ProductType = "physical"
-	}
+	in.ProductType = normalizeProductType(in.ProductType)
 	q := `
 		INSERT INTO products (store_id, category_id, name, slug, description, price_cents, stock,
 		                     low_stock_threshold,
@@ -229,9 +238,7 @@ func (r *ProductRepo) Create(ctx context.Context, in SaveProductInput) (*Product
 }
 
 func (r *ProductRepo) Update(ctx context.Context, id uuid.UUID, in SaveProductInput) (*Product, error) {
-	if in.ProductType != "digital" {
-		in.ProductType = "physical"
-	}
+	in.ProductType = normalizeProductType(in.ProductType)
 	q := `
 		UPDATE products
 		SET category_id = $3,

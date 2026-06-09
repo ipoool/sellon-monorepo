@@ -81,6 +81,7 @@ func (f *Fulfiller) OnPaymentPaid(ctx context.Context, storeID, orderID uuid.UUI
 	// tokens can manually invalidate later via a future admin tool.
 	type minted struct {
 		token       string
+		productType string
 		productName string
 		variantName string
 	}
@@ -98,6 +99,7 @@ func (f *Fulfiller) OnPaymentPaid(ctx context.Context, storeID, orderID uuid.UUI
 		}
 		tokens = append(tokens, minted{
 			token:       t.Token,
+			productType: it.ProductType,
 			productName: it.ProductName,
 			variantName: it.VariantName,
 		})
@@ -107,7 +109,7 @@ func (f *Fulfiller) OnPaymentPaid(ctx context.Context, storeID, orderID uuid.UUI
 	}
 
 	// Email the buyer. Skip if the buyer didn't supply an email (the
-	// storefront enforces this for all-digital carts, but defensively
+	// storefront enforces this for all-non-physical carts, but defensively
 	// no-op here too).
 	if !f.mailer.Configured() || strings.TrimSpace(order.CustomerEmail) == "" {
 		return
@@ -115,39 +117,57 @@ func (f *Fulfiller) OnPaymentPaid(ctx context.Context, storeID, orderID uuid.UUI
 
 	origin := strings.TrimRight(f.webOrigin, "/")
 
-	// Build a multi-link summary. For one item, single link is the
-	// hero CTA. For multiple, list each link.
-	links := make([]email.DownloadLink, 0, len(tokens))
+	// Split by type: digital items point at /download/{token}; course items
+	// point at the OTP-gated viewer /{slug}/course/{token}. A mixed cart gets
+	// one email per kind (clearer than cramming both into one).
+	var digitalLinks, courseLinks []email.DownloadLink
 	for _, t := range tokens {
 		name := t.productName
 		if t.variantName != "" {
 			name += " — " + t.variantName
 		}
-		links = append(links, email.DownloadLink{
-			Name: name,
-			URL:  origin + "/download/" + t.token,
+		if t.productType == "course" {
+			courseLinks = append(courseLinks, email.DownloadLink{
+				Name: name,
+				URL:  origin + "/" + store.Slug + "/course/" + t.token,
+			})
+		} else {
+			digitalLinks = append(digitalLinks, email.DownloadLink{
+				Name: name,
+				URL:  origin + "/download/" + t.token,
+			})
+		}
+	}
+
+	if len(digitalLinks) > 0 {
+		subject, text, htmlBody := email.RenderDigitalDelivery(email.DigitalDeliveryData{
+			StoreName:    store.Name,
+			OrderNumber:  order.OrderNumber,
+			CustomerName: order.CustomerName,
+			Links:        digitalLinks,
+		})
+		f.mailer.Send(email.Message{
+			To: order.CustomerEmail, ToName: order.CustomerName,
+			Subject: subject, Text: text, HTML: htmlBody, Category: "digital_delivery",
+		})
+	}
+	if len(courseLinks) > 0 {
+		subject, text, htmlBody := email.RenderCourseAccess(email.CourseAccessData{
+			StoreName:    store.Name,
+			OrderNumber:  order.OrderNumber,
+			CustomerName: order.CustomerName,
+			Links:        courseLinks,
+		})
+		f.mailer.Send(email.Message{
+			To: order.CustomerEmail, ToName: order.CustomerName,
+			Subject: subject, Text: text, HTML: htmlBody, Category: "course_access",
 		})
 	}
 
-	subject, text, htmlBody := email.RenderDigitalDelivery(email.DigitalDeliveryData{
-		StoreName:    store.Name,
-		OrderNumber:  order.OrderNumber,
-		CustomerName: order.CustomerName,
-		Links:        links,
-	})
-
-	f.mailer.Send(email.Message{
-		To:       order.CustomerEmail,
-		ToName:   order.CustomerName,
-		Subject:  subject,
-		Text:     text,
-		HTML:     htmlBody,
-		Category: "digital_delivery",
-	})
-
 	// best-effort log so seller debugging is easier
-	f.logger.Info("digital order fulfilled",
+	f.logger.Info("non-physical order fulfilled",
 		"order_id", orderID, "store_id", storeID,
-		"items", len(tokens), "email", order.CustomerEmail,
+		"digital", len(digitalLinks), "course", len(courseLinks),
+		"email", order.CustomerEmail,
 		"completed_at", time.Now().UTC().Format(time.RFC3339))
 }

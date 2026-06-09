@@ -245,6 +245,55 @@ func (h *POSHandler) ListSessionOrders(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, map[string]any{"orders": out})
 }
 
+// ListPOSOrders — cross-shift POS transaction history (Riwayat Transaksi page).
+func (h *POSHandler) ListPOSOrders(w http.ResponseWriter, r *http.Request) {
+	c := h.ctx(w, r)
+	if c == nil {
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 || limit > 100 {
+		limit = 30
+	}
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+
+	filter := repository.ListPOSOrdersFilter{
+		StoreID:       c.storeID,
+		Limit:         limit,
+		Offset:        offset,
+		PaymentMethod: r.URL.Query().Get("payment_method"),
+		Status:        r.URL.Query().Get("status"),
+		Search:        strings.TrimSpace(r.URL.Query().Get("q")),
+	}
+	if v := r.URL.Query().Get("cashier_id"); v != "" {
+		if cid, err := uuid.Parse(v); err == nil {
+			filter.CashierID = &cid
+		}
+	}
+	if v := r.URL.Query().Get("from"); v != "" {
+		if t, err := time.Parse("2006-01-02", v); err == nil {
+			filter.From = &t
+		}
+	}
+	if v := r.URL.Query().Get("to"); v != "" {
+		if t, err := time.Parse("2006-01-02", v); err == nil {
+			next := t.AddDate(0, 0, 1) // exclusive next-day bound
+			filter.To = &next
+		}
+	}
+
+	orders, total, err := h.pos.ListPOSOrders(r.Context(), filter)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	out := make([]any, 0, len(orders))
+	for _, o := range orders {
+		out = append(out, sessionOrderToDTO(&o))
+	}
+	response.JSON(w, http.StatusOK, map[string]any{"orders": out, "total": total})
+}
+
 // ExportSessionOrdersCSV — download CSV transaksi dalam shift.
 func (h *POSHandler) ExportSessionOrdersCSV(w http.ResponseWriter, r *http.Request) {
 	c := h.ctx(w, r)
@@ -1087,6 +1136,8 @@ func sessionOrderToDTO(o *repository.POSSessionOrder) map[string]any {
 		"payments":            payments,
 		"refunded_at":         o.RefundedAt,
 		"refund_reason":       o.RefundReason,
+		"session_id":          o.SessionID,
+		"cashier_name":        o.CashierName,
 	}
 }
 

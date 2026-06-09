@@ -29,7 +29,7 @@ export type KioskProduct = {
   price_cents: number;
   stock: number;
   photo_urls: string[];
-  product_type?: "physical" | "digital";
+  product_type?: "physical" | "digital" | "course";
   has_variants?: boolean;
   variants?: KioskVariant[];
   modifiers?: KioskModifierGroup[];

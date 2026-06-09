@@ -45,6 +45,12 @@ type DownloadInfo struct {
 	DigitalDeliveryURL  string
 	DigitalFileURL      string
 	DigitalInstructions string
+	// Course delivery needs the product (to load its videos) + the order email
+	// (to send the OTP) + the type (to gate the course viewer). nil/"" for
+	// legacy/anonymous rows.
+	ProductID     *uuid.UUID
+	CustomerEmail string
+	ProductType   string
 }
 
 type DownloadTokenRepo struct {
@@ -123,7 +129,8 @@ func (r *DownloadTokenRepo) FindForDelivery(ctx context.Context, token string) (
 		  oi.product_name, oi.variant_name,
 		  COALESCE(p.digital_delivery_url, ''),
 		  COALESCE(p.digital_file_url, ''),
-		  COALESCE(p.digital_instructions, '')
+		  COALESCE(p.digital_instructions, ''),
+		  oi.product_id, COALESCE(o.customer_email, ''), oi.product_type
 		FROM download_tokens dt
 		JOIN stores s        ON s.id  = dt.store_id
 		JOIN orders o        ON o.id  = dt.order_id
@@ -140,6 +147,7 @@ func (r *DownloadTokenRepo) FindForDelivery(ctx context.Context, token string) (
 		&info.OrderNumber, &info.CustomerName, &info.CustomerID,
 		&info.ProductName, &info.VariantName,
 		&info.DigitalDeliveryURL, &info.DigitalFileURL, &info.DigitalInstructions,
+		&info.ProductID, &info.CustomerEmail, &info.ProductType,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrDownloadTokenNotFound

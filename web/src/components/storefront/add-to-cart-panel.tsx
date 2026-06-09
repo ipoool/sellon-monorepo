@@ -38,7 +38,7 @@ type Props = {
     stock: number;
     has_variants: boolean;
     photo_urls?: string[];
-    product_type?: "physical" | "digital";
+    product_type?: "physical" | "digital" | "course";
   };
   variants?: StorefrontVariant[];
   modifiers?: ModifierGroup[];
@@ -85,6 +85,9 @@ export function AddToCartPanel({
   );
 
   const isDigital = product.product_type === "digital";
+  const isCourse = product.product_type === "course";
+  // Both digital + course are non-physical: unlimited stock, never out of stock.
+  const isNonPhysical = product.product_type !== "physical";
   const selectedVariant = product.has_variants
     ? variants.find((v) => v.id === variantId) ?? null
     : null;
@@ -106,7 +109,7 @@ export function AddToCartPanel({
     ? selectedVariant.price_cents
     : product.price_cents;
   const unitPriceCents = baseUnit + optionDelta;
-  const availableStock = isDigital
+  const availableStock = isNonPhysical
     ? Number.MAX_SAFE_INTEGER
     : product.has_variants
       ? selectedVariant?.stock ?? 0
@@ -114,7 +117,7 @@ export function AddToCartPanel({
   const subtotal = unitPriceCents * qty;
 
   const outOfStock =
-    !isDigital &&
+    !isNonPhysical &&
     (product.has_variants
       ? variants.every((v) => v.stock <= 0)
       : product.stock <= 0);
@@ -148,7 +151,7 @@ export function AddToCartPanel({
       unit_price_cents: unitPriceCents,
       qty,
       photo_url: product.photo_urls?.[0],
-      product_type: isDigital ? "digital" : "physical",
+      product_type: product.product_type ?? "physical",
       available_stock: availableStock === Number.MAX_SAFE_INTEGER ? 0 : availableStock,
       selected_options: selected_options.length > 0 ? selected_options : undefined,
     };
@@ -191,19 +194,21 @@ export function AddToCartPanel({
           <ShoppingCart className="size-4 text-brand-600" aria-hidden />
           <h2 className="font-semibold text-neutral-900">Pesan Sekarang</h2>
         </div>
-        {isDigital && (
+        {isNonPhysical && (
           <Badge variant="brand" className="gap-1">
             <Download className="size-3" aria-hidden />
-            Digital
+            {isCourse ? "Kursus" : "Digital"}
           </Badge>
         )}
       </div>
 
       <div className="mt-1">
         <p className="text-xs text-neutral-500">
-          {isDigital
-            ? "Pelanggan dapat link akses setelah pembayaran lunas."
-            : "Ongkir dihitung otomatis di checkout."}
+          {isCourse
+            ? "Akses kelas via link + login OTP email setelah pembayaran lunas."
+            : isDigital
+              ? "Pelanggan dapat link akses setelah pembayaran lunas."
+              : "Ongkir dihitung otomatis di checkout."}
         </p>
       </div>
 
@@ -329,12 +334,12 @@ export function AddToCartPanel({
             aria-label="Tambah"
             onClick={() =>
               setQty((q) =>
-                isDigital
+                isNonPhysical
                   ? q + 1
                   : Math.min(q + 1, availableStock || q + 1),
               )
             }
-            disabled={disabled || (!isDigital && qty >= availableStock)}
+            disabled={disabled || (!isNonPhysical && qty >= availableStock)}
             className="flex size-8 items-center justify-center rounded-md border border-neutral-200 text-neutral-700 transition-colors hover:bg-neutral-100 disabled:opacity-40"
           >
             +
@@ -342,7 +347,7 @@ export function AddToCartPanel({
         </div>
       </div>
 
-      {!isDigital && availableStock > 0 && availableStock <= 5 && (
+      {!isNonPhysical && availableStock > 0 && availableStock <= 5 && (
         <p className="mt-2 text-xs font-medium text-warning">
           Sisa stok tinggal {availableStock} pcs
         </p>

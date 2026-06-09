@@ -249,6 +249,7 @@ export function ProductsTable({
                         <ProductRowActions
                           productId={p.id}
                           productName={p.name}
+                          productType={p.product_type}
                           storeSlug={storeSlug}
                           quotaFull={quotaFull}
                           asMenu
@@ -368,6 +369,7 @@ export function ProductsTable({
                             <ProductRowActions
                               productId={p.id}
                               productName={p.name}
+                              productType={p.product_type}
                               storeSlug={storeSlug}
                               quotaFull={quotaFull}
                               asMenu

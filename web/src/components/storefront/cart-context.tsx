@@ -26,7 +26,7 @@ export type CartItem = {
   unit_price_cents: number;
   qty: number;
   photo_url?: string;
-  product_type: "physical" | "digital";
+  product_type: "physical" | "digital" | "course";
   available_stock: number;
   // Chosen modifier options. unit_price_cents already includes their deltas.
   selected_options?: SelectedOption[];
@@ -111,9 +111,9 @@ export function CartProvider({ storeSlug, children }: Props) {
       let nextItems: CartItem[];
       if (existing) {
         // Same product+variant → bump qty, clamp to available stock for
-        // physical items. Digital has unlimited stock — no cap.
+        // physical items. Non-physical (digital/course) has unlimited stock.
         const newQty =
-          existing.product_type === "digital"
+          existing.product_type !== "physical"
             ? existing.qty + item.qty
             : Math.min(
                 existing.qty + item.qty,
@@ -137,7 +137,7 @@ export function CartProvider({ storeSlug, children }: Props) {
           return acc;
         }
         const nextQty =
-          x.product_type === "digital"
+          x.product_type !== "physical"
             ? Math.max(1, qty)
             : Math.max(1, Math.min(qty, x.available_stock || qty));
         if (nextQty > 0) acc.push({ ...x, qty: nextQty });
@@ -161,7 +161,9 @@ export function CartProvider({ storeSlug, children }: Props) {
     const items = state.items;
     const count = items.reduce((s, x) => s + x.qty, 0);
     const subtotal = items.reduce((s, x) => s + x.unit_price_cents * x.qty, 0);
-    const hasDigital = items.some((x) => x.product_type === "digital");
+    // "hasDigital" = has any non-physical item (digital or course): both need
+    // a buyer email and skip shipping. hasPhysical drives the shipping step.
+    const hasDigital = items.some((x) => x.product_type !== "physical");
     const hasPhysical = items.some((x) => x.product_type === "physical");
     return {
       items,

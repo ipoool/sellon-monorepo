@@ -75,3 +75,60 @@ func (s *JWTService) Verify(tokenStr string) (*SessionClaims, error) {
 }
 
 func (s *JWTService) TTL() time.Duration { return s.ttl }
+
+// ─── Buyer (storefront) tokens ───────────────────────────────────────────────
+// Separate from the seller session in every way — distinct claims (no `uid`),
+// distinct issuer, a dedicated cookie, and a dedicated middleware — so a buyer
+// token can never satisfy the seller RequireAuth gate (which rejects a nil uid),
+// and a seller token can never satisfy VerifyBuyer (issuer mismatch).
+
+const BuyerCookieName = "buyer_session"
+
+const buyerIssuer = "sellon-buyer"
+
+// BuyerClaims authenticates a storefront buyer for a SINGLE course link
+// (download token), scoped to one store/order item.
+type BuyerClaims struct {
+	StoreID     uuid.UUID `json:"sid"`
+	TokenID     uuid.UUID `json:"tid"`
+	OrderItemID uuid.UUID `json:"oid"`
+	Email       string    `json:"eml"`
+	jwt.RegisteredClaims
+}
+
+// IssueBuyer mints a short-lived buyer token. Default ttl 6h when unset.
+func (s *JWTService) IssueBuyer(c BuyerClaims, ttl time.Duration) (string, time.Time, error) {
+	if ttl <= 0 {
+		ttl = 6 * time.Hour
+	}
+	exp := time.Now().Add(ttl)
+	c.RegisteredClaims = jwt.RegisteredClaims{
+		ExpiresAt: jwt.NewNumericDate(exp),
+		IssuedAt:  jwt.NewNumericDate(time.Now()),
+		Issuer:    buyerIssuer,
+		Subject:   c.TokenID.String(),
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, c)
+	signed, err := tok.SignedString(s.secret)
+	return signed, exp, err
+}
+
+func (s *JWTService) VerifyBuyer(tokenStr string) (*BuyerClaims, error) {
+	parsed, err := jwt.ParseWithClaims(tokenStr, &BuyerClaims{}, func(t *jwt.Token) (any, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, errors.New("unexpected signing method")
+		}
+		return s.secret, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	claims, ok := parsed.Claims.(*BuyerClaims)
+	if !ok || !parsed.Valid {
+		return nil, errors.New("invalid token")
+	}
+	if claims.Issuer != buyerIssuer {
+		return nil, errors.New("not a buyer token")
+	}
+	return claims, nil
+}

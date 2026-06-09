@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, type FormEvent } from "react";
-import { showError, showSuccess } from "@/lib/toast";
+import { showError } from "@/lib/toast";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -12,6 +12,7 @@ import {
   MapPin,
   Sparkles,
   PartyPopper,
+  SlidersHorizontal,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -20,6 +21,7 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { ProfilingForm, type ProfilingResult } from "@/components/onboarding/profiling-form";
 import { cn } from "@/lib/utils";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -71,6 +73,7 @@ const steps = [
   { id: 1, title: "Identitas Toko", icon: StoreIcon },
   { id: 2, title: "Kontak & Lokasi", icon: MapPin },
   { id: 3, title: "Review & Buat", icon: Sparkles },
+  { id: 4, title: "Kebutuhan Toko", icon: SlidersHorizontal },
 ];
 
 export function SetupWizard({
@@ -162,6 +165,36 @@ export function SetupWizard({
         });
       }
 
+      // Store created — advance to profiling instead of finishing. The store
+      // now exists with profiling_completed_at = NULL; if the seller bails here,
+      // the forced dialog on /dashboard catches them (self-healing).
+      setStep(4);
+    } catch (err) {
+      showError(err);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleProfiling(r: ProfilingResult) {
+    setSubmitting(true);
+    try {
+      const res = await fetch(`${apiBase}/api/v1/store/profiling`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cap_pos: r.caps.pos,
+          cap_reseller: r.caps.reseller,
+          cap_digital: r.caps.digital,
+          cap_materials: r.caps.materials,
+          seller_types: r.seller_types,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Gagal menyimpan preferensi menu");
+      }
       setDone(true);
       // Brief celebration screen, then redirect.
       setTimeout(() => {
@@ -208,7 +241,7 @@ export function SetupWizard({
             Halo, {firstName}! 👋
           </p>
           <p className="mt-1 text-sm text-neutral-600">
-            Setup toko-mu dalam 3 langkah cepat. Bisa diubah kapan saja nanti.
+            Setup toko-mu dalam 4 langkah cepat. Bisa diubah kapan saja nanti.
           </p>
         </div>
 
@@ -473,6 +506,25 @@ export function SetupWizard({
                   )}
                 </Button>
               </div>
+            </div>
+          )}
+
+          {step === 4 && (
+            <div className="flex flex-col gap-5">
+              <div>
+                <h2 className="font-display text-xl font-semibold text-neutral-900">
+                  Sesuaikan menu tokomu
+                </h2>
+                <p className="mt-1 text-sm text-neutral-600">
+                  Biar dasbor cuma menampilkan fitur yang kamu butuh. Bisa diubah
+                  lagi kapan saja di Pengaturan → Tampilan Menu.
+                </p>
+              </div>
+              <ProfilingForm
+                submitting={submitting}
+                onSubmit={handleProfiling}
+                submitLabel="Selesai & Masuk Dasbor"
+              />
             </div>
           )}
         </Card>

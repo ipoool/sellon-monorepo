@@ -105,7 +105,7 @@ export function ReceiptView({
           <div className="space-y-0.5">
             <p>No: #{order.order_number}</p>
             <p>Tgl: {formatDateTime(order.created_at ?? new Date().toISOString())}</p>
-            <p>Kasir: {cashierName}</p>
+            <p>Kasir: {order.cashier_name || cashierName}</p>
           </div>
 
           <Divider />
@@ -163,11 +163,35 @@ export function ReceiptView({
 
           <Divider />
 
-          {/* Payment */}
-          <Row
-            label={paymentLabel(order.payment_method)}
-            value={formatRupiah(order.total_cents)}
-          />
+          {/* Payment — per-method breakdown (split/EDC/QRIS) when available,
+              else a single line. Cash amount is the tendered amount, so a
+              "Kembali" line follows when there's change. */}
+          {order.payments && order.payments.length > 0 ? (
+            order.payments.map((p, i) => (
+              <div key={i}>
+                <Row label={paymentLabel(p.method)} value={formatRupiah(p.amount_cents)} />
+                {p.card_last4 ? (
+                  <p className="pl-2 text-[10px]">
+                    {p.card_brand ? `${p.card_brand} ` : ""}•••• {p.card_last4}
+                  </p>
+                ) : null}
+                {p.reference_number ? (
+                  <p className="pl-2 text-[10px]">Ref: {p.reference_number}</p>
+                ) : null}
+                {p.approval_code ? (
+                  <p className="pl-2 text-[10px]">Approval: {p.approval_code}</p>
+                ) : null}
+              </div>
+            ))
+          ) : (
+            <Row
+              label={paymentLabel(order.payment_method)}
+              value={formatRupiah(order.total_cents)}
+            />
+          )}
+          {(order.change_amount_cents ?? 0) > 0 && (
+            <Row label="Kembali" value={formatRupiah(order.change_amount_cents ?? 0)} />
+          )}
 
           <Divider />
 
@@ -232,6 +256,8 @@ function paymentLabel(method: string): string {
       return "EDC Kredit";
     case "pos_split":
       return "Split";
+    case "free":
+      return "Gratis (Poin/Diskon)";
     case "cod":
       return "COD";
     default:

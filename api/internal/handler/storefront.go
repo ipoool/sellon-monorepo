@@ -825,11 +825,11 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 			stock = variant.Stock
 		}
 
-		// Digital products have no real inventory — bytes don't run out.
-		// Skipping the check so a seller who forgets to set stock on an
-		// ebook/voucher product doesn't end up with a silently-broken
-		// store (BUG-020).
-		if p.ProductType != "digital" && stock < it.Quantity {
+		// Non-physical products (digital + course) have no real inventory —
+		// bytes/videos don't run out. Skipping the check so a seller who
+		// forgets to set stock on an ebook/voucher/course product doesn't
+		// end up with a silently-broken store (BUG-020).
+		if p.ProductType == "physical" && stock < it.Quantity {
 			response.Error(w, http.StatusBadRequest,
 				"stok "+productName+" tidak cukup")
 			return
@@ -906,26 +906,26 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 		promoID = &pid
 	}
 
-	// Cart-level digital detection. If every item is digital, we know
-	// to skip address / shipping requirements and trigger fulfillment
-	// path on payment-paid. Mixed carts (1 digital + 1 physical) are
-	// treated as physical for shipping purposes — seller still ships
-	// the physical item; the digital one gets its own download link.
+	// Cart-level non-physical detection (digital + course). If every item is
+	// non-physical, we skip address / shipping requirements and trigger the
+	// fulfillment path on payment-paid. Mixed carts (1 non-physical + 1
+	// physical) are treated as physical for shipping purposes — seller still
+	// ships the physical item; the non-physical one gets its own access link.
 	allDigital := len(items) > 0
 	for _, it := range items {
-		if it.ProductType != "digital" {
+		if it.ProductType == "physical" {
 			allDigital = false
 			break
 		}
 	}
 	if allDigital {
-		// Sanity-check: digital orders should not be billed shipping.
+		// Sanity-check: non-physical orders should not be billed shipping.
 		shippingCents = 0
 	}
 
 	if allDigital && strings.TrimSpace(req.CustomerEmail) == "" {
 		response.Error(w, http.StatusBadRequest,
-			"email pembeli wajib diisi untuk produk digital — link download dikirim ke sini")
+			"email pembeli wajib diisi untuk produk digital/kursus — link akses dikirim ke sini")
 		return
 	}
 

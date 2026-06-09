@@ -4,7 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { Trash2, Save, ArrowLeft, Plus, X, Layers, Star, Box, Download, Info, Boxes } from "lucide-react";
+import { Trash2, Save, ArrowLeft, Plus, X, Layers, Star, Box, Info, Boxes } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,6 +14,8 @@ import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { PhotoUploader } from "@/components/dashboard/photo-uploader";
+import { ProductTypeSelector } from "@/components/dashboard/product-type-selector";
+import { NonPhysicalProductForm } from "@/components/dashboard/non-physical-product-form";
 import { cn } from "@/lib/utils";
 import { showError, showSuccess } from "@/lib/toast";
 import type { Category, Material, Product, ProductDiscount, Variant } from "@/lib/types";
@@ -80,7 +82,7 @@ export function ProdukForm({ initial }: Props) {
   const [hasVariants, setHasVariants] = useState<boolean>(
     (initial?.variants?.length ?? 0) > 0,
   );
-  const [productType, setProductType] = useState<"physical" | "digital">(
+  const [productType, setProductType] = useState<"physical" | "digital" | "course">(
     initial?.product_type ?? "physical",
   );
 
@@ -135,16 +137,10 @@ export function ProdukForm({ initial }: Props) {
   const [takeawayMaterialId, setTakeawayMaterialId] = useState<string>(
     initial?.takeaway_material_id ?? "",
   );
-  const [digitalDeliveryURL, setDigitalDeliveryURL] = useState<string>(
-    initial?.digital_delivery_url ?? "",
-  );
-  const [digitalFileURL, setDigitalFileURL] = useState<string>(
-    initial?.digital_file_url ?? "",
-  );
-  const [digitalInstructions, setDigitalInstructions] = useState<string>(
-    initial?.digital_instructions ?? "",
-  );
-  const isDigital = productType === "digital";
+  // This form renders ONLY physical products — digital + course get their own
+  // dedicated form (NonPhysicalProductForm) via the early return below. Keeping
+  // isPhysical as a const lets the physical-only section guards stay unchanged.
+  const isPhysical = true;
 
   useEffect(() => {
     void (async () => {
@@ -181,9 +177,11 @@ export function ProdukForm({ initial }: Props) {
     e.preventDefault();
     setPending(true);
     const fd = new FormData(e.currentTarget);
-    const cleanVariants = hasVariants
-      ? variants.filter((v) => v.name.trim().length > 0)
-      : [];
+    // Variants only apply to physical products.
+    const cleanVariants =
+      isPhysical && hasVariants
+        ? variants.filter((v) => v.name.trim().length > 0)
+        : [];
 
     // When variants are active, the parent product's price/stock are
     // derived (min price across variants, summed stock) so the storefront
@@ -192,7 +190,7 @@ export function ProdukForm({ initial }: Props) {
     // branch - see the helper text in the form.
     let priceCents: number;
     let stock: number;
-    if (hasVariants) {
+    if (isPhysical && hasVariants) {
       if (cleanVariants.length === 0) {
         showError("Tambah minimal 1 varian (atau matikan 'Pakai varian').");
         setPending(false);
@@ -211,50 +209,34 @@ export function ProdukForm({ initial }: Props) {
       stock = Math.max(0, Number(fd.get("stock") ?? 0));
     }
 
-    // Digital products: server requires at least one delivery channel.
-    // Validate locally too so seller doesn't roundtrip just for that.
-    if (isDigital) {
-      const hasAny =
-        digitalDeliveryURL.trim() !== "" ||
-        digitalFileURL.trim() !== "" ||
-        digitalInstructions.trim() !== "";
-      if (!hasAny) {
-        showError(
-          "Produk digital butuh minimal salah satu: link delivery, file upload, atau instruksi.",
-        );
-        setPending(false);
-        return;
-      }
-    }
-
     const body = {
       category_id: categoryId,
       name: String(fd.get("name") ?? ""),
       slug: String(fd.get("slug") ?? ""),
       description: String(fd.get("description") ?? ""),
       price_cents: priceCents,
-      stock: isDigital ? 0 : stock,
-      low_stock_threshold: isDigital
-        ? 0
-        : Math.max(0, Number(fd.get("low_stock_threshold") ?? 0)),
-      weight_g: isDigital ? 0 : Math.max(0, Number(fd.get("weight_g") ?? 0)),
-      length_cm: isDigital ? 0 : Math.max(0, Number(fd.get("length_cm") ?? 0)),
-      width_cm: isDigital ? 0 : Math.max(0, Number(fd.get("width_cm") ?? 0)),
-      height_cm: isDigital ? 0 : Math.max(0, Number(fd.get("height_cm") ?? 0)),
+      stock: isPhysical ? stock : 0,
+      low_stock_threshold: isPhysical
+        ? Math.max(0, Number(fd.get("low_stock_threshold") ?? 0))
+        : 0,
+      weight_g: isPhysical ? Math.max(0, Number(fd.get("weight_g") ?? 0)) : 0,
+      length_cm: isPhysical ? Math.max(0, Number(fd.get("length_cm") ?? 0)) : 0,
+      width_cm: isPhysical ? Math.max(0, Number(fd.get("width_cm") ?? 0)) : 0,
+      height_cm: isPhysical ? Math.max(0, Number(fd.get("height_cm") ?? 0)) : 0,
       status: String(fd.get("status") ?? "active"),
       gtin: String(fd.get("gtin") ?? "").trim(),
-      takeaway_enabled: takeawayEnabled,
-      takeaway_charge_cents: takeawayEnabled
-        ? Math.max(0, Math.round(takeawayCharge)) * 100
-        : 0,
-      takeaway_material_id: takeawayEnabled ? takeawayMaterialId : "",
+      takeaway_enabled: isPhysical && takeawayEnabled,
+      takeaway_charge_cents:
+        isPhysical && takeawayEnabled ? Math.max(0, Math.round(takeawayCharge)) * 100 : 0,
+      takeaway_material_id: isPhysical && takeawayEnabled ? takeawayMaterialId : "",
       photo_urls: photoUrls,
       is_featured: fd.get("is_featured") === "on",
       product_type: productType,
-      digital_delivery_url: isDigital ? digitalDeliveryURL.trim() : "",
-      digital_file_url: isDigital ? digitalFileURL.trim() : "",
-      digital_instructions: isDigital ? digitalInstructions.trim() : "",
+      digital_delivery_url: "",
+      digital_file_url: "",
+      digital_instructions: "",
       variants: cleanVariants,
+      course_videos: [],
     };
 
     try {
@@ -279,7 +261,9 @@ export function ProdukForm({ initial }: Props) {
           credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            discounts: discounts.map((d) => ({
+            // Non-physical products have no volume discounts — send empty to
+            // clear any left over from a previous physical config.
+            discounts: (isPhysical ? discounts : []).map((d) => ({
               min_quantity: d.min_quantity,
               discount_type: d.discount_type,
               discount_value: d.discount_value,
@@ -296,10 +280,12 @@ export function ProdukForm({ initial }: Props) {
           credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            base_recipe: recipe
+            // Base recipe + product options are physical-only — cleared for
+            // digital + course products.
+            base_recipe: (isPhysical ? recipe : [])
               .filter((r) => r.material_id && r.quantity > 0)
               .map((r) => ({ material_id: r.material_id, quantity: r.quantity })),
-            groups: groups
+            groups: (isPhysical ? groups : [])
               .filter(
                 (g) =>
                   g.name.trim() && g.options.some((o) => o.name.trim()),
@@ -354,64 +340,21 @@ export function ProdukForm({ initial }: Props) {
     }
   }
 
+  // Router: digital + course render their own dedicated, purpose-built form.
+  // (All hooks above run unconditionally, so this early return is safe.)
+  if (productType !== "physical") {
+    return (
+      <NonPhysicalProductForm
+        initial={initial}
+        productType={productType}
+        onChangeType={setProductType}
+      />
+    );
+  }
+
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-5">
-      <Card>
-        <div className="mb-4">
-          <h2 className="font-semibold text-neutral-900">Tipe Produk</h2>
-          <p className="mt-0.5 text-sm text-neutral-500">
-            Pilih jenis produk. Digital melewati ongkir & alamat pengiriman dan
-            otomatis dikirim setelah pembayaran lunas.
-          </p>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {[
-            {
-              value: "physical" as const,
-              icon: Box,
-              title: "Fisik",
-              desc: "Barang yang dikirim ke alamat pembeli (kaos, makanan, kerajinan, dll.).",
-            },
-            {
-              value: "digital" as const,
-              icon: Download,
-              title: "Digital",
-              desc: "File / akses yang diserahkan via link / kode (ebook, kursus, voucher).",
-            },
-          ].map((opt) => {
-            const active = productType === opt.value;
-            const Icon = opt.icon;
-            return (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => setProductType(opt.value)}
-                className={cn(
-                  "flex items-start gap-3 rounded-lg border-2 p-4 text-left transition-colors",
-                  active
-                    ? "border-brand-500 bg-brand-50/40"
-                    : "border-neutral-200 bg-white hover:border-neutral-300",
-                )}
-              >
-                <span
-                  className={cn(
-                    "flex size-9 shrink-0 items-center justify-center rounded-md",
-                    active ? "bg-brand-100 text-brand-700" : "bg-neutral-100 text-neutral-600",
-                  )}
-                >
-                  <Icon className="size-5" aria-hidden />
-                </span>
-                <div>
-                  <p className="font-semibold text-neutral-900">{opt.title}</p>
-                  <p className="mt-1 text-xs leading-relaxed text-neutral-600">
-                    {opt.desc}
-                  </p>
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </Card>
+      <ProductTypeSelector value={productType} onChange={setProductType} />
 
       <Card>
         <div className="mb-4">
@@ -517,7 +460,7 @@ export function ProdukForm({ initial }: Props) {
               placeholder={hasVariants ? "Otomatis dari varian" : "35000"}
             />
           </div>
-          {!isDigital && (
+          {isPhysical && (
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="stock">Stok {hasVariants ? "" : "*"}</Label>
               <Input
@@ -532,7 +475,7 @@ export function ProdukForm({ initial }: Props) {
               />
             </div>
           )}
-          {!isDigital && (
+          {isPhysical && (
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="low_stock_threshold">Alert Stok Rendah</Label>
               <Input
@@ -545,14 +488,6 @@ export function ProdukForm({ initial }: Props) {
               />
               <p className="text-xs text-neutral-500">
                 Tampilkan badge &ldquo;stok rendah&rdquo; saat stok ≤ angka ini.
-              </p>
-            </div>
-          )}
-          {isDigital && (
-            <div className="flex flex-col gap-1.5 sm:col-span-2">
-              <p className="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-600">
-                Produk digital tidak butuh stok - pembeli langsung dapat akses
-                setelah bayar.
               </p>
             </div>
           )}
@@ -606,6 +541,10 @@ export function ProdukForm({ initial }: Props) {
         </label>
       </Card>
 
+      {/* Volume discounts, base recipe, serving type, and product options are
+          physical-only concepts — hidden for digital + course products. */}
+      {isPhysical && (
+        <>
       <Card>
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
@@ -638,7 +577,7 @@ export function ProdukForm({ initial }: Props) {
 
         {discounts.length === 0 ? (
           <p className="rounded-lg border border-dashed border-neutral-200 bg-neutral-50 py-6 text-center text-sm text-neutral-500">
-            Belum ada potongan volume. Klik "Tambah Tier" untuk mulai.
+            Belum ada potongan volume. Klik &ldquo;Tambah Tier&rdquo; untuk mulai.
           </p>
         ) : (
           <div className="flex flex-col gap-3">
@@ -1279,6 +1218,8 @@ export function ProdukForm({ initial }: Props) {
           </div>
         </div>
       </Card>
+        </>
+      )}
 
       <Card>
         <div className="mb-4">
@@ -1328,77 +1269,7 @@ export function ProdukForm({ initial }: Props) {
         />
       </Card>
 
-      {isDigital && (
-        <Card>
-          <div className="mb-4">
-            <h2 className="flex items-center gap-2 font-semibold text-neutral-900">
-              <Download className="size-4 text-brand-600" aria-hidden />
-              Pengiriman Digital
-            </h2>
-            <p className="mt-0.5 text-sm text-neutral-500">
-              Salah satu (atau lebih) wajib diisi. Pembeli akan lihat semua
-              info ini di halaman download setelah pembayaran lunas.
-            </p>
-          </div>
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="digital_delivery_url">Link Akses</Label>
-              <Input
-                id="digital_delivery_url"
-                value={digitalDeliveryURL}
-                onChange={(e) => setDigitalDeliveryURL(e.target.value)}
-                placeholder="https://drive.google.com/... atau https://notion.so/..."
-              />
-              <p className="text-xs text-neutral-500">
-                Link Google Drive, Notion, Dropbox, halaman kursus, dll.
-              </p>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label>File Upload (opsional)</Label>
-              {digitalFileURL ? (
-                <div className="flex items-center justify-between gap-2 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm">
-                  <a
-                    href={digitalFileURL}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="truncate font-medium text-brand-600 hover:underline"
-                  >
-                    {digitalFileURL}
-                  </a>
-                  <button
-                    type="button"
-                    onClick={() => setDigitalFileURL("")}
-                    aria-label="Hapus file"
-                    className="rounded-md p-1.5 text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-danger"
-                  >
-                    <X className="size-4" aria-hidden />
-                  </button>
-                </div>
-              ) : (
-                <PhotoUploader
-                  onUploaded={(url) => setDigitalFileURL(url)}
-                />
-              )}
-              <p className="text-xs text-neutral-500">
-                Upload langsung ke storage SellOn (PDF, zip, gambar). Maks. ~25MB.
-              </p>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="digital_instructions">Instruksi / Catatan</Label>
-              <textarea
-                id="digital_instructions"
-                rows={4}
-                value={digitalInstructions}
-                onChange={(e) => setDigitalInstructions(e.target.value)}
-                placeholder="Cara redeem kode, password unzip, instruksi akses, dll. Akan tampil di halaman download pembeli."
-                className="rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
-              />
-            </div>
-          </div>
-        </Card>
-      )}
-
-      {!isDigital && (
+      {isPhysical && (
       <Card>
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
@@ -1540,7 +1411,7 @@ export function ProdukForm({ initial }: Props) {
       </Card>
       )}
 
-      {!isDigital && (
+      {isPhysical && (
       <Card>
         <div className="mb-4">
           <h2 className="font-semibold text-neutral-900">Berat & Dimensi</h2>

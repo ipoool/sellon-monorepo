@@ -233,6 +233,88 @@ Selamat menikmati!
 	return
 }
 
+type CourseAccessData struct {
+	StoreName    string
+	OrderNumber  string
+	CustomerName string
+	Links        []DownloadLink
+}
+
+// RenderCourseAccess emails the buyer their course-viewer link(s). Unlike the
+// digital-delivery email, the link leads to an OTP-gated viewer (the buyer
+// confirms the order email + a one-time code before watching).
+func RenderCourseAccess(d CourseAccessData) (subject, text, htmlBody string) {
+	subject = fmt.Sprintf("[%s] Akses kelas pesanan #%s ✓", d.StoreName, d.OrderNumber)
+
+	var textLinks strings.Builder
+	for _, l := range d.Links {
+		textLinks.WriteString("• ")
+		textLinks.WriteString(l.Name)
+		textLinks.WriteString("\n  ")
+		textLinks.WriteString(l.URL)
+		textLinks.WriteString("\n\n")
+	}
+	text = fmt.Sprintf(`Halo %s,
+
+Terima kasih sudah membeli kelas di %s. Buka link berikut untuk mulai belajar:
+
+%s
+
+Saat membuka, kamu akan diminta memasukkan email pesanan + kode OTP yang
+dikirim ke email ini — supaya hanya kamu yang bisa akses.
+
+Selamat belajar!
+
+— %s
+`, d.CustomerName, d.StoreName, textLinks.String(), d.StoreName)
+
+	var htmlLinks strings.Builder
+	for _, l := range d.Links {
+		htmlLinks.WriteString(fmt.Sprintf(`
+<div style="margin:0 0 16px;padding:14px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;">
+  <p style="margin:0 0 8px;font-weight:600;color:#0f172a;">%s</p>
+  <a href="%s" style="display:inline-block;background:#10b981;color:#fff;padding:10px 16px;border-radius:6px;text-decoration:none;font-weight:600;font-size:14px;">Buka kelas →</a>
+</div>`,
+			html.EscapeString(l.Name),
+			html.EscapeString(l.URL),
+		))
+	}
+
+	htmlBody = wrapHTML(fmt.Sprintf(`
+<h2 style="margin:0 0 8px;font-size:20px;color:#0f172a;">Kelasmu siap diakses ✓</h2>
+<p style="margin:0 0 24px;color:#475569;">Halo <strong>%s</strong>, pesanan <strong>#%s</strong> di toko <strong>%s</strong> sudah lunas. Klik untuk mulai belajar:</p>
+%s
+<p style="margin:24px 0 0;color:#475569;font-size:13px;">Saat membuka, masukkan email pesanan + kode OTP yang kami kirim ke email ini. Link bersifat pribadi — jangan dibagikan.</p>`,
+		html.EscapeString(d.CustomerName),
+		html.EscapeString(d.OrderNumber),
+		html.EscapeString(d.StoreName),
+		htmlLinks.String(),
+	))
+	return
+}
+
+// RenderBuyerOTP emails the buyer a one-time code to unlock a course viewer.
+func RenderBuyerOTP(storeName, code string, expiryMinutes int) (subject, text, htmlBody string) {
+	subject = fmt.Sprintf("[%s] Kode akses kelas: %s", storeName, code)
+	text = fmt.Sprintf(`Kode akses kelasmu di %s:
+
+%s
+
+Berlaku %d menit. Jangan bagikan kode ini ke siapa pun.
+Kalau kamu tidak meminta kode ini, abaikan email ini.
+`, storeName, code, expiryMinutes)
+	htmlBody = wrapHTML(fmt.Sprintf(`
+<h2 style="margin:0 0 8px;font-size:20px;color:#0f172a;">Kode akses kelas</h2>
+<p style="margin:0 0 16px;color:#475569;">Masukkan kode ini untuk membuka kelasmu di <strong>%s</strong>:</p>
+<p style="margin:0 0 16px;font-size:32px;font-weight:700;letter-spacing:6px;color:#0f172a;text-align:center;">%s</p>
+<p style="margin:0;color:#475569;font-size:13px;">Berlaku %d menit. Jangan bagikan kode ini. Kalau kamu tidak memintanya, abaikan email ini.</p>`,
+		html.EscapeString(storeName),
+		html.EscapeString(code),
+		expiryMinutes,
+	))
+	return
+}
+
 // wrapHTML wraps a body fragment in a minimal email-safe shell — wide
 // WrapHTML adalah versi exported dari wrapHTML — bisa dipanggil dari
 // package lain (mis. handler) untuk re-use chrome SellOn yang sama.

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   Boxes,
   Plus,
@@ -12,6 +13,7 @@ import {
   Search,
   ChevronLeft,
   ChevronRight,
+  History,
   X,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
@@ -289,6 +291,14 @@ export function MaterialsManager({
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1">
+                      <Link
+                        href={`/materials/${m.id}`}
+                        title="Riwayat keluar/masuk"
+                        className="inline-flex items-center gap-1 rounded-md border border-neutral-200 px-2.5 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
+                      >
+                        <History className="size-3.5" aria-hidden />
+                        Riwayat
+                      </Link>
                       <button
                         onClick={() => setRestock(m)}
                         title="Restock"

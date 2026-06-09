@@ -50,6 +50,9 @@ export function ProductGrid({ products, categories }: Props) {
     const qUpper = q.toUpperCase();
     const qRaw = query.trim();
     return products.filter((p) => {
+      // Courses are online-only (access via emailed link + OTP) — they can't be
+      // delivered through an in-store POS sale, so hide them from the cashier.
+      if (p.product_type === "course") return false;
       if (activeCategory && p.category_id !== activeCategory) return false;
       if (q) {
         const barcodeVal = p.id.replace(/-/g, "").slice(0, 12).toUpperCase();

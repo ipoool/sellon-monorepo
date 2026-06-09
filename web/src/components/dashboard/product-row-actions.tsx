@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { showError, showSuccess } from "@/lib/toast";
+import { showError } from "@/lib/toast";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -22,6 +22,7 @@ const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 type Props = {
   productId: string;
   productName: string;
+  productType?: string;
   storeSlug?: string;
   quotaFull?: boolean;
   // asMenu: render as vertical menu items instead of icon row (mobile popover)
@@ -32,6 +33,7 @@ type Props = {
 export function ProductRowActions({
   productId,
   productName,
+  productType,
   storeSlug,
   quotaFull,
   asMenu = false,
@@ -71,6 +73,18 @@ export function ProductRowActions({
   function openDuplicateDialog() {
     setDuplicateName(productName + " (Salinan)");
     setShowDuplicateDialog(true);
+  }
+
+  // Course products preview the actual course-viewer layout (videos +
+  // playlist) on a dedicated page, no OTP — opened in a new tab. Other types
+  // use the in-place storefront preview dialog.
+  function handlePreview() {
+    if (productType === "course") {
+      window.open(`/products/${productId}/course-preview`, "_blank", "noopener");
+      onMenuClose?.();
+      return;
+    }
+    setShowPreview(true);
   }
 
   async function onDuplicate(name: string) {
@@ -215,7 +229,7 @@ export function ProductRowActions({
       <>
         <button
           type="button"
-          onClick={() => setShowPreview(true)}
+          onClick={handlePreview}
           className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-neutral-700 hover:bg-neutral-50"
         >
           <Eye className="size-4" aria-hidden />
@@ -258,7 +272,7 @@ export function ProductRowActions({
         <Tooltip label="Preview seperti customer">
           <button
             type="button"
-            onClick={() => setShowPreview(true)}
+            onClick={handlePreview}
             aria-label="Preview produk"
             className="inline-flex size-8 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900"
           >
