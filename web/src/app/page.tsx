@@ -11,6 +11,7 @@ import { CtaBanner } from "@/components/marketing/cta-banner";
 import { BlogPreview } from "@/components/marketing/blog-preview";
 import { ResellerSection } from "@/components/marketing/reseller-section";
 import { BeforeAfter } from "@/components/marketing/before-after";
+import { CourseSection } from "@/components/marketing/course-section";
 import { PosSection } from "@/components/marketing/pos-section";
 import { OfflineSection } from "@/components/marketing/offline-section";
 import { MetaSection } from "@/components/marketing/meta-section";
@@ -145,6 +146,7 @@ export default async function Home() {
         <TrustBar />
         <BeforeAfter />
         <Features />
+        <CourseSection />
         <PosSection />
         <OfflineSection />
         <ResellerSection />
