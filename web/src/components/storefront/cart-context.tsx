@@ -13,6 +13,8 @@ import {
 
 import type { SelectedOption } from "@/lib/types";
 
+const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+
 // Cart entries are denormalized snapshots — server re-validates price
 // and stock at checkout, so a stale cart can't underpay or oversell.
 // We persist to localStorage keyed by store slug so different stores
@@ -103,6 +105,46 @@ export function CartProvider({ storeSlug, children }: Props) {
       // Quota exceeded etc. — silent no-op.
     }
   }, [state, storeSlug]);
+
+  // Reconcile the cart's denormalized product_type against the authoritative
+  // server value once after hydration. The cart is a localStorage snapshot, so
+  // a product converted physical→digital after being added (or any stale entry)
+  // could otherwise drive the wrong checkout flow — e.g. an all-digital cart
+  // still asking for a shipping address. One-shot, fail-safe (no-op on error;
+  // unchanged if every type already matches, so no spurious persist).
+  const reconciledRef = useRef(false);
+  useEffect(() => {
+    if (!isHydrated || reconciledRef.current || state.items.length === 0) return;
+    reconciledRef.current = true;
+    const ctrl = new AbortController();
+    void fetch(`${apiBase}/api/v1/storefront/${storeSlug}`, { signal: ctrl.signal })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { products?: Array<{ id?: string; product_type?: CartItem["product_type"] }> } | null) => {
+        if (!data || !Array.isArray(data.products)) return;
+        const typeById = new Map<string, CartItem["product_type"]>();
+        for (const p of data.products) {
+          if (p && typeof p.id === "string" && p.product_type) {
+            typeById.set(p.id, p.product_type);
+          }
+        }
+        setState((prev) => {
+          let changed = false;
+          const items = prev.items.map((it) => {
+            const fresh = typeById.get(it.product_id);
+            if (fresh && fresh !== it.product_type) {
+              changed = true;
+              return { ...it, product_type: fresh };
+            }
+            return it;
+          });
+          return changed ? { items } : prev;
+        });
+      })
+      .catch(() => {
+        // Network/abort — keep the snapshot as-is (no worse than before).
+      });
+    return () => ctrl.abort();
+  }, [isHydrated, storeSlug, state.items.length]);
 
   const addItem = useCallback((item: CartItem) => {
     setState((prev) => {
