@@ -151,6 +151,7 @@ type productDTO struct {
 	TakeawayMaterialName string `json:"takeaway_material_name"`
 	AccessValidityValue  int    `json:"access_validity_value"`
 	AccessValidityUnit   string `json:"access_validity_unit"`
+	DigitalStockLimit    *int   `json:"digital_stock_limit"`
 	Variants            []variantDTO `json:"variants"`
 	// VariantsCount + VariantsStock are list-only aggregates so the dashboard
 	// "Stok" column can show "N varian · stok M" instead of the parent's
@@ -252,6 +253,7 @@ func toProductDTO(p *repository.Product, variants []repository.Variant) productD
 		TakeawayMaterialID:  uuidPtrString(p.TakeawayMaterialID),
 		AccessValidityValue: p.AccessValidityValue,
 		AccessValidityUnit:  p.AccessValidityUnit,
+		DigitalStockLimit:   p.DigitalStockLimit,
 		Variants:            vDTOs,
 		CreatedAt:           p.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
@@ -614,6 +616,7 @@ type productInput struct {
 	TakeawayMaterialID  string         `json:"takeaway_material_id"`
 	AccessValidityValue int            `json:"access_validity_value"`
 	AccessValidityUnit  string         `json:"access_validity_unit"`
+	DigitalStockLimit   *int           `json:"digital_stock_limit"`
 	Variants            []variantInput `json:"variants"`
 	CourseVideos        []courseVideoInput `json:"course_videos"`
 }
@@ -805,6 +808,23 @@ func (in productInput) sanitize() (repository.SaveProductInput, error) {
 		}
 	}
 
+	// Non-physical sales cap ("limit"/kuota): nil = unlimited. Only digital +
+	// course use it (physical products cap via real stock). A provided value is
+	// clamped to a sane non-negative range; 0 means currently sold out.
+	var stockLimit *int
+	if productType == "digital" || productType == "course" {
+		if in.DigitalStockLimit != nil {
+			v := *in.DigitalStockLimit
+			if v < 0 {
+				v = 0
+			}
+			if v > 1_000_000 {
+				v = 1_000_000
+			}
+			stockLimit = &v
+		}
+	}
+
 	return repository.SaveProductInput{
 		CategoryID: categoryID,
 		Name: in.Name, Slug: in.Slug, Description: in.Description,
@@ -823,6 +843,7 @@ func (in productInput) sanitize() (repository.SaveProductInput, error) {
 		TakeawayMaterialID:  takeawayMaterialID,
 		AccessValidityValue: validityValue,
 		AccessValidityUnit:  validityUnit,
+		DigitalStockLimit:   stockLimit,
 	}, nil
 }
 

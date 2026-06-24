@@ -4,7 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { Trash2, Save, ArrowLeft, Plus, X, Download, GraduationCap, Video, Star, Clock } from "lucide-react";
+import { Trash2, Save, ArrowLeft, Plus, X, Download, GraduationCap, Video, Star, Clock, PackageCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -82,6 +82,16 @@ export function NonPhysicalProductForm({
     month: "bulan",
     year: "tahun",
   };
+
+  // Sales cap ("kuota"). Off by default = unlimited; when on, limit holds the
+  // remaining sellable quantity (same model as physical stock). Applies to both
+  // digital + course (non-physical) products.
+  const [limitEnabled, setLimitEnabled] = useState<boolean>(
+    initial?.digital_stock_limit != null,
+  );
+  const [limitValue, setLimitValue] = useState<number>(
+    initial?.digital_stock_limit != null ? initial.digital_stock_limit : 10,
+  );
 
   useEffect(() => {
     void (async () => {
@@ -178,6 +188,8 @@ export function NonPhysicalProductForm({
       access_validity_unit: isCourse ? accessUnit : "lifetime",
       access_validity_value:
         isCourse && accessUnit !== "lifetime" ? Math.max(1, Math.round(accessValue)) : 0,
+      // Sales cap: null = unlimited, otherwise the remaining quota (>= 0).
+      digital_stock_limit: limitEnabled ? Math.max(0, Math.round(limitValue)) : null,
     };
 
     try {
@@ -558,6 +570,49 @@ export function NonPhysicalProductForm({
           </p>
         </Card>
       )}
+
+      <Card>
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <h2 className="flex items-center gap-2 font-semibold text-neutral-900">
+              <PackageCheck className="size-4 text-brand-600" aria-hidden />
+              Batasi Jumlah (Kuota)
+            </h2>
+            <p className="mt-0.5 text-sm text-neutral-500">
+              Batasi berapa banyak yang bisa terjual — cocok untuk slot terbatas,
+              early-bird, atau kuota peserta. Default tanpa batas.
+            </p>
+          </div>
+          <Switch
+            checked={limitEnabled}
+            onChange={(e) => setLimitEnabled(e.target.checked)}
+            aria-label="Aktifkan batas kuota"
+          />
+        </div>
+        {limitEnabled && (
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="digital_stock_limit" className="text-xs text-neutral-500">
+              Sisa kuota tersedia
+            </Label>
+            <Input
+              id="digital_stock_limit"
+              type="number"
+              min={0}
+              max={1000000}
+              value={limitValue}
+              onChange={(e) =>
+                setLimitValue(Math.max(0, Math.round(Number(e.target.value) || 0)))
+              }
+              className="w-40"
+            />
+            <p className="text-xs text-neutral-500">
+              {limitValue > 0
+                ? `Bisa terjual ${limitValue} lagi. Otomatis "habis" saat mencapai 0.`
+                : "Kuota 0 — produk tampil habis dan tidak bisa dibeli."}
+            </p>
+          </div>
+        )}
+      </Card>
 
       <Card>
         <div className="mb-4">

@@ -39,6 +39,9 @@ type Product = {
   photo_urls: string[];
   has_variants: boolean;
   product_type?: "physical" | "digital" | "course";
+  // track_stock=true → `stock` is a finite quantity to enforce (physical always;
+  // capped non-physical → `stock` is the remaining quota). false → unlimited.
+  track_stock?: boolean;
 };
 
 type StorefrontVariant = {
@@ -137,11 +140,11 @@ export default async function ProductDetailPage({
   const totalStock = product.has_variants
     ? variants.reduce((sum, v) => sum + v.stock, 0)
     : product.stock;
-  // Hide the stock badge for digital items (no real inventory) and for
-  // sellers using a sentinel "unlimited" stock (>= 9999) — buyers don't
-  // need a count there. Physical products still see "Stok N" / "Stok habis".
-  const hideStockBadge =
-    product.product_type !== "physical" || totalStock >= 9999;
+  // Hide the stock badge for products without a finite quantity (unlimited
+  // digital), and for sellers using a sentinel "unlimited" stock (>= 9999).
+  // Physical + capped-digital ("kuota") still see "Stok N" / "Stok habis".
+  const tracksStock = product.track_stock ?? product.product_type === "physical";
+  const hideStockBadge = !tracksStock || totalStock >= 9999;
   const minPrice = product.has_variants && variants.length > 0
     ? Math.min(...variants.map((v) => v.price_cents))
     : product.price_cents;
@@ -237,6 +240,7 @@ export default async function ProductDetailPage({
                     has_variants: product.has_variants,
                     photo_urls: product.photo_urls,
                     product_type: product.product_type,
+                    track_stock: product.track_stock,
                   }}
                   variants={variants}
                   modifiers={modifiers}

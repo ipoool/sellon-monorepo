@@ -113,6 +113,9 @@ type OrderItemInput struct {
 	UnitCents   int64
 	Quantity    int
 	ProductType string // "physical" | "digital" — when "digital", Create skips stock decrement
+	// DigitalStockLimit, when non-nil, is a non-physical product's remaining sales
+	// quota: Create atomically decrements it (oversell-safe). nil = unlimited.
+	DigitalStockLimit *int
 	// Modifiers are the chosen option snapshots for this line (already
 	// validated + priced by the handler). UnitCents already includes their
 	// price deltas.
@@ -1021,6 +1024,21 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 				rowsAffected = tag.RowsAffected()
 			}
 			if rowsAffected == 0 {
+				return nil, ErrStockInsufficient
+			}
+		} else if it.DigitalStockLimit != nil {
+			// Non-physical product with a seller-set sales cap (kuota): atomically
+			// decrement the remaining quota. 0 rows = sold out (oversell-safe even
+			// under concurrent orders). nil limit = unlimited → no decrement.
+			tag, err := tx.Exec(ctx, `
+				UPDATE products
+				SET digital_stock_limit = digital_stock_limit - $2, updated_at = now()
+				WHERE id = $1 AND digital_stock_limit >= $2
+			`, it.ProductID, it.Quantity)
+			if err != nil {
+				return nil, fmt.Errorf("decrement digital limit: %w", err)
+			}
+			if tag.RowsAffected() == 0 {
 				return nil, ErrStockInsufficient
 			}
 		}

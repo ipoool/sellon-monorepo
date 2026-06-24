@@ -133,6 +133,9 @@ export type Product = {
   // Course access validity ("masa aktif"): lifetime (value 0) or N week/month/year.
   access_validity_value?: number;
   access_validity_unit?: "lifetime" | "week" | "month" | "year";
+  // Non-physical sales cap ("kuota"): null/undefined = unlimited; otherwise the
+  // remaining sellable quantity (decrements per order, sold out at 0).
+  digital_stock_limit?: number | null;
   variants?: Variant[];
   // Aggregates surfaced by the list endpoint when has_variants=true so the
   // dashboard "Stok" column reflects per-variant edits. Zero otherwise.

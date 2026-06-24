@@ -39,6 +39,9 @@ type Props = {
     has_variants: boolean;
     photo_urls?: string[];
     product_type?: "physical" | "digital" | "course";
+    // track_stock=true → `stock` is a finite quantity to enforce (physical, or a
+    // capped non-physical product where `stock` is the remaining quota).
+    track_stock?: boolean;
   };
   variants?: StorefrontVariant[];
   modifiers?: ModifierGroup[];
@@ -86,8 +89,11 @@ export function AddToCartPanel({
 
   const isDigital = product.product_type === "digital";
   const isCourse = product.product_type === "course";
-  // Both digital + course are non-physical: unlimited stock, never out of stock.
   const isNonPhysical = product.product_type !== "physical";
+  // A product enforces a finite quantity when physical, or when a non-physical
+  // product has a seller-set sales cap ("kuota"; then `stock` = remaining). When
+  // not tracked, it's unlimited and never out of stock.
+  const tracked = product.track_stock ?? product.product_type === "physical";
   const selectedVariant = product.has_variants
     ? variants.find((v) => v.id === variantId) ?? null
     : null;
@@ -109,7 +115,7 @@ export function AddToCartPanel({
     ? selectedVariant.price_cents
     : product.price_cents;
   const unitPriceCents = baseUnit + optionDelta;
-  const availableStock = isNonPhysical
+  const availableStock = !tracked
     ? Number.MAX_SAFE_INTEGER
     : product.has_variants
       ? selectedVariant?.stock ?? 0
@@ -117,7 +123,7 @@ export function AddToCartPanel({
   const subtotal = unitPriceCents * qty;
 
   const outOfStock =
-    !isNonPhysical &&
+    tracked &&
     (product.has_variants
       ? variants.every((v) => v.stock <= 0)
       : product.stock <= 0);
@@ -333,13 +339,9 @@ export function AddToCartPanel({
             type="button"
             aria-label="Tambah"
             onClick={() =>
-              setQty((q) =>
-                isNonPhysical
-                  ? q + 1
-                  : Math.min(q + 1, availableStock || q + 1),
-              )
+              setQty((q) => Math.min(q + 1, availableStock || q + 1))
             }
-            disabled={disabled || (!isNonPhysical && qty >= availableStock)}
+            disabled={disabled || (tracked && qty >= availableStock)}
             className="flex size-8 items-center justify-center rounded-md border border-neutral-200 text-neutral-700 transition-colors hover:bg-neutral-100 disabled:opacity-40"
           >
             +
@@ -347,9 +349,11 @@ export function AddToCartPanel({
         </div>
       </div>
 
-      {!isNonPhysical && availableStock > 0 && availableStock <= 5 && (
+      {tracked && availableStock > 0 && availableStock <= 5 && (
         <p className="mt-2 text-xs font-medium text-warning">
-          Sisa stok tinggal {availableStock} pcs
+          {isNonPhysical
+            ? `Sisa kuota tinggal ${availableStock}`
+            : `Sisa stok tinggal ${availableStock} pcs`}
         </p>
       )}
 

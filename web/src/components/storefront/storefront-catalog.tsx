@@ -24,6 +24,10 @@ type StorefrontProduct = {
   photo_urls: string[];
   is_featured: boolean;
   product_type?: "physical" | "digital" | "course";
+  // track_stock=true means `stock` is a real finite quantity to enforce: always
+  // for physical, and for non-physical only when the seller set a sales cap (then
+  // `stock` carries the remaining quota). false → unlimited, `stock` ignored.
+  track_stock?: boolean;
   // Populated by GetStore for the kiosk fast-checkout option sheet.
   has_variants?: boolean;
   variants?: KioskVariant[];
@@ -35,8 +39,16 @@ type StorefrontProduct = {
 // always-available items. Physical products still show "Stok: N" or
 // "Stok habis" so buyers can plan.
 const UNLIMITED_STOCK_THRESHOLD = 9999;
-function shouldHideStock(p: { product_type?: string; stock: number }): boolean {
-  return p.product_type !== "physical" || p.stock >= UNLIMITED_STOCK_THRESHOLD;
+function shouldHideStock(p: {
+  product_type?: string;
+  stock: number;
+  track_stock?: boolean;
+}): boolean {
+  // Show the stock/sold-out badge only for products that enforce a finite
+  // quantity. track_stock comes from the server (true for physical + capped
+  // digital); the ?? fallback keeps old behavior if it's ever absent.
+  const tracked = p.track_stock ?? p.product_type === "physical";
+  return !tracked || p.stock >= UNLIMITED_STOCK_THRESHOLD;
 }
 
 type StorefrontCategory = {

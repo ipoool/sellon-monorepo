@@ -152,15 +152,13 @@ export function CartProvider({ storeSlug, children }: Props) {
       const existing = prev.items.find((x) => itemKey(x) === k);
       let nextItems: CartItem[];
       if (existing) {
-        // Same product+variant → bump qty, clamp to available stock for
-        // physical items. Non-physical (digital/course) has unlimited stock.
-        const newQty =
-          existing.product_type !== "physical"
-            ? existing.qty + item.qty
-            : Math.min(
-                existing.qty + item.qty,
-                existing.available_stock || existing.qty + item.qty,
-              );
+        // Same product+variant → bump qty, clamped to available_stock. That cap
+        // is the per-line finite quantity (physical stock, or a capped digital's
+        // remaining quota); 0/falsy means unlimited (uncapped non-physical).
+        const newQty = Math.min(
+          existing.qty + item.qty,
+          existing.available_stock || existing.qty + item.qty,
+        );
         nextItems = prev.items.map((x) =>
           itemKey(x) === k ? { ...x, qty: newQty } : x,
         );
@@ -178,10 +176,7 @@ export function CartProvider({ storeSlug, children }: Props) {
           acc.push(x);
           return acc;
         }
-        const nextQty =
-          x.product_type !== "physical"
-            ? Math.max(1, qty)
-            : Math.max(1, Math.min(qty, x.available_stock || qty));
+        const nextQty = Math.max(1, Math.min(qty, x.available_stock || qty));
         if (nextQty > 0) acc.push({ ...x, qty: nextQty });
         return acc;
       }, []);

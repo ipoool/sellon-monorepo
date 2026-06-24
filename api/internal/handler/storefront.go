@@ -194,6 +194,12 @@ type publicProductDTO struct {
 	IsFeatured  bool     `json:"is_featured"`
 	HasVariants bool     `json:"has_variants"`
 	ProductType string   `json:"product_type"` // "physical" | "digital"
+	// TrackStock = the product enforces a finite quantity (Stock is meaningful):
+	// always true for physical; for non-physical only when the seller set a sales
+	// cap (digital_stock_limit). When false, Stock is unlimited and ignored. This
+	// lets the storefront's existing sold-out/badge logic work for capped digital
+	// products by treating Stock as the remaining quota.
+	TrackStock bool `json:"track_stock"`
 	// Variants is populated only by the list endpoint (GetStore) for products
 	// with has_variants=true, so the self-order kiosk can pick a variant inline
 	// without a per-product detail fetch. Omitted for non-variant products.
@@ -463,12 +469,26 @@ func toPublicProduct(p *repository.Product) publicProductDTO {
 	if productType == "" {
 		productType = "physical"
 	}
+	// Non-physical products are unlimited unless the seller set a sales cap.
+	// When capped, expose the remaining quota via Stock + TrackStock=true so the
+	// storefront's sold-out/badge logic applies; otherwise Stock is meaningless.
+	stockOut := p.Stock
+	trackStock := true
+	if productType != "physical" {
+		if p.DigitalStockLimit != nil {
+			stockOut = *p.DigitalStockLimit
+		} else {
+			stockOut = 0
+			trackStock = false
+		}
+	}
 	return publicProductDTO{
 		ID: p.ID.String(), CategoryID: categoryID,
 		Name: p.Name, Slug: p.Slug, Description: p.Description,
-		PriceCents: p.PriceCents, Stock: p.Stock, PhotoURLs: p.PhotoURLs,
+		PriceCents: p.PriceCents, Stock: stockOut, PhotoURLs: p.PhotoURLs,
 		IsFeatured: p.IsFeatured, HasVariants: p.HasVariants,
 		ProductType: productType,
+		TrackStock:  trackStock,
 	}
 }
 
@@ -835,6 +855,15 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 
+		// Non-physical products may carry a seller-set sales cap (kuota). When
+		// set, enforce it like stock; the atomic decrement in Create is the
+		// authoritative oversell guard (this is the early, friendly check).
+		if p.ProductType != "physical" && p.DigitalStockLimit != nil && *p.DigitalStockLimit < it.Quantity {
+			response.Error(w, http.StatusBadRequest,
+				"kuota "+productName+" sudah habis")
+			return
+		}
+
 		// Resolve modifier options: validate against the product, recompute
 		// price from DB (never trust client deltas), capture snapshots.
 		var optionSnaps []repository.OptionSnapshot
@@ -858,14 +887,15 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 		}
 
 		items = append(items, repository.OrderItemInput{
-			ProductID:   p.ID,
-			VariantID:   variantID,
-			ProductName: productName,
-			VariantName: variantName,
-			UnitCents:   unitCents,
-			Quantity:    it.Quantity,
-			ProductType: p.ProductType,
-			Modifiers:   optionSnaps,
+			ProductID:         p.ID,
+			VariantID:         variantID,
+			ProductName:       productName,
+			VariantName:       variantName,
+			UnitCents:         unitCents,
+			Quantity:          it.Quantity,
+			ProductType:       p.ProductType,
+			DigitalStockLimit: p.DigitalStockLimit,
+			Modifiers:         optionSnaps,
 		})
 	}
 
