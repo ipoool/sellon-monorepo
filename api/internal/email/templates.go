@@ -167,6 +167,66 @@ Buka dasbor:
 	return
 }
 
+// OrderCreatedData drives the buyer-facing confirmation email sent right after
+// checkout, with a CTA to the public order page where they pay + track status.
+type OrderCreatedData struct {
+	StoreName     string
+	OrderNumber   string
+	CustomerName  string
+	TotalCents    int64
+	ItemSummary   string // pre-formatted, one line per item
+	PaymentMethod string
+	OrderURL      string // public /{slug}/order/{number} page
+}
+
+func RenderOrderCreated(d OrderCreatedData) (subject, text, htmlBody string) {
+	subject = fmt.Sprintf("[%s] Pesanan #%s diterima — selesaikan pembayaran",
+		d.StoreName, d.OrderNumber)
+
+	text = fmt.Sprintf(`Halo %s,
+
+Terima kasih! Pesananmu di %s sudah kami terima.
+
+Nomor pesanan : #%s
+Metode bayar  : %s
+Total         : %s
+
+Detail produk:
+%s
+
+Lanjutkan pembayaran & lacak status pesanan di sini:
+%s
+
+— %s
+`,
+		d.CustomerName, d.StoreName, d.OrderNumber, d.PaymentMethod,
+		RenderRupiah(d.TotalCents), d.ItemSummary, d.OrderURL, d.StoreName)
+
+	htmlBody = wrapHTML(fmt.Sprintf(`
+<h2 style="margin:0 0 8px;font-size:20px;color:#0f172a;">Pesanan diterima 🎉</h2>
+<p style="margin:0 0 24px;color:#475569;">Halo <strong>%s</strong>, terima kasih sudah memesan di <strong>%s</strong>. Selesaikan pembayaran lewat tombol di bawah.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%%;border-collapse:collapse;background:#f8fafc;border-radius:8px;padding:16px;">
+  <tr><td style="padding:6px 12px;color:#64748b;">No. pesanan</td><td style="padding:6px 12px;font-weight:600;color:#0f172a;">#%s</td></tr>
+  <tr><td style="padding:6px 12px;color:#64748b;">Metode bayar</td><td style="padding:6px 12px;color:#0f172a;">%s</td></tr>
+  <tr><td style="padding:6px 12px;color:#64748b;">Total</td><td style="padding:6px 12px;font-weight:700;color:#0f172a;">%s</td></tr>
+</table>
+<h3 style="margin:24px 0 8px;font-size:14px;text-transform:uppercase;letter-spacing:0.05em;color:#64748b;">Produk</h3>
+<pre style="margin:0;white-space:pre-wrap;font-family:inherit;color:#1e293b;background:#f8fafc;padding:12px;border-radius:6px;">%s</pre>
+<p style="margin:32px 0 0;text-align:center;">
+  <a href="%s" style="display:inline-block;background:#10b981;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600;">Lihat &amp; Bayar Pesanan</a>
+</p>
+<p style="margin:16px 0 0;text-align:center;color:#94a3b8;font-size:13px;">Di halaman itu kamu bisa lihat instruksi pembayaran, upload bukti transfer, dan lacak status pesanan.</p>`,
+		html.EscapeString(d.CustomerName),
+		html.EscapeString(d.StoreName),
+		html.EscapeString(d.OrderNumber),
+		html.EscapeString(d.PaymentMethod),
+		html.EscapeString(RenderRupiah(d.TotalCents)),
+		html.EscapeString(d.ItemSummary),
+		html.EscapeString(d.OrderURL),
+	))
+	return
+}
+
 // === Digital delivery ===
 
 type DownloadLink struct {

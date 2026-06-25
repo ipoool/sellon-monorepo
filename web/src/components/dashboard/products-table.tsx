@@ -214,7 +214,7 @@ export function ProductsTable({
                     <Badge variant={statusBadge[p.status].variant}>
                       {statusBadge[p.status].label}
                     </Badge>
-                    {p.product_type !== "digital" && !p.has_variants && p.low_stock_threshold > 0 && p.stock <= p.low_stock_threshold && p.stock > 0 && (
+                    {p.product_type === "physical" && !p.has_variants && p.low_stock_threshold > 0 && p.stock <= p.low_stock_threshold && p.stock > 0 && (
                       <Badge variant="warning">Stok rendah</Badge>
                     )}
                     {p.discounts && p.discounts.length > 0 && (
@@ -225,9 +225,12 @@ export function ProductsTable({
                     )}
                   </div>
                   <p className="mt-0.5 text-xs text-neutral-500">
-                    {p.product_type === "digital" ? "Digital" :
-                      p.has_variants ? `${p.variants_count ?? 0} varian · stok ${p.variants_stock ?? 0}` :
-                      `Stok: ${p.stock}`}
+                    {p.product_type !== "physical"
+                      ? (p.digital_stock_limit != null
+                          ? `Kuota: ${p.digital_stock_limit}`
+                          : p.product_type === "course" ? "Kursus" : "Digital")
+                      : p.has_variants ? `${p.variants_count ?? 0} varian · stok ${p.variants_stock ?? 0}`
+                      : `Stok: ${p.stock}`}
                   </p>
                 </div>
                 {/* Mobile: popover berisi semua actions */}
@@ -334,14 +337,18 @@ export function ProductsTable({
                   </td>
                   <td className="px-5 py-3">
                     <div className="flex items-center gap-2">
-                      {p.product_type === "digital" ? (
-                        <span className="text-neutral-500">—</span>
+                      {p.product_type !== "physical" ? (
+                        p.digital_stock_limit != null ? (
+                          <span className="text-neutral-700">Kuota: {p.digital_stock_limit}</span>
+                        ) : (
+                          <span className="text-neutral-500">—</span>
+                        )
                       ) : p.has_variants ? (
                         <span className="text-neutral-700">{p.variants_count ?? 0} varian · stok {p.variants_stock ?? 0}</span>
                       ) : (
                         <span className="text-neutral-700">{p.stock}</span>
                       )}
-                      {p.product_type !== "digital" && !p.has_variants && p.low_stock_threshold > 0 && p.stock <= p.low_stock_threshold && p.stock > 0 && (
+                      {p.product_type === "physical" && !p.has_variants && p.low_stock_threshold > 0 && p.stock <= p.low_stock_threshold && p.stock > 0 && (
                         <Badge variant="warning">Stok rendah</Badge>
                       )}
                     </div>

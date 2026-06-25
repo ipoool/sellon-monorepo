@@ -51,6 +51,12 @@ function shouldHideStock(p: {
   return !tracked || p.stock >= UNLIMITED_STOCK_THRESHOLD;
 }
 
+// Label for the finite-quantity badge: physical products show "Stok"; non-physical
+// (digital/course) show "Kuota". Same underlying number — the BE tracks it as stock.
+function stockWord(p: { product_type?: string }): string {
+  return p.product_type === "physical" ? "Stok" : "Kuota";
+}
+
 type StorefrontCategory = {
   id: string;
   name: string;
@@ -474,7 +480,7 @@ function ProductCard({
         </p>
         {!shouldHideStock(p) && (
           <p className="mt-1 text-xs text-neutral-500">
-            {p.stock > 0 ? `Stok: ${p.stock}` : "Stok habis"}
+            {p.stock > 0 ? `${stockWord(p)}: ${p.stock}` : `${stockWord(p)} habis`}
           </p>
         )}
       </div>
@@ -720,7 +726,7 @@ function ProductListItem({
           </p>
           {!shouldHideStock(p) && (
             <p className="text-xs text-neutral-500">
-              {p.stock > 0 ? `Stok: ${p.stock}` : "Stok habis"}
+              {p.stock > 0 ? `${stockWord(p)}: ${p.stock}` : `${stockWord(p)} habis`}
             </p>
           )}
         </div>
@@ -808,7 +814,7 @@ function ProductHeroCard({
                   forceMobile ? "text-[10px]" : "text-xs",
                 )}
               >
-                Stok: {p.stock}
+                {stockWord(p)}: {p.stock}
               </p>
             )}
           </div>
@@ -1037,7 +1043,7 @@ function ProductFeedCard({
             {formatRupiah(p.price_cents)}
           </p>
           {!shouldHideStock(p) && p.stock > 0 && (
-            <p className="text-xs text-neutral-500">Stok: {p.stock}</p>
+            <p className="text-xs text-neutral-500">{stockWord(p)}: {p.stock}</p>
           )}
         </div>
       </div>
@@ -1248,7 +1254,7 @@ function ProductKatalogCard({ p, storeSlug }: { p: StorefrontProduct; storeSlug:
         <div className="mt-auto flex items-center justify-between gap-2">
           <p className="font-display text-base font-bold text-neutral-900">{formatRupiah(p.price_cents)}</p>
           {!shouldHideStock(p) && p.stock > 0 && (
-            <span className="text-xs text-neutral-400">Stok {p.stock}</span>
+            <span className="text-xs text-neutral-400">{stockWord(p)} {p.stock}</span>
           )}
         </div>
       </div>
@@ -1286,7 +1292,7 @@ function ProductPosterCard({ p, storeSlug }: { p: StorefrontProduct; storeSlug: 
         <p className="mt-1.5 font-display text-lg font-bold text-white/95">{formatRupiah(p.price_cents)}</p>
         {!shouldHideStock(p) && p.stock === 0 && (
           <span className="mt-1 inline-block rounded-full bg-white/20 px-2.5 py-0.5 text-xs font-medium text-white backdrop-blur-sm">
-            Stok habis
+            {stockWord(p)} habis
           </span>
         )}
       </div>

@@ -53,7 +53,10 @@ type StorefrontHandler struct {
 	storage     *storage.SupabaseClient
 	auditLog    *audit.Logger
 	webOrigin   string
-	logger      *slog.Logger
+	// orderExpiryHours mirrors cfg.OrderExpiryHours so the buyer order page can
+	// show an accurate "bayar sebelum …" deadline. 0 = expiry disabled.
+	orderExpiryHours int
+	logger           *slog.Logger
 }
 
 func NewStorefrontHandler(
@@ -74,6 +77,7 @@ func NewStorefrontHandler(
 	storageCli *storage.SupabaseClient,
 	auditLog *audit.Logger,
 	webOrigin string,
+	orderExpiryHours int,
 	logger *slog.Logger,
 ) *StorefrontHandler {
 	return &StorefrontHandler{
@@ -89,7 +93,8 @@ func NewStorefrontHandler(
 		mailer: mailer, twilio: twilio,
 		storage:  storageCli,
 		auditLog: auditLog, webOrigin: webOrigin,
-		logger: logger,
+		orderExpiryHours: orderExpiryHours,
+		logger:           logger,
 	}
 }
 
@@ -855,12 +860,12 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 
-		// Non-physical products may carry a seller-set sales cap (kuota). When
-		// set, enforce it like stock; the atomic decrement in Create is the
+		// Non-physical products may carry a seller-set limit. The BE tracks it as
+		// stock, but buyers see "kuota". The atomic decrement in Create is the
 		// authoritative oversell guard (this is the early, friendly check).
 		if p.ProductType != "physical" && p.DigitalStockLimit != nil && *p.DigitalStockLimit < it.Quantity {
 			response.Error(w, http.StatusBadRequest,
-				"kuota "+productName+" sudah habis")
+				"kuota "+productName+" habis")
 			return
 		}
 
@@ -1103,6 +1108,10 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 	// disconnected buyer doesn't cancel the lookup.
 	go h.emailNewOrderToSeller(store, order, items)
 
+	// Email the buyer their order + a link to the payment / status page.
+	// Best-effort, only when they left an email at checkout.
+	go h.emailOrderCreatedToBuyer(store, order, items)
+
 	response.JSON(w, http.StatusCreated, map[string]any{
 		"order_id":     order.ID.String(),
 		"order_number": order.OrderNumber,
@@ -1160,6 +1169,49 @@ func (h *StorefrontHandler) emailNewOrderToSeller(
 		Text:     text,
 		HTML:     htmlBody,
 		Category: "order_created",
+	})
+}
+
+// emailOrderCreatedToBuyer sends the buyer a confirmation right after checkout
+// with a CTA to the public order page where they pay + track. Best-effort:
+// skipped when the buyer left no email or the mailer is unconfigured.
+func (h *StorefrontHandler) emailOrderCreatedToBuyer(
+	store *repository.Store,
+	order *repository.Order,
+	items []repository.OrderItemInput,
+) {
+	if !h.mailer.Configured() || strings.TrimSpace(order.CustomerEmail) == "" {
+		return
+	}
+
+	// One-line-per-item summary, same formatting as the seller email.
+	var sb strings.Builder
+	for _, it := range items {
+		name := it.ProductName
+		if it.VariantName != "" {
+			name += " (" + it.VariantName + ")"
+		}
+		fmtLine(&sb, it.Quantity, name, it.UnitCents*int64(it.Quantity))
+	}
+
+	orderURL := strings.TrimRight(h.webOrigin, "/") + "/" + store.Slug + "/order/" + order.OrderNumber
+
+	subject, text, htmlBody := email.RenderOrderCreated(email.OrderCreatedData{
+		StoreName:     store.Name,
+		OrderNumber:   order.OrderNumber,
+		CustomerName:  order.CustomerName,
+		TotalCents:    order.TotalCents,
+		ItemSummary:   sb.String(),
+		PaymentMethod: order.PaymentMethod,
+		OrderURL:      orderURL,
+	})
+	h.mailer.Send(email.Message{
+		To:       order.CustomerEmail,
+		ToName:   order.CustomerName,
+		Subject:  subject,
+		Text:     text,
+		HTML:     htmlBody,
+		Category: "order_created_buyer",
 	})
 }
 
@@ -1272,6 +1324,22 @@ func (h *StorefrontHandler) GetOrder(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusNotFound, "pesanan tidak ditemukan")
 		return
 	}
+
+	// Lazy expiry: if this order has blown past its payment deadline, cancel it
+	// now (releasing stock + kuota + promo) so the buyer sees the final status
+	// immediately on load instead of waiting for the periodic worker tick.
+	if h.orderExpiryHours > 0 &&
+		order.Status == "pending" &&
+		order.PaymentStatus == "unpaid" &&
+		strings.TrimSpace(order.PaymentProofURL) == "" &&
+		time.Now().After(order.CreatedAt.Add(time.Duration(h.orderExpiryHours)*time.Hour)) {
+		if cErr := h.orders.Cancel(r.Context(), store.ID, order.ID, "Kadaluwarsa — tidak dibayar"); cErr == nil {
+			if updated, fErr := h.orders.FindByOrderNumber(r.Context(), store.ID, orderNum); fErr == nil && updated != nil {
+				order = updated
+			}
+		}
+	}
+
 	items, err := h.orders.ListItems(r.Context(), order.ID)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "internal error")
@@ -1300,6 +1368,19 @@ func (h *StorefrontHandler) GetOrder(w http.ResponseWriter, r *http.Request) {
 			BankName: b.BankName, HolderName: b.HolderName, AccountNo: b.AccountNo,
 			IsPrimary: b.IsPrimary, QRISURL: b.QRISURL,
 		})
+	}
+
+	// payment_expires_at: the deadline the auto-expiry worker uses, surfaced so
+	// the buyer page can show an accurate countdown. Empty unless the order is
+	// still genuinely expirable (pending + unpaid + no proof, worker enabled).
+	paymentExpiresAt := ""
+	if h.orderExpiryHours > 0 &&
+		order.Status == "pending" &&
+		order.PaymentStatus == "unpaid" &&
+		strings.TrimSpace(order.PaymentProofURL) == "" {
+		paymentExpiresAt = order.CreatedAt.
+			Add(time.Duration(h.orderExpiryHours) * time.Hour).
+			Format("2006-01-02T15:04:05Z07:00")
 	}
 
 	response.JSON(w, http.StatusOK, map[string]any{
@@ -1331,6 +1412,7 @@ func (h *StorefrontHandler) GetOrder(w http.ResponseWriter, r *http.Request) {
 			"payment_proof_url":  order.PaymentProofURL,
 			"payment_proof_note": order.PaymentProofNote,
 			"created_at":         order.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			"payment_expires_at": paymentExpiresAt,
 			"items":              itemsOut,
 		},
 		"bank_accounts": banksOut,

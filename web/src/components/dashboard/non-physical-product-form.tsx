@@ -576,10 +576,10 @@ export function NonPhysicalProductForm({
           <div>
             <h2 className="flex items-center gap-2 font-semibold text-neutral-900">
               <PackageCheck className="size-4 text-brand-600" aria-hidden />
-              Batasi Jumlah (Kuota)
+              Kuota
             </h2>
             <p className="mt-0.5 text-sm text-neutral-500">
-              Batasi berapa banyak yang bisa terjual — cocok untuk slot terbatas,
+              Batasi jumlah yang bisa terjual — cocok untuk slot terbatas,
               early-bird, atau kuota peserta. Default tanpa batas.
             </p>
           </div>
@@ -607,7 +607,7 @@ export function NonPhysicalProductForm({
             />
             <p className="text-xs text-neutral-500">
               {limitValue > 0
-                ? `Bisa terjual ${limitValue} lagi. Otomatis "habis" saat mencapai 0.`
+                ? `Bisa terjual ${limitValue} lagi. Otomatis "habis" saat kuota 0.`
                 : "Kuota 0 — produk tampil habis dan tidak bisa dibeli."}
             </p>
           </div>

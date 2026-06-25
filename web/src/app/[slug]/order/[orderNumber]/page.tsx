@@ -6,6 +6,7 @@ import { ArrowLeft, CheckCircle2, Clock } from "lucide-react";
 import { Container } from "@/components/layout/container";
 import { Badge } from "@/components/ui/badge";
 import { BuyerPaymentPanel } from "@/components/storefront/buyer-payment-panel";
+import { PaymentExpiryNotice } from "@/components/storefront/payment-expiry-notice";
 import { MetaPurchaseTracker } from "@/components/storefront/meta-purchase-tracker";
 import { formatRupiah, formatDateTimeID } from "@/lib/format";
 
@@ -45,6 +46,9 @@ type BuyerOrder = {
   payment_url: string;
   payment_proof_url?: string;
   created_at: string;
+  // Absolute auto-cancel deadline (created_at + ORDER_EXPIRY_HOURS); empty unless
+  // the order is still expirable (unpaid, no proof, worker enabled).
+  payment_expires_at?: string;
   items: BuyerOrderItem[];
 };
 
@@ -150,7 +154,9 @@ export default async function BuyerOrderPage({
       <main className="py-6 lg:py-10">
         <Container>
           <div className="mx-auto max-w-3xl">
-            {/* Status banner */}
+            {/* Status banner — hidden while the merged expiry banner below is
+                shown, so the buyer doesn't see two "Selesaikan pembayaran" cards. */}
+            {!order.payment_expires_at && (
             <div
               className={
                 isPaid
@@ -182,6 +188,13 @@ export default async function BuyerOrderPage({
                 </p>
               </div>
             </div>
+            )}
+
+            {/* Merged payment + auto-cancel countdown banner — shown instead of
+                the status banner above while the order can still expire. */}
+            {order.payment_expires_at && (
+              <PaymentExpiryNotice expiresAt={order.payment_expires_at} />
+            )}
 
             {/* Order summary */}
             <div className="rounded-xl border border-neutral-200 bg-white p-6 shadow-card">

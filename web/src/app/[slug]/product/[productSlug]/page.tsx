@@ -145,6 +145,9 @@ export default async function ProductDetailPage({
   // Physical + capped-digital ("kuota") still see "Stok N" / "Stok habis".
   const tracksStock = product.track_stock ?? product.product_type === "physical";
   const hideStockBadge = !tracksStock || totalStock >= 9999;
+  // Physical shows "Stok"; non-physical (digital/course) shows "Kuota" — same
+  // number, the BE tracks it as stock either way.
+  const stockWord = product.product_type === "physical" ? "Stok" : "Kuota";
   const minPrice = product.has_variants && variants.length > 0
     ? Math.min(...variants.map((v) => v.price_cents))
     : product.price_cents;
@@ -195,9 +198,9 @@ export default async function ProductDetailPage({
                   <div className="flex flex-wrap items-center gap-2">
                     {!hideStockBadge &&
                       (totalStock > 0 ? (
-                        <Badge variant="success">Stok {totalStock}</Badge>
+                        <Badge variant="success">{stockWord} {totalStock}</Badge>
                       ) : (
-                        <Badge variant="warning">Stok habis</Badge>
+                        <Badge variant="warning">{stockWord} habis</Badge>
                       ))}
                     {product.has_variants && (
                       <Badge variant="brand">{variants.length} varian</Badge>

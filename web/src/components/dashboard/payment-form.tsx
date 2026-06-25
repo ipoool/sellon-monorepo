@@ -81,23 +81,43 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
   function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
-    void doSave({
-      server_key: String(fd.get("server_key") ?? "").trim(),
-      client_key: String(fd.get("client_key") ?? "").trim(),
-    });
+    const server_key = String(fd.get("server_key") ?? "").trim();
+    const client_key = String(fd.get("client_key") ?? "").trim();
+    // Midtrans is optional — a seller may only use manual transfer / QRIS. But if
+    // they start configuring it fresh, both keys must come together (the gateway
+    // needs the server key; Snap needs the client key).
+    if (!hasStoredKey && (server_key !== "" || client_key !== "")) {
+      if (!server_key) {
+        showError("Server Key wajib diisi untuk mengaktifkan Midtrans");
+        return;
+      }
+      if (!client_key) {
+        showError("Client Key wajib diisi untuk mengaktifkan Midtrans");
+        return;
+      }
+    }
+    void doSave({ server_key, client_key });
   }
 
-  async function doSave(body: Record<string, unknown>) {
+  async function doSave(body: { server_key: string; client_key: string }) {
     setPending(true);
     try {
-      const res = await fetch(`${apiBase}/api/v1/payments/midtrans`, {
-        method: "PUT",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      // Only hit the Midtrans endpoint when there's something to save there: a
+      // new/updated key, or an existing config to keep. A seller who only manages
+      // bank/QRIS (never configured Midtrans) skips it, so the backend's
+      // "Server Key wajib diisi" guard can't block their Simpan.
+      const touchMidtrans =
+        hasStoredKey || body.server_key !== "" || body.client_key !== "";
+      if (touchMidtrans) {
+        const res = await fetch(`${apiBase}/api/v1/payments/midtrans`, {
+          method: "PUT",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      }
       // Flush bank-account drafts AFTER the Midtrans save so one Simpan covers
       // everything on the Pembayaran page.
       if (banksRef.current) {
@@ -246,23 +266,22 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
             </a>
           </div>
           <p className="mt-1.5 text-sm text-neutral-500">
-            Dana hasil penjualan langsung masuk ke rekeningmu — kami tidak pernah pegang uang pembeli.
+            Dana hasil penjualan langsung masuk ke rekeningmu — kami tidak pernah pegang uang pembeli.{" "}
+            <span className="text-neutral-400">
+              Opsional — lewati saja kalau cukup pakai transfer manual / QRIS di bawah.
+            </span>
           </p>
 
           {/* API Keys */}
           <div className="mt-5 flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="server_key">
-                Server Key
-                <span className="ml-1 text-danger">*</span>
-              </Label>
+              <Label htmlFor="server_key">Server Key</Label>
               <div className="flex h-10 items-center gap-2 rounded-lg border border-neutral-200 bg-white px-3 transition-colors focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-500/30">
                 <Lock className="size-4 shrink-0 text-neutral-400" aria-hidden />
                 <input
                   id="server_key"
                   name="server_key"
                   type="password"
-                  required={!hasStoredKey}
                   placeholder={
                     hasStoredKey
                       ? maskedKey || "•••••••• tersimpan"
@@ -279,14 +298,10 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="client_key">
-                Client Key
-                <span className="ml-1 text-danger">*</span>
-              </Label>
+              <Label htmlFor="client_key">Client Key</Label>
               <Input
                 id="client_key"
                 name="client_key"
-                required
                 defaultValue={initial?.client_key ?? ""}
                 placeholder="Mid-client-..."
                 className="font-mono text-xs"

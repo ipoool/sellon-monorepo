@@ -118,7 +118,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 		stores, products, variants, orders, bankAccounts, categories, promos, gateways,
 		encryptor, midtransClient,
 		subscriptions, planRepo, users, waTemplates, modifierRepo, tableRepo, broker, rajaOngkir, mailer, twilioClient,
-		storageClient, auditLogger, publicWebURL, logger,
+		storageClient, auditLogger, publicWebURL, cfg.OrderExpiryHours, logger,
 	)
 	orderStreamHandler := handler.NewOrderStreamHandler(stores, broker, logger)
 	citiesHandler := handler.NewCitiesHandler(rajaOngkir, logger)

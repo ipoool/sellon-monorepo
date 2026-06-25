@@ -68,6 +68,14 @@ func main() {
 	renewURL := cfg.PrimaryWebOrigin() + "/settings/subscription"
 	scheduler.NewSubscriptionExpiryJob(subs, reports, mailer, expiryGen, renewURL, logger).Start(ctx)
 
+	// Auto-release stale unpaid orders (releases stock + digital kuota + promo).
+	// Disabled when ORDER_EXPIRY_HOURS=0.
+	if cfg.OrderExpiryHours > 0 {
+		orders := repository.NewOrderRepo(pool)
+		ttl := time.Duration(cfg.OrderExpiryHours) * time.Hour
+		scheduler.NewOrderExpiryJob(orders, ttl, logger).Start(ctx)
+	}
+
 	slog.Info("server started", "port", cfg.Port, "env", cfg.Env)
 
 	stop := make(chan os.Signal, 1)

@@ -84,6 +84,12 @@ type Config struct {
 	// CnameTarget is the DNS CNAME value sellers must point their custom
 	// domain at. Shown on the settings/domain page. Defaults to cname.sellon.id.
 	CnameTarget string
+
+	// OrderExpiryHours: a 'pending'/'unpaid' order with no payment proof that
+	// is older than this many hours gets auto-cancelled by the order-expiry
+	// worker, releasing its stock + digital kuota + promo allocation. Default
+	// 1. Set to 0 to disable the worker entirely.
+	OrderExpiryHours int
 }
 
 func Load() (*Config, error) {
@@ -102,6 +108,7 @@ func Load() (*Config, error) {
 	v.SetDefault("from_name", "SellOn")
 	v.SetDefault("postgres_sslmode", "disable")
 	v.SetDefault("cname_target", "cname.sellon.id")
+	v.SetDefault("order_expiry_hours", 1)
 
 	cfg := &Config{
 		Port:           v.GetString("api_port"),
@@ -141,6 +148,7 @@ func Load() (*Config, error) {
 		TwilioWhatsAppFrom:        v.GetString("twilio_whatsapp_from"),
 		AnthropicAPIKey:           v.GetString("anthropic_api_key"),
 		CnameTarget:               v.GetString("cname_target"),
+		OrderExpiryHours:          v.GetInt("order_expiry_hours"),
 	}
 
 	if cfg.JWTSecret == "" {

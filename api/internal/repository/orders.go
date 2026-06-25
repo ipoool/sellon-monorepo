@@ -596,6 +596,22 @@ func (r *OrderRepo) Cancel(ctx context.Context, storeID, id uuid.UUID, reason st
 		return fmt.Errorf("restore variant stock: %w", err)
 	}
 
+	// Restore the digital "kuota" (sales cap) for non-physical line items.
+	// Only products that still have a limit set (digital_stock_limit IS NOT
+	// NULL) — if the seller switched it off since the order, it's unlimited
+	// now and there's nothing to give back.
+	if _, err := tx.Exec(ctx, `
+		UPDATE products p
+		SET digital_stock_limit = p.digital_stock_limit + oi.quantity, updated_at = now()
+		FROM order_items oi
+		WHERE oi.order_id = $1
+		  AND oi.product_id = p.id
+		  AND oi.product_type <> 'physical'
+		  AND p.digital_stock_limit IS NOT NULL
+	`, id); err != nil {
+		return fmt.Errorf("restore digital kuota: %w", err)
+	}
+
 	// Return the promo allocation back to its pool. Mirrors the stock
 	// restore above — sellers running scarcity-style campaigns shouldn't
 	// have their quota burned by cancelled orders. GREATEST guards against
@@ -708,6 +724,17 @@ func (r *OrderRepo) Refund(ctx context.Context, storeID, id uuid.UUID, amountCen
 			return fmt.Errorf("restore variant stock on refund: %w", err)
 		}
 		if _, err := tx.Exec(ctx, `
+			UPDATE products p
+			SET digital_stock_limit = p.digital_stock_limit + oi.quantity, updated_at = now()
+			FROM order_items oi
+			WHERE oi.order_id = $1
+			  AND oi.product_id = p.id
+			  AND oi.product_type <> 'physical'
+			  AND p.digital_stock_limit IS NOT NULL
+		`, id); err != nil {
+			return fmt.Errorf("restore digital kuota on refund: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `
 			UPDATE promos SET used_count = GREATEST(0, used_count - 1),
 			                  updated_at = now()
 			WHERE id = (
@@ -720,6 +747,115 @@ func (r *OrderRepo) Refund(ctx context.Context, storeID, id uuid.UUID, amountCen
 	}
 
 	return tx.Commit(ctx)
+}
+
+// ExpireStaleUnpaid auto-cancels orders left 'pending'/'unpaid' past the cutoff
+// with NO payment proof uploaded (buyers who transferred + uploaded proof are
+// awaiting seller confirmation, not abandoned — those are never touched).
+// Cancelling releases stock + digital kuota + promo allocation, mirroring Cancel.
+// One transaction; target rows are locked (FOR UPDATE SKIP LOCKED) so a
+// concurrent payment webhook can't pay an order we're expiring. Returns the
+// count cancelled.
+func (r *OrderRepo) ExpireStaleUnpaid(ctx context.Context, cutoff time.Time) (int, error) {
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+
+	rows, err := tx.Query(ctx, `
+		SELECT id FROM orders
+		WHERE status = 'pending'
+		  AND payment_status = 'unpaid'
+		  AND created_at < $1
+		  AND COALESCE(payment_proof_url, '') = ''
+		FOR UPDATE SKIP LOCKED
+	`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("select stale orders: %w", err)
+	}
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	if len(ids) == 0 {
+		return 0, tx.Commit(ctx)
+	}
+
+	// Restore physical product stock.
+	if _, err := tx.Exec(ctx, `
+		UPDATE products p
+		SET stock = p.stock + oi.quantity, updated_at = now()
+		FROM order_items oi
+		WHERE oi.order_id = ANY($1)
+		  AND oi.product_id = p.id
+		  AND oi.variant_id IS NULL
+		  AND oi.product_type = 'physical'
+	`, ids); err != nil {
+		return 0, fmt.Errorf("restore product stock: %w", err)
+	}
+	// Restore variant stock.
+	if _, err := tx.Exec(ctx, `
+		UPDATE product_variants pv
+		SET stock = pv.stock + oi.quantity
+		FROM order_items oi
+		WHERE oi.order_id = ANY($1)
+		  AND oi.variant_id = pv.id
+		  AND oi.product_type = 'physical'
+	`, ids); err != nil {
+		return 0, fmt.Errorf("restore variant stock: %w", err)
+	}
+	// Restore digital kuota for non-physical items that still have a limit.
+	if _, err := tx.Exec(ctx, `
+		UPDATE products p
+		SET digital_stock_limit = p.digital_stock_limit + oi.quantity, updated_at = now()
+		FROM order_items oi
+		WHERE oi.order_id = ANY($1)
+		  AND oi.product_id = p.id
+		  AND oi.product_type <> 'physical'
+		  AND p.digital_stock_limit IS NOT NULL
+	`, ids); err != nil {
+		return 0, fmt.Errorf("restore digital kuota: %w", err)
+	}
+	// Return promo allocations — one decrement per order that used a promo.
+	if _, err := tx.Exec(ctx, `
+		UPDATE promos pr
+		SET used_count = GREATEST(0, pr.used_count - c.cnt), updated_at = now()
+		FROM (
+			SELECT promo_id, COUNT(*) AS cnt
+			FROM orders
+			WHERE id = ANY($1) AND promo_id IS NOT NULL
+			GROUP BY promo_id
+		) c
+		WHERE pr.id = c.promo_id
+	`, ids); err != nil {
+		return 0, fmt.Errorf("restore promo usage: %w", err)
+	}
+	// Finally, cancel the orders.
+	if _, err := tx.Exec(ctx, `
+		UPDATE orders
+		SET status = 'cancelled',
+		    cancellation_reason = 'Kadaluwarsa — tidak dibayar',
+		    cancelled_at = now(),
+		    updated_at = now()
+		WHERE id = ANY($1)
+	`, ids); err != nil {
+		return 0, fmt.Errorf("cancel stale orders: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	return len(ids), nil
 }
 
 // FindByOrderNumber looks up an order by store + order_number (unique pair).
