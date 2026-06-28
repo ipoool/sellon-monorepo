@@ -32,17 +32,22 @@ const TYPES: { value: ProductTypeValue; icon: LucideIcon; title: string; desc: s
 export function ProductTypeSelector({
   value,
   onChange,
+  disabled = false,
 }: {
   value: ProductTypeValue;
   onChange: (v: ProductTypeValue) => void;
+  // When true (editing an existing product), the type is locked — switching it
+  // would orphan type-specific data (stock vs digital channels vs course videos).
+  disabled?: boolean;
 }) {
   return (
     <Card>
       <div className="mb-4">
         <h2 className="font-semibold text-neutral-900">Tipe Produk</h2>
         <p className="mt-0.5 text-sm text-neutral-500">
-          Pilih jenis produk. Digital & kursus melewati ongkir & alamat
-          pengiriman dan otomatis dikirim setelah pembayaran lunas.
+          {disabled
+            ? "Tipe produk tidak bisa diganti setelah produk dibuat."
+            : "Pilih jenis produk. Digital & kursus melewati ongkir & alamat pengiriman dan otomatis dikirim setelah pembayaran lunas."}
         </p>
       </div>
       <div className="grid gap-3 sm:grid-cols-3">
@@ -53,12 +58,15 @@ export function ProductTypeSelector({
             <button
               key={opt.value}
               type="button"
+              disabled={disabled}
+              aria-disabled={disabled}
               onClick={() => onChange(opt.value)}
               className={cn(
                 "flex items-start gap-3 rounded-lg border-2 p-4 text-left transition-colors",
-                active
-                  ? "border-brand-500 bg-brand-50/40"
-                  : "border-neutral-200 bg-white hover:border-neutral-300",
+                active ? "border-brand-500 bg-brand-50/40" : "border-neutral-200 bg-white",
+                !disabled && !active && "hover:border-neutral-300",
+                disabled && "cursor-not-allowed",
+                disabled && !active && "opacity-50",
               )}
             >
               <span

@@ -252,7 +252,7 @@ export function NonPhysicalProductForm({
 
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-5">
-      <ProductTypeSelector value={productType} onChange={onChangeType} />
+      <ProductTypeSelector value={productType} onChange={onChangeType} disabled={isEditing} />
 
       <Card>
         <div className="mb-4">

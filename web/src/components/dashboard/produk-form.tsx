@@ -354,7 +354,7 @@ export function ProdukForm({ initial }: Props) {
 
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-5">
-      <ProductTypeSelector value={productType} onChange={setProductType} />
+      <ProductTypeSelector value={productType} onChange={setProductType} disabled={isEditing} />
 
       <Card>
         <div className="mb-4">

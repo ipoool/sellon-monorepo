@@ -4,7 +4,7 @@ import { useState } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { useRouter } from "next/navigation";
 import { QRCodeSVG } from "qrcode.react";
-import { QrCode, Plus, Trash2, Save, Printer, Utensils, Palette, Monitor, Copy, ExternalLink } from "lucide-react";
+import { QrCode, Plus, Trash2, Save, Printer, Utensils, Palette, Monitor, Copy, ExternalLink, Download } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -223,6 +223,49 @@ export function TablesManager({
     }, 300);
   };
 
+  // Bulk export: render EVERY table's QR card into one print sheet, then open the
+  // print dialog so the seller can "Save as PDF" (zero deps — same serialize-and-
+  // print pattern as the single-card printQR above). Cards never split a page.
+  const printAllQR = () => {
+    if (initialTables.length === 0) {
+      showError("Belum ada meja untuk dicetak");
+      return;
+    }
+    const cards = initialTables
+      .map(
+        (t) =>
+          `<div class="card-wrap">${renderToStaticMarkup(
+            <QrCard config={qrConfig} url={tableURL(t.qr_token)} label={t.label} />,
+          )}</div>`,
+      )
+      .join("");
+    const heading = storeName
+      ? `QR Meja — ${escapeHtml(storeName)}`
+      : "QR Meja";
+    const win = window.open("", "_blank", "width=900,height=1000");
+    if (!win) return;
+    win.document.write(`<!doctype html><html><head><title>${heading}</title>
+      <style>
+        @page { margin: 12mm; }
+        *{ -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+        body{margin:0;background:#fff;font-family:system-ui,-apple-system,sans-serif}
+        h1{text-align:center;font-size:16px;font-weight:700;color:#0f172a;margin:8px 0 4px}
+        .grid{display:flex;flex-wrap:wrap;gap:18px;justify-content:center;align-items:flex-start;padding:12px}
+        .card-wrap{break-inside:avoid;page-break-inside:avoid}
+      </style></head>
+      <body><h1>${heading}</h1><div class="grid">${cards}</div></body></html>`);
+    win.document.close();
+    win.focus();
+    win.onload = () => win.print();
+    setTimeout(() => {
+      try {
+        win.print();
+      } catch {
+        /* window may already be closed */
+      }
+    }, 400);
+  };
+
   return (
     <div className="flex flex-col gap-5">
       {/* Dine-in settings */}
@@ -400,9 +443,17 @@ export function TablesManager({
 
       {/* Tables list */}
       <Card>
-        <div className="mb-4 flex items-center gap-2">
-          <QrCode className="size-4 text-brand-600" aria-hidden />
-          <h2 className="font-semibold text-neutral-900">Daftar Meja</h2>
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <QrCode className="size-4 text-brand-600" aria-hidden />
+            <h2 className="font-semibold text-neutral-900">Daftar Meja</h2>
+          </div>
+          {initialTables.length > 0 && (
+            <Button size="sm" variant="outline" onClick={printAllQR}>
+              <Download className="size-4" aria-hidden />
+              Download PDF
+            </Button>
+          )}
         </div>
         <div className="flex flex-wrap items-end gap-2">
           <Input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="Nomor/nama meja (mis. 12)" className="w-44" />
