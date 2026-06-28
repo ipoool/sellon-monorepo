@@ -912,6 +912,18 @@ func (r *OrderRepo) SetPaymentStatus(ctx context.Context, storeID, id uuid.UUID,
 	return err
 }
 
+// FlagNeedsReview marks an order for seller attention — surfaced as a
+// "Perlu dicek" badge + filter in Pesanan. Used e.g. when a payment lands on
+// an already-cancelled order (late payment after auto-expiry).
+func (r *OrderRepo) FlagNeedsReview(ctx context.Context, storeID, id uuid.UUID, reason string) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE orders
+		SET needs_review = true, review_reason = $3, updated_at = now()
+		WHERE id = $1 AND store_id = $2
+	`, id, storeID, reason)
+	return err
+}
+
 // PrepareDigitalFulfillment fetches every digital line item for the
 // order and reports whether the order is exclusively digital.
 //

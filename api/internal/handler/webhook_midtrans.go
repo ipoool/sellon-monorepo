@@ -152,19 +152,46 @@ func (h *WebhookHandler) Midtrans(w http.ResponseWriter, r *http.Request) {
 	h.logger.Info("webhook: payment status updated",
 		"order_id", n.OrderID, "from", order.PaymentStatus, "to", mappedStatus)
 
-	// Email seller when a payment freshly transitions to paid. Only fire
-	// once: if the previous payment_status was already 'paid' this is a
-	// duplicate notification.
-	if mappedStatus == "paid" && order.PaymentStatus != "paid" {
+	// React to the freshly-mapped status. order.PaymentStatus / order.Status are
+	// the pre-update values (loaded above), so these branches fire once.
+	switch {
+	case mappedStatus == "paid" && order.PaymentStatus != "paid" && order.Status == "cancelled":
+		// Payment landed on an order that was already cancelled (e.g. the buyer
+		// paid after auto-expiry already released its stock/kuota). Do NOT
+		// auto-fulfill — the inventory may be gone/re-sold. Record the payment
+		// (done above) but flag for the seller to refund or re-activate manually.
+		if rErr := h.orders.FlagNeedsReview(r.Context(), gateway.StoreID, order.ID,
+			"Dibayar setelah order dibatalkan — cek lalu refund atau aktifkan manual"); rErr != nil {
+			h.logger.Error("webhook: flag needs_review", "err", rErr, "order_id", n.OrderID)
+		}
+		h.logger.Warn("webhook: payment on cancelled order — flagged for review",
+			"order_id", n.OrderID)
+
+	case mappedStatus == "paid" && order.PaymentStatus != "paid":
+		// Normal fresh payment. Fire side-effects once.
 		go h.emailPaymentReceived(gateway.StoreID, order, n.PaymentType)
-		// Digital fulfillment: auto-complete + mint download tokens +
-		// email buyer. Background context so this survives the webhook
-		// HTTP handler returning.
+		// Digital fulfillment: auto-complete + mint download tokens + email buyer.
+		// Background context so this survives the webhook HTTP handler returning.
 		go h.fulfiller.OnPaymentPaid(context.Background(), gateway.StoreID, order.ID)
-		// Meta Conversions API: fire a server-side Purchase so Facebook/Instagram
-		// can attribute the sale to an ad. No-op when the store hasn't enabled Meta.
+		// Meta Conversions API: server-side Purchase for ad attribution. No-op
+		// when the store hasn't enabled Meta.
 		if h.meta != nil {
 			go h.meta.OnPaymentPaid(context.Background(), gateway.StoreID, order.ID)
+		}
+
+	case mappedStatus == "failed" &&
+		order.Status == "pending" &&
+		order.PaymentStatus != "paid" &&
+		order.PaymentStatus != "refunded" &&
+		strings.TrimSpace(order.PaymentProofURL) == "":
+		// Midtrans expire/cancel/deny on a still-open order (unpaid OR a pending
+		// VA/bank charge that lapsed): cancel it now so its stock + kuota + promo
+		// are released. The order-expiry worker only matches payment_status=
+		// 'unpaid', so a 'failed'/'pending' order would otherwise hold inventory
+		// forever until a manual cancel. Never touches an already-paid order.
+		if cErr := h.orders.Cancel(r.Context(), gateway.StoreID, order.ID,
+			"Pembayaran gagal / kadaluwarsa (Midtrans)"); cErr != nil {
+			h.logger.Error("webhook: cancel on failed payment", "err", cErr, "order_id", n.OrderID)
 		}
 	}
 
