@@ -7,6 +7,91 @@ import type { BlogPost } from "./blog-posts";
 
 export const tutorialPosts: BlogPost[] = [
   {
+    slug: "cara-daftar-sellon",
+    category: "Panduan",
+    title: "Cara Daftar Akun & Bikin Toko di SellOn",
+    excerpt:
+      "Belum punya akun SellOn? Dari login pakai Google sampai toko online-mu live, prosesnya cuma beberapa menit dan gratis. Begini langkah-langkahnya.",
+    publishedAt: "2026-09-01",
+    readingTime: "3 menit",
+    featured: true,
+    coverColor: "from-brand-500 to-brand-700",
+    coverImage: "/tutorials/cara-daftar-sellon/cover.png",
+    plan: "free",
+    sections: [
+      {
+        paragraphs: [
+          "Hasil akhir: kamu punya akun SellOn dan toko online-mu langsung live dengan link sellon.id/nama-toko.",
+        ],
+        callout: {
+          kind: "tip",
+          title: "Yang kamu butuhkan",
+          body: "Cuma akun Google. Tidak ada formulir pendaftaran terpisah — login pertama kali otomatis bikin akun untukmu, gratis.",
+        },
+      },
+      {
+        heading: "1. Buka halaman login, klik \"Masuk dengan Google\"",
+        paragraphs: [
+          "Buka sellon.id/login. Tidak ada tombol \"Daftar\" terpisah — SellOn pakai satu pintu masuk: Google. Klik Masuk dengan Google, lalu pilih akun Google yang mau dipakai. Kalau ini pertama kalinya, akun SellOn-mu otomatis dibuat saat itu juga.",
+        ],
+        image: {
+          src: "/tutorials/cara-daftar-sellon/01-halaman-login.png",
+          alt: "Halaman login SellOn dengan tombol Masuk dengan Google",
+          caption: "Halaman login — satu tombol, tanpa formulir pendaftaran.",
+        },
+      },
+      {
+        heading: "2. Isi identitas toko",
+        paragraphs: [
+          "Setelah berhasil login pertama kali, kamu langsung diarahkan ke halaman setup toko. Isi Nama Toko — ini yang dilihat pembeli. URL Toko terisi otomatis dari nama (boleh diubah sekarang, tapi tidak bisa diganti lagi setelah toko dibuat). Pilih Kategori Usaha, lalu klik Lanjut.",
+        ],
+        image: {
+          src: "/tutorials/cara-daftar-sellon/02-identitas-toko.png",
+          alt: "Form isi nama toko, URL toko, dan kategori usaha",
+          caption: "Langkah 1 — identitas toko.",
+        },
+      },
+      {
+        heading: "3. Tambah kontak & lokasi (opsional)",
+        paragraphs: [
+          "Isi Kota, Nomor WhatsApp, dan akun Instagram/TikTok kalau ada. Semua kolom di sini opsional — boleh dilewati dan diisi nanti dari Pengaturan. Klik Lanjut.",
+        ],
+        image: {
+          src: "/tutorials/cara-daftar-sellon/03-kontak-lokasi.png",
+          alt: "Form isi kota, WhatsApp, dan sosial media toko",
+          caption: "Langkah 2 — kontak & lokasi (boleh dilewati).",
+        },
+      },
+      {
+        heading: "4. Cek ringkasan, lalu buat toko",
+        paragraphs: [
+          "Halaman terakhir menampilkan ringkasan datamu. Kalau sudah pas, klik Buat Toko. Tokomu langsung live dan kamu masuk ke dasbor — siap ditambah produk.",
+        ],
+        image: {
+          src: "/tutorials/cara-daftar-sellon/04-review-buat.png",
+          alt: "Halaman review data toko lalu klik Buat Toko",
+          caption: "Langkah 3 — review lalu Buat Toko.",
+        },
+      },
+      {
+        heading: "Tips",
+        bullets: [
+          "Tidak perlu isi kata sandi atau verifikasi email terpisah — semua terhubung lewat akun Google-mu.",
+          "URL toko tidak bisa diganti setelah toko dibuat. Pikirkan baik-baik nama link-nya sebelum lanjut.",
+          "Sudah lupa toko atau belum pernah bikin toko? Login lagi dengan akun Google yang sama akan langsung masuk ke dasbor toko yang sudah ada.",
+        ],
+      },
+      {
+        heading: "FAQ",
+        paragraphs: [
+          "Apakah pendaftaran berbayar? Tidak. Bikin akun dan toko di SellOn gratis, tanpa kartu kredit.",
+          "Bisa daftar tanpa akun Google? Saat ini login SellOn hanya lewat Google, karena lebih aman dan cepat dibanding formulir email/kata sandi manual.",
+          "Kalau salah pilih akun Google saat login, gimana? Logout, lalu klik Masuk dengan Google lagi dan pilih akun yang benar sebelum toko dibuat.",
+        ],
+      },
+    ],
+  },
+  {
     slug: "mulai-cepat-setup-toko",
     category: "Panduan",
     title: "Mulai Cepat: Cara Membuat Toko di SellOn",

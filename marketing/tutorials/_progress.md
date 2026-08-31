@@ -9,6 +9,7 @@ Akun screenshot: **Toko Ijo** (Pro) untuk semua; **user demo "Budi"** untuk arti
 
 | # | Artikel | Slug | Status |
 |---|---------|------|--------|
+| 0 | Cara Daftar Akun & Bikin Toko | cara-daftar-sellon | ✅ (screenshot mockup HTML, bukan app real — env dev api lagi rusak, lihat catatan bug) |
 | 1 | Mulai Cepat: Setup Toko | mulai-cepat-setup-toko | ✅ |
 | 2 | Kelola Produk | kelola-produk | ✅ |
 | 3 | Resep & Opsi Produk | resep-opsi-produk | ✅ |
@@ -37,5 +38,6 @@ Akun screenshot: **Toko Ijo** (Pro) untuk semua; **user demo "Budi"** untuk arti
 
 
 ## CATATAN BUG (ditemukan saat QA)
+- **Dev env api rusak (2026-09-01)**: `api/Dockerfile` `go install github.com/air-verse/air@latest` gagal build — versi air terbaru butuh Go 1.26+, image masih `golang:1.25-alpine`. `make dev`/`make up` gagal total untuk service `api` (dan `web` karena depends_on). Belum di-fix (user pilih skip, bukan prioritas task ini). Perlu pin versi air kompatibel di Dockerfile sebelum bisa screenshot dari app real lagi.
 - **#4 Bulk upload**: FIXED — `bulk_jobs.go:109` `$2+$3` → `$2::int + $3::int`. Job kini `completed` normal.
 - **Storefront stok varian**: API `/storefront/{slug}` kirim `stock:0` untuk produk bervarian (tanpa agregasi stok varian) → katalog publik tampil "Stok habis" walau varian ada stok. Saat QA, base stock 21 produk di-set 99 (data demo) agar screenshot sehat. Perlu fix agregasi stok varian di storefront.
