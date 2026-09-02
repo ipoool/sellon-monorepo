@@ -138,6 +138,7 @@ export function EmailAuthForm({ inviteCode }: { inviteCode?: string }) {
             inputMode="numeric"
             maxLength={6}
             autoFocus
+            autoComplete="one-time-code"
             value={code}
             onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
             placeholder="123456"
@@ -197,6 +198,7 @@ export function EmailAuthForm({ inviteCode }: { inviteCode?: string }) {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Nama kamu"
+              autoComplete="name"
               required
             />
           </div>
@@ -209,6 +211,7 @@ export function EmailAuthForm({ inviteCode }: { inviteCode?: string }) {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="nama@email.com"
+            autoComplete="email"
             required
           />
         </div>
@@ -221,6 +224,7 @@ export function EmailAuthForm({ inviteCode }: { inviteCode?: string }) {
             onChange={(e) => setPassword(e.target.value)}
             placeholder={mode === "register" ? "Minimal 8 karakter, huruf & angka" : "Password kamu"}
             minLength={mode === "register" ? 8 : undefined}
+            autoComplete={mode === "register" ? "new-password" : "current-password"}
             required
           />
         </div>
