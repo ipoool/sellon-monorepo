@@ -9,9 +9,9 @@ const steps = [
     icon: UserPlus,
     title: "Daftar dalam 1 menit",
     description:
-      "Login pakai akun Google. Tidak perlu isi formulir panjang, langsung punya akun.",
+      "Daftar pakai email & password, verifikasi lewat kode di email. Tanpa ribet, langsung punya akun.",
     duration: "~1 menit",
-    highlight: "Login → langsung jadi.",
+    highlight: "Daftar → verifikasi → jadi.",
   },
   {
     icon: ImagePlus,

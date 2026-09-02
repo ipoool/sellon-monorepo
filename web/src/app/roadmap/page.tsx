@@ -46,9 +46,9 @@ const columns: Column[] = [
     description: "Sudah live dan dipakai merchant.",
     items: [
       {
-        title: "Login Google SSO",
+        title: "Daftar Email & Password",
         description:
-          "Daftar dan masuk dengan akun Google. Tidak perlu isi formulir — toko langsung bisa dibuat.",
+          "Daftar dan masuk pakai email & password, verifikasi lewat kode di email. Cepat dan aman.",
       },
       {
         title: "Storefront publik + 6 layout",

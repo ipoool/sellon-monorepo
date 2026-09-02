@@ -311,8 +311,8 @@ export function StaffManager({ initial }: Props) {
           <p className="mt-1">
             Saat kamu undang lewat email, kalau orang itu sudah punya akun
             SellOn, mereka langsung ditambahkan. Kalau belum, mereka jadi
-            &ldquo;Pending&rdquo; - undangan otomatis aktif saat mereka login
-            pertama kali pakai akun Google dengan email yang sama.
+            &ldquo;Pending&rdquo; - undangan otomatis aktif saat mereka daftar
+            (email &amp; password) dengan email yang sama.
           </p>
         </div>
       </Card>
@@ -345,17 +345,17 @@ export function StaffManager({ initial }: Props) {
           </div>
           <div className="flex flex-col gap-4 p-5">
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="invite_email">Email Google staf *</Label>
+              <Label htmlFor="invite_email">Email staf *</Label>
               <Input
                 id="invite_email"
                 name="email"
                 type="email"
                 required
 
-                placeholder="rekan@gmail.com"
+                placeholder="rekan@email.com"
               />
               <p className="text-xs text-neutral-500">
-                Pakai email yang sama dengan akun Google mereka.
+                Pakai email yang sama dengan akun SellOn mereka nanti.
               </p>
             </div>
             <div className="flex flex-col gap-1.5">

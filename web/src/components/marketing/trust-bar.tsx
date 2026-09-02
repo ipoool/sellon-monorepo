@@ -13,7 +13,7 @@ const trustPoints = [
   {
     icon: Zap,
     title: "Setup kurang dari 5 menit",
-    description: "Login Google, foto produk, link toko langsung jadi.",
+    description: "Daftar email, foto produk, link toko langsung jadi.",
   },
   {
     icon: ShieldCheck,

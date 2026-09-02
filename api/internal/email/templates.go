@@ -375,6 +375,36 @@ Kalau kamu tidak meminta kode ini, abaikan email ini.
 	return
 }
 
+// RenderEmailVerification is the seller-registration counterpart of
+// RenderBuyerOTP — same shape (subject + big code + expiry note), different
+// copy since this gates the seller's own account, not a buyer download link.
+func RenderEmailVerification(name, code string, expiryMinutes int) (subject, text, htmlBody string) {
+	greeting := "Halo!"
+	if strings.TrimSpace(name) != "" {
+		greeting = "Halo " + name + "!"
+	}
+	subject = fmt.Sprintf("Kode verifikasi SellOn: %s", code)
+	text = fmt.Sprintf(`%s
+
+Kode verifikasi email untuk akun SellOn-mu:
+
+%s
+
+Berlaku %d menit. Jangan bagikan kode ini ke siapa pun.
+Kalau kamu tidak mendaftar di SellOn, abaikan email ini.
+`, greeting, code, expiryMinutes)
+	htmlBody = wrapHTML(fmt.Sprintf(`
+<h2 style="margin:0 0 8px;font-size:20px;color:#0f172a;">%s</h2>
+<p style="margin:0 0 16px;color:#475569;">Masukkan kode ini untuk verifikasi email akun SellOn-mu:</p>
+<p style="margin:0 0 16px;font-size:32px;font-weight:700;letter-spacing:6px;color:#0f172a;text-align:center;">%s</p>
+<p style="margin:0;color:#475569;font-size:13px;">Berlaku %d menit. Jangan bagikan kode ini. Kalau kamu tidak mendaftar di SellOn, abaikan email ini.</p>`,
+		html.EscapeString(greeting),
+		html.EscapeString(code),
+		expiryMinutes,
+	))
+	return
+}
+
 // wrapHTML wraps a body fragment in a minimal email-safe shell — wide
 // WrapHTML adalah versi exported dari wrapHTML — bisa dipanggil dari
 // package lain (mis. handler) untuk re-use chrome SellOn yang sama.
@@ -432,7 +462,7 @@ Sebagai %s, kamu bisa %s.
 
 Cara bergabung:
 1. Klik link di bawah (atau buka %s)
-2. Login dengan akun Google yang menggunakan email %s
+2. Daftar/masuk pakai email %s (kalau belum punya akun, daftar dulu dengan email ini)
 3. Kamu akan langsung masuk sebagai %s toko ini
 
 %s
@@ -466,7 +496,7 @@ Jika sudah kadaluarsa, minta pemilik toko untuk mengundang ulang.
 <h3 style="margin:0 0 12px;font-size:15px;color:#0f172a;">Cara bergabung:</h3>
 <ol style="margin:0 0 24px;padding-left:20px;color:#334155;line-height:1.8;">
   <li>Klik tombol <strong>"Gabung ke Toko"</strong> di bawah</li>
-  <li>Login dengan akun Google yang menggunakan email <strong>%s</strong></li>
+  <li>Daftar/masuk pakai email <strong>%s</strong> (kalau belum punya akun, daftar dulu dengan email ini)</li>
   <li>Kamu akan langsung masuk sebagai <strong>%s</strong> toko ini</li>
 </ol>
 

@@ -4,7 +4,7 @@ import { ShieldCheck, Zap, Wallet, Sparkles, Handshake } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { GoogleSignInButton } from "@/components/auth/google-sign-in-button";
+import { EmailAuthForm } from "@/components/auth/email-auth-form";
 import { MasukTestimonial } from "@/components/auth/login-testimonial";
 import { getMe } from "@/lib/server-auth";
 import { pageMetadata } from "@/lib/seo";
@@ -20,7 +20,7 @@ const benefits = [
   {
     icon: Zap,
     title: "Setup 5 menit",
-    description: "Akun otomatis dibuat dari Google. Tidak perlu isi formulir panjang.",
+    description: "Daftar dengan email & password, verifikasi lewat kode di email. Tidak perlu isi formulir panjang.",
   },
   {
     icon: Wallet,
@@ -30,7 +30,7 @@ const benefits = [
   {
     icon: ShieldCheck,
     title: "Aman & private",
-    description: "Login pakai standar Google OAuth. Kami hanya menyimpan email, nama, dan foto profil.",
+    description: "Password kamu disimpan terenkripsi. Kami hanya menyimpan email, nama, dan data yang kamu isi sendiri.",
   },
 ];
 
@@ -77,7 +77,7 @@ export default async function MasukPage({
                   Daftar & langsung mulai resell
                 </h1>
                 <p className="mt-2 text-sm text-neutral-600">
-                  Belum punya akun? Login pertama kali otomatis bikin akun — setelah itu langsung aktif sebagai reseller.
+                  Belum punya akun? Daftar pakai email — setelah verifikasi kamu langsung aktif sebagai reseller.
                 </p>
               </>
             ) : (
@@ -86,7 +86,7 @@ export default async function MasukPage({
                   Masuk untuk mulai jualan
                 </h1>
                 <p className="mt-2 text-sm text-neutral-600">
-                  Belum punya akun? Tenang - login pertama kali otomatis bikin akun untukmu.
+                  Belum punya akun? Daftar pakai email dan password — tinggal verifikasi kode di email.
                 </p>
               </>
             )}
@@ -110,27 +110,14 @@ export default async function MasukPage({
                 </ul>
               )}
 
-              <div className="relative my-2">
-                <div aria-hidden className="absolute inset-0 flex items-center">
-                  <span className="w-full border-t border-neutral-200" />
-                </div>
-                <div className="relative flex justify-center">
-                  <span className="bg-white px-3 text-xs uppercase tracking-wider text-neutral-400">
-                    Lanjutkan dengan
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex flex-col items-center gap-4">
-                <GoogleSignInButton inviteCode={inviteCode} />
-                <p className="text-center text-xs leading-relaxed text-neutral-500">
-                  Dengan masuk, kamu menyetujui{" "}
-                  <Link href="/terms" className="font-medium text-brand-600 hover:text-brand-700">
-                    Syarat &amp; Ketentuan
-                  </Link>{" "}
-                  SellOn.
-                </p>
-              </div>
+              <EmailAuthForm inviteCode={inviteCode} />
+              <p className="text-center text-xs leading-relaxed text-neutral-500">
+                Dengan masuk, kamu menyetujui{" "}
+                <Link href="/terms" className="font-medium text-brand-600 hover:text-brand-700">
+                  Syarat &amp; Ketentuan
+                </Link>{" "}
+                SellOn.
+              </p>
             </CardContent>
           </Card>
 

@@ -25,7 +25,7 @@ const faqs = [
   },
   {
     q: "Data saya aman?",
-    a: "Login pakai Google OAuth (standar yang dipakai aplikasi besar). Database disimpan dalam bentuk terenkripsi - kami cuma simpan email, nama, dan foto profil dari Google. Data pesanan & pembeli sepenuhnya milik kamu. Kami tidak menjualnya, tidak memakainya untuk iklan.",
+    a: "Login pakai email & password, dengan verifikasi kode ke email kamu. Password disimpan terenkripsi (bukan teks biasa) - kami cuma simpan email dan nama yang kamu daftarkan. Data pesanan & pembeli sepenuhnya milik kamu. Kami tidak menjualnya, tidak memakainya untuk iklan.",
   },
   {
     q: "Kalau saya berhenti langganan Pro/Bisnis, data saya hilang?",

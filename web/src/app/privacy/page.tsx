@@ -114,8 +114,9 @@ export default async function PrivasiPage() {
                   <p>Data yang kami kumpulkan dari Penjual:</p>
                   <ul className="mt-3 list-disc space-y-1 pl-6">
                     <li>
-                      <strong>Profil Google:</strong> alamat email, nama, foto
-                      profil - saat Anda login dengan Google OAuth.
+                      <strong>Data akun:</strong> alamat email, nama, dan
+                      password (disimpan terenkripsi/hashed, tidak pernah
+                      dalam bentuk teks biasa) - saat Anda mendaftar.
                     </li>
                     <li>
                       <strong>Data toko:</strong> nama toko, deskripsi, foto
@@ -176,7 +177,8 @@ export default async function PrivasiPage() {
                   </p>
                   <ul className="mt-3 list-disc space-y-1 pl-6">
                     <li>
-                      <strong>Google:</strong> autentikasi OAuth (login).
+                      <strong>Penyedia email transaksional (mis. Mailtrap):</strong>{" "}
+                      mengirim email kode verifikasi dan notifikasi akun.
                     </li>
                     <li>
                       <strong>Penyedia hosting (mis. AWS, GCP):</strong>{" "}

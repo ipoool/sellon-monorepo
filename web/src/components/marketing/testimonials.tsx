@@ -23,7 +23,7 @@ type Testimonial = {
 const testimonials: Testimonial[] = [
   {
     quote:
-      "Saya tuh awalnya gaptek banget, takut ribet. Eh ternyata daftarnya cuma login Google, langsung jadi. Sekarang kalau ada pesanan masuk, WA langsung bunyi—gak perlu nyatat di buku lagi kayak dulu.",
+      "Saya tuh awalnya gaptek banget, takut ribet. Eh ternyata daftarnya cuma isi email & password, verifikasi kode, langsung jadi. Sekarang kalau ada pesanan masuk, WA langsung bunyi—gak perlu nyatat di buku lagi kayak dulu.",
     name: "Bu Sari",
     role: "Jualan keripik & sambel rumahan",
     city: "Yogyakarta",

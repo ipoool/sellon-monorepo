@@ -14,21 +14,25 @@ import (
 var ErrUserNotFound = errors.New("user not found")
 
 type User struct {
-	ID         uuid.UUID
-	GoogleID   string
-	Email      string
-	Name       string
-	PictureURL string
-	Role       string
-	BannedAt   *time.Time
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	ID              uuid.UUID
+	GoogleID        string
+	Email           string
+	Name            string
+	PictureURL      string
+	Role            string
+	PasswordHash    string
+	EmailVerifiedAt *time.Time
+	BannedAt        *time.Time
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 func (u *User) IsAdmin() bool { return u != nil && u.Role == "admin" }
 func (u *User) IsBanned() bool {
 	return u != nil && u.BannedAt != nil
 }
+func (u *User) IsEmailVerified() bool { return u != nil && u.EmailVerifiedAt != nil }
+func (u *User) HasPassword() bool     { return u != nil && u.PasswordHash != "" }
 
 type UserRepo struct {
 	pool *pgxpool.Pool
@@ -38,13 +42,13 @@ func NewUserRepo(pool *pgxpool.Pool) *UserRepo {
 	return &UserRepo{pool: pool}
 }
 
-const userCols = `id, google_id, email, name, picture_url, role, banned_at, created_at, updated_at`
+const userCols = `id, COALESCE(google_id, ''), email, name, picture_url, role, password_hash, email_verified_at, banned_at, created_at, updated_at`
 
 func scanUser(row pgx.Row) (*User, error) {
 	var u User
 	err := row.Scan(
 		&u.ID, &u.GoogleID, &u.Email, &u.Name, &u.PictureURL,
-		&u.Role, &u.BannedAt, &u.CreatedAt, &u.UpdatedAt,
+		&u.Role, &u.PasswordHash, &u.EmailVerifiedAt, &u.BannedAt, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -73,12 +77,53 @@ func (r *UserRepo) FindOrCreateByGoogleID(ctx context.Context, googleID, email, 
 	var isNew bool
 	if err := row.Scan(
 		&u.ID, &u.GoogleID, &u.Email, &u.Name, &u.PictureURL,
-		&u.Role, &u.BannedAt, &u.CreatedAt, &u.UpdatedAt,
+		&u.Role, &u.PasswordHash, &u.EmailVerifiedAt, &u.BannedAt, &u.CreatedAt, &u.UpdatedAt,
 		&isNew,
 	); err != nil {
 		return nil, false, err
 	}
 	return &u, isNew, nil
+}
+
+// CreateWithPassword inserts a brand-new email+password account
+// (google_id NULL, email_verified_at NULL — set by the caller after OTP
+// verification). Caller must check FindByEmail first — a duplicate email
+// hits the unique index and returns a raw pg error.
+func (r *UserRepo) CreateWithPassword(ctx context.Context, email, name, passwordHash string) (*User, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	const q = `
+		INSERT INTO users (email, name, password_hash)
+		VALUES ($1, $2, $3)
+		RETURNING ` + userCols
+	u, err := scanUser(r.pool.QueryRow(ctx, q, email, name, passwordHash))
+	if err != nil {
+		return nil, err
+	}
+	return u, nil
+}
+
+// SetPassword sets/replaces a user's password hash — used both when a
+// brand-new account registers and when a legacy Google-only account
+// claims a password for the first time.
+func (r *UserRepo) SetPassword(ctx context.Context, id uuid.UUID, passwordHash string) error {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE users SET password_hash = $2, updated_at = now() WHERE id = $1`,
+		id, passwordHash)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
+// MarkEmailVerified stamps email_verified_at = now() (idempotent).
+func (r *UserRepo) MarkEmailVerified(ctx context.Context, id uuid.UUID) error {
+	_, err := r.pool.Exec(ctx,
+		`UPDATE users SET email_verified_at = now(), updated_at = now() WHERE id = $1 AND email_verified_at IS NULL`,
+		id)
+	return err
 }
 
 func (r *UserRepo) FindByID(ctx context.Context, id uuid.UUID) (*User, error) {

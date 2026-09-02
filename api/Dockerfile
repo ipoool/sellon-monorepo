@@ -8,7 +8,9 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/server ./cmd/server
 
 # === Dev (with hot reload) ===
-FROM golang:1.25-alpine AS dev
+# 1.26 here (not 1.25 like builder/prod) because air-verse/air@latest requires
+# go >= 1.26 to `go install`; this stage only runs local hot-reload, never ships.
+FROM golang:1.26-alpine AS dev
 WORKDIR /app
 RUN apk add --no-cache git && \
     go install github.com/air-verse/air@latest

@@ -36,6 +36,7 @@ type Server struct {
 
 func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, error) {
 	users := repository.NewUserRepo(pool)
+	emailVerifications := repository.NewEmailVerificationRepo(pool)
 	stores := repository.NewStoreRepo(pool)
 	products := repository.NewProductRepo(pool)
 	orders := repository.NewOrderRepo(pool)
@@ -96,7 +97,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	metaClient := meta.NewClient(logger)
 	metaNotifier := meta.NewNotifier(stores, orders, subscriptions, encryptor, metaClient, publicWebURL, logger)
 
-	authHandler := handler.NewAuthHandler(users, memberships, googleVerifier, jwtSvc, mailer, publicWebURL, logger, cfg.IsProd())
+	authHandler := handler.NewAuthHandler(users, emailVerifications, memberships, googleVerifier, jwtSvc, mailer, publicWebURL, logger, cfg.IsProd())
 	storeHandler := handler.NewStoreHandler(stores, subscriptions, auditLogger, logger)
 	metaHandler := handler.NewMetaHandler(stores, encryptor, cfg.WebhookBaseURL, auditLogger, logger)
 	productHandler := handler.NewProductHandler(products, variants, stores, subscriptions, planRepo, bulkJobs, productDiscounts, modifierRepo, materialRepo, categories, courseVideos, storageClient, broker, auditLogger, logger)
@@ -226,6 +227,10 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 
 		r.Route("/auth", func(r chi.Router) {
 			r.Post("/google", authHandler.Google)
+			r.Post("/register", authHandler.Register)
+			r.Post("/login", authHandler.Login)
+			r.Post("/verify-email", authHandler.VerifyEmail)
+			r.Post("/resend-verification", authHandler.ResendVerification)
 			r.Post("/logout", authHandler.Logout)
 			r.Group(func(r chi.Router) {
 				r.Use(requireAuth)

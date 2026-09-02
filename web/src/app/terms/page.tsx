@@ -166,10 +166,10 @@ export default async function SyaratKetentuanPage() {
                     yang terjadi di dalamnya.
                   </p>
                   <p className="mt-3">
-                    Akun SellOn saat ini dapat dibuat melalui sign-in dengan
-                    akun Google Anda. Dengan masuk, Anda mengizinkan kami untuk
-                    membaca alamat email, nama, dan foto profil Anda dari
-                    Google.
+                    Akun SellOn dibuat dengan alamat email dan password Anda
+                    sendiri. Kami mengirim kode verifikasi ke email yang
+                    Anda daftarkan untuk memastikan alamat tersebut benar
+                    milik Anda sebelum akun aktif.
                   </p>
                 </Article>
 

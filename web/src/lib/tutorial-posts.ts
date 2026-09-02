@@ -11,8 +11,8 @@ export const tutorialPosts: BlogPost[] = [
     category: "Panduan",
     title: "Cara Daftar Akun & Bikin Toko di SellOn",
     excerpt:
-      "Belum punya akun SellOn? Dari login pakai Google sampai toko online-mu live, prosesnya cuma beberapa menit dan gratis. Begini langkah-langkahnya.",
-    publishedAt: "2026-09-01",
+      "Belum punya akun SellOn? Dari daftar email & password, verifikasi kode, sampai toko online-mu live, prosesnya cuma beberapa menit dan gratis. Begini langkah-langkahnya.",
+    publishedAt: "2026-09-02",
     readingTime: "3 menit",
     featured: true,
     coverColor: "from-brand-500 to-brand-700",
@@ -26,49 +26,60 @@ export const tutorialPosts: BlogPost[] = [
         callout: {
           kind: "tip",
           title: "Yang kamu butuhkan",
-          body: "Cuma akun Google. Tidak ada formulir pendaftaran terpisah — login pertama kali otomatis bikin akun untukmu, gratis.",
+          body: "Cuma email aktif. Daftar dengan email & password, verifikasi lewat kode 6 digit yang kami kirim ke email-mu — gratis, tanpa kartu kredit.",
         },
       },
       {
-        heading: "1. Buka halaman login, klik \"Masuk dengan Google\"",
+        heading: "1. Buka halaman login, pilih tab \"Daftar\"",
         paragraphs: [
-          "Buka sellon.id/login. Tidak ada tombol \"Daftar\" terpisah — SellOn pakai satu pintu masuk: Google. Klik Masuk dengan Google, lalu pilih akun Google yang mau dipakai. Kalau ini pertama kalinya, akun SellOn-mu otomatis dibuat saat itu juga.",
+          "Buka sellon.id/login. Di kartu form, pilih tab Daftar, lalu isi Nama, Email, dan Password (minimal 8 karakter, kombinasi huruf & angka). Klik Daftar dengan Email.",
         ],
         image: {
           src: "/tutorials/cara-daftar-sellon/01-halaman-login.png",
-          alt: "Halaman login SellOn dengan tombol Masuk dengan Google",
-          caption: "Halaman login — satu tombol, tanpa formulir pendaftaran.",
+          alt: "Halaman login SellOn dengan form daftar email & password",
+          caption: "Halaman login — tab Masuk / Daftar dengan email & password.",
         },
       },
       {
-        heading: "2. Isi identitas toko",
+        heading: "2. Masukkan kode verifikasi dari email",
         paragraphs: [
-          "Setelah berhasil login pertama kali, kamu langsung diarahkan ke halaman setup toko. Isi Nama Toko — ini yang dilihat pembeli. URL Toko terisi otomatis dari nama (boleh diubah sekarang, tapi tidak bisa diganti lagi setelah toko dibuat). Pilih Kategori Usaha, lalu klik Lanjut.",
+          "Cek inbox email-mu (termasuk folder spam kalau belum muncul). Masukkan kode 6 digit yang kami kirim — berlaku 15 menit. Kalau belum masuk, klik Kirim ulang kode.",
         ],
         image: {
-          src: "/tutorials/cara-daftar-sellon/02-identitas-toko.png",
+          src: "/tutorials/cara-daftar-sellon/02-verifikasi-email.png",
+          alt: "Form input kode verifikasi 6 digit dari email",
+          caption: "Verifikasi email — kode 6 digit, berlaku 15 menit.",
+        },
+      },
+      {
+        heading: "3. Isi identitas toko",
+        paragraphs: [
+          "Setelah email terverifikasi, kamu langsung diarahkan ke halaman setup toko. Isi Nama Toko — ini yang dilihat pembeli. URL Toko terisi otomatis dari nama (boleh diubah sekarang, tapi tidak bisa diganti lagi setelah toko dibuat). Pilih Kategori Usaha, lalu klik Lanjut.",
+        ],
+        image: {
+          src: "/tutorials/cara-daftar-sellon/03-identitas-toko.png",
           alt: "Form isi nama toko, URL toko, dan kategori usaha",
           caption: "Langkah 1 — identitas toko.",
         },
       },
       {
-        heading: "3. Tambah kontak & lokasi (opsional)",
+        heading: "4. Tambah kontak & lokasi (opsional)",
         paragraphs: [
           "Isi Kota, Nomor WhatsApp, dan akun Instagram/TikTok kalau ada. Semua kolom di sini opsional — boleh dilewati dan diisi nanti dari Pengaturan. Klik Lanjut.",
         ],
         image: {
-          src: "/tutorials/cara-daftar-sellon/03-kontak-lokasi.png",
+          src: "/tutorials/cara-daftar-sellon/04-kontak-lokasi.png",
           alt: "Form isi kota, WhatsApp, dan sosial media toko",
           caption: "Langkah 2 — kontak & lokasi (boleh dilewati).",
         },
       },
       {
-        heading: "4. Cek ringkasan, lalu buat toko",
+        heading: "5. Cek ringkasan, lalu buat toko",
         paragraphs: [
           "Halaman terakhir menampilkan ringkasan datamu. Kalau sudah pas, klik Buat Toko. Tokomu langsung live dan kamu masuk ke dasbor — siap ditambah produk.",
         ],
         image: {
-          src: "/tutorials/cara-daftar-sellon/04-review-buat.png",
+          src: "/tutorials/cara-daftar-sellon/05-review-buat.png",
           alt: "Halaman review data toko lalu klik Buat Toko",
           caption: "Langkah 3 — review lalu Buat Toko.",
         },
@@ -76,17 +87,17 @@ export const tutorialPosts: BlogPost[] = [
       {
         heading: "Tips",
         bullets: [
-          "Tidak perlu isi kata sandi atau verifikasi email terpisah — semua terhubung lewat akun Google-mu.",
+          "Password minimal 8 karakter dan kombinasi huruf & angka — SellOn menolak password yang terlalu lemah.",
           "URL toko tidak bisa diganti setelah toko dibuat. Pikirkan baik-baik nama link-nya sebelum lanjut.",
-          "Sudah lupa toko atau belum pernah bikin toko? Login lagi dengan akun Google yang sama akan langsung masuk ke dasbor toko yang sudah ada.",
+          "Lupa password? Untuk saat ini hubungi halo@sellon.id dari email akunmu — fitur reset password self-service segera hadir.",
         ],
       },
       {
         heading: "FAQ",
         paragraphs: [
           "Apakah pendaftaran berbayar? Tidak. Bikin akun dan toko di SellOn gratis, tanpa kartu kredit.",
-          "Bisa daftar tanpa akun Google? Saat ini login SellOn hanya lewat Google, karena lebih aman dan cepat dibanding formulir email/kata sandi manual.",
-          "Kalau salah pilih akun Google saat login, gimana? Logout, lalu klik Masuk dengan Google lagi dan pilih akun yang benar sebelum toko dibuat.",
+          "Kenapa harus verifikasi email? Supaya notifikasi pesanan, kode akses, dan email penting lainnya benar-benar sampai ke inbox-mu — bukan orang lain.",
+          "Kode verifikasi tidak masuk, gimana? Cek folder spam/promosi, lalu klik Kirim ulang kode di halaman verifikasi. Kode berlaku 15 menit dan bisa diminta ulang setelah 60 detik.",
         ],
       },
     ],
@@ -111,7 +122,7 @@ export const tutorialPosts: BlogPost[] = [
         callout: {
           kind: "tip",
           title: "Yang kamu butuhkan",
-          body: "Akun SellOn (login pakai Google). Setup ini gratis dan cuma 3 langkah.",
+          body: "Akun SellOn yang sudah didaftarkan & terverifikasi. Setup ini gratis dan cuma 3 langkah.",
         },
       },
       {
@@ -1360,7 +1371,7 @@ export const tutorialPosts: BlogPost[] = [
     category: "Panduan",
     title: "Cara Undang Staf & Atur Akses Tim di SellOn",
     excerpt:
-      "Ajak staf bantu kelola toko tanpa berbagi akun pribadi. Undang lewat email Google dan tentukan perannya — pemilik tetap kamu.",
+      "Ajak staf bantu kelola toko tanpa berbagi akun pribadi. Undang lewat email dan tentukan perannya — pemilik tetap kamu.",
     publishedAt: "2026-05-29",
     readingTime: "3 menit",
     featured: false,
@@ -1375,13 +1386,13 @@ export const tutorialPosts: BlogPost[] = [
         callout: {
           kind: "tip",
           title: "Yang kamu butuhkan",
-          body: "Buka Pengaturan → Tim. Staf perlu punya (atau akan membuat) akun Google.",
+          body: "Buka Pengaturan → Tim. Staf perlu punya (atau akan membuat) akun SellOn dengan email & password sendiri.",
         },
       },
       {
         heading: "1. Undang staf",
         paragraphs: [
-          "Klik Undang Staf, masukkan Email Google staf (harus sama dengan akun Google mereka), pilih Role, lalu klik Undang. Kalau mereka sudah punya akun SellOn, langsung ditambahkan. Kalau belum, statusnya “Pending” dan otomatis aktif saat mereka login pertama kali dengan email itu.",
+          "Klik Undang Staf, masukkan Email staf (harus sama dengan email akun SellOn mereka), pilih Role, lalu klik Undang. Kalau mereka sudah punya akun SellOn, langsung ditambahkan. Kalau belum, statusnya “Pending” dan otomatis aktif saat mereka daftar/login pertama kali dengan email itu.",
         ],
         image: {
           src: "/tutorials/tim-akses/01-tim.png",
@@ -1396,14 +1407,14 @@ export const tutorialPosts: BlogPost[] = [
         ],
         image: {
           src: "/tutorials/tim-akses/02-undang-staf.png",
-          alt: "Dialog Undang Staf Baru: isi email Google dan pilih Role",
+          alt: "Dialog Undang Staf Baru: isi email dan pilih Role",
           caption: "Undang staf + pilih perannya.",
         },
       },
       {
         heading: "Tips",
         bullets: [
-          "Pakai email Google yang benar — undangan terikat ke email itu.",
+          "Pakai email yang benar — undangan terikat ke email itu.",
           "Beri peran seminimal yang dibutuhkan untuk keamanan toko.",
           "Cabut akses staf yang sudah tidak aktif lewat tombol hapus.",
         ],

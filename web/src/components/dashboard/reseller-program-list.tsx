@@ -30,7 +30,7 @@ function ShareDialog({
     ``,
     `Cara daftar (mudah banget):`,
     `1️⃣ Buka link ini: ${inviteLink}`,
-    `2️⃣ Login pakai akun Google`,
+    `2️⃣ Daftar pakai email & password (verifikasi kode via email)`,
     `3️⃣ Kamu otomatis terdaftar sebagai reseller kami!`,
     ``,
     `Setelah itu kamu bisa langsung pilih produk kami dan jual di toko kamu sendiri — tanpa perlu stok.`,

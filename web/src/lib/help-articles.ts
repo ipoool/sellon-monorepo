@@ -50,29 +50,29 @@ export const helpArticles: HelpArticle[] = [
     category: "memulai",
     title: "Cara daftar akun SellOn",
     excerpt:
-      "Login pakai akun Google Anda — tidak perlu isi formulir panjang.",
+      "Daftar pakai email & password Anda sendiri — verifikasi lewat kode di email.",
     readingTime: "2 menit",
     body: [
       {
         type: "p",
         text:
-          "Mendaftar SellOn dirancang sesimpel mungkin. Anda tidak perlu mengisi formulir, mengunggah KTP, atau menunggu verifikasi. Cukup login menggunakan akun Google.",
+          "Mendaftar SellOn dirancang sesimpel mungkin. Anda tidak perlu mengunggah KTP atau menunggu verifikasi manual. Cukup isi email & password, lalu verifikasi lewat kode 6 digit yang dikirim ke email Anda.",
       },
       { type: "h2", text: "Langkah pendaftaran" },
       {
         type: "ol",
         items: [
-          "Buka halaman /login dari mana saja di sellon.id.",
-          "Klik tombol 'Lanjut dengan Google'.",
-          "Pilih akun Google yang ingin Anda pakai untuk toko.",
-          "Setelah login, Anda akan diarahkan ke setup wizard untuk membuat toko pertama.",
+          "Buka halaman /login dari mana saja di sellon.id, lalu pilih tab 'Daftar'.",
+          "Isi nama, email, dan password (minimal 8 karakter, kombinasi huruf & angka).",
+          "Cek email Anda, masukkan kode verifikasi 6 digit yang kami kirim.",
+          "Setelah terverifikasi, Anda akan diarahkan ke setup wizard untuk membuat toko pertama.",
         ],
       },
       {
         type: "callout",
         tone: "info",
         text:
-          "Akun yang Anda pilih akan menjadi pemilik toko. Pilih akun yang Anda kontrol penuh — login Google ini juga jadi cara Anda masuk lagi nanti.",
+          "Email yang Anda daftarkan akan menjadi pemilik toko. Pastikan email tersebut aktif dan Anda kontrol penuh — ini juga jadi cara Anda masuk lagi nanti.",
       },
       {
         type: "p",
@@ -86,13 +86,13 @@ export const helpArticles: HelpArticle[] = [
     category: "memulai",
     title: "Setup toko pertamamu dalam 5 menit",
     excerpt:
-      "Dari login Google sampai katalog publik siap dibagikan ke pelanggan.",
+      "Dari daftar email sampai katalog publik siap dibagikan ke pelanggan.",
     readingTime: "5 menit",
     body: [
       {
         type: "p",
         text:
-          "Setelah daftar dengan Google, ada 4 langkah untuk membuat toko siap menerima pesanan.",
+          "Setelah daftar & verifikasi email, ada 4 langkah untuk membuat toko siap menerima pesanan.",
       },
       { type: "h2", text: "1. Setup wizard" },
       {
@@ -886,8 +886,8 @@ export const helpArticles: HelpArticle[] = [
       {
         type: "ul",
         items: [
-          "Bagikan akses Google Anda ke staff (tidak direkomendasikan untuk privacy).",
-          "Pakai akun Google bersama yang khusus untuk SellOn — buat alias di Google Workspace bila Anda pakai domain bisnis.",
+          "Bagikan password akun Anda ke staff (tidak direkomendasikan untuk privacy).",
+          "Pakai email bersama yang khusus untuk SellOn — buat alias email bila Anda pakai domain bisnis.",
           "Tunggu rilis multi-user di update mendatang.",
         ],
       },
@@ -1115,13 +1115,13 @@ export const helpArticles: HelpArticle[] = [
       {
         type: "p",
         text:
-          "MVP belum punya self-service delete di dashboard. Untuk menghapus akun, kirim email ke halo@sellon.id dari alamat email yang Anda pakai login Google.",
+          "MVP belum punya self-service delete di dashboard. Untuk menghapus akun, kirim email ke halo@sellon.id dari alamat email akun SellOn Anda.",
       },
       { type: "h2", text: "Yang akan dihapus" },
       {
         type: "ul",
         items: [
-          "Akun Google → SellOn (bukan akun Google itu sendiri).",
+          "Akun SellOn Anda (email, password, dan semua data terkait).",
           "Profil toko, produk, foto produk di storage.",
           "Database pelanggan, pesanan, dan promo.",
           "Server key Midtrans yang terenkripsi di sistem kami.",
@@ -1187,7 +1187,7 @@ export const helpArticles: HelpArticle[] = [
       {
         type: "p",
         text:
-          "Mulai paket Pro, Anda bisa mengundang staf dengan dua role berbeda. Staf login dengan akun Google mereka sendiri — Anda tidak perlu berbagi password.",
+          "Mulai paket Pro, Anda bisa mengundang staf dengan dua role berbeda. Staf daftar/login dengan akun email mereka sendiri — Anda tidak perlu berbagi password.",
       },
       { type: "h2", text: "Role yang tersedia" },
       {
@@ -1202,8 +1202,8 @@ export const helpArticles: HelpArticle[] = [
         type: "ol",
         items: [
           "Pengaturan → Tim → klik 'Undang Staf'.",
-          "Masukkan alamat email Google staf dan pilih role.",
-          "Staf mendapat email undangan. Setelah mereka login, mereka otomatis terhubung ke toko Anda.",
+          "Masukkan alamat email staf dan pilih role.",
+          "Staf mendapat email undangan. Setelah mereka daftar/login dengan email yang sama, mereka otomatis terhubung ke toko Anda.",
         ],
       },
       { type: "h2", text: "Batas staf per paket" },
