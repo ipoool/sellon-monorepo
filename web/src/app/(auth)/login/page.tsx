@@ -17,12 +17,12 @@ export const metadata = pageMetadata({
   noindex: true,
 });
 
-function benefitsFor(emailSignup: boolean) {
+function benefitsFor(emailPassword: boolean) {
   return [
   {
     icon: Zap,
     title: "Setup 5 menit",
-    description: emailSignup
+    description: emailPassword
       ? "Daftar dengan email & password, verifikasi lewat kode di email. Tidak perlu isi formulir panjang."
       : "Masuk sekali klik pakai akun Google. Tidak perlu isi formulir panjang.",
   },
@@ -34,7 +34,7 @@ function benefitsFor(emailSignup: boolean) {
   {
     icon: ShieldCheck,
     title: "Aman & private",
-    description: emailSignup
+    description: emailPassword
       ? "Password kamu disimpan terenkripsi. Kami hanya menyimpan email, nama, dan data yang kamu isi sendiri."
       : "Kami hanya menyimpan email, nama, dan data yang kamu isi sendiri. Password Google-mu tidak pernah sampai ke kami.",
   },
@@ -50,7 +50,7 @@ function benefitsFor(emailSignup: boolean) {
  */
 async function signInOptions(): Promise<{
   google: boolean;
-  emailSignup: boolean;
+  emailPassword: boolean;
   googleClientId?: string;
 }> {
   try {
@@ -60,11 +60,13 @@ async function signInOptions(): Promise<{
     const data = await res.json();
     return {
       google: !!data?.features?.google_signin,
-      emailSignup: data?.features?.email_signup !== false,
+      emailPassword: data?.features?.email_password !== false,
       googleClientId: data?.google_client_id,
     };
   } catch {
-    return { google: false, emailSignup: true };
+    // API unreachable: fall back to the email form rather than rendering a
+    // page with no way in at all.
+    return { google: false, emailPassword: true };
   }
 }
 
@@ -112,7 +114,7 @@ export default async function MasukPage({
                   Daftar & langsung mulai resell
                 </h1>
                 <p className="mt-2 text-sm text-neutral-600">
-                  {options.emailSignup
+                  {options.emailPassword
                     ? "Belum punya akun? Daftar pakai email — setelah verifikasi kamu langsung aktif sebagai reseller."
                     : "Belum punya akun? Lanjutkan dengan Google — kamu langsung aktif sebagai reseller."}
                 </p>
@@ -123,7 +125,7 @@ export default async function MasukPage({
                   Masuk untuk mulai jualan
                 </h1>
                 <p className="mt-2 text-sm text-neutral-600">
-                  {options.emailSignup
+                  {options.emailPassword
                     ? "Belum punya akun? Daftar pakai email dan password — tinggal verifikasi kode di email."
                     : "Belum punya akun? Lanjutkan dengan Google, akunmu langsung dibuat."}
                 </p>
@@ -135,7 +137,7 @@ export default async function MasukPage({
             <CardContent className="gap-6">
               {!inviteCode && (
                 <ul className="flex flex-col gap-4">
-                  {benefitsFor(options.emailSignup).map(({ icon: Icon, title, description }) => (
+                  {benefitsFor(options.emailPassword).map(({ icon: Icon, title, description }) => (
                     <li key={title} className="flex items-start gap-3">
                       <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
                         <Icon className="size-5" strokeWidth={2} aria-hidden />
@@ -155,25 +157,24 @@ export default async function MasukPage({
                     inviteCode={inviteCode}
                     clientId={options.googleClientId}
                   />
-                  {!options.emailSignup && (
+                  {!options.emailPassword && (
                     <p className="text-center text-xs leading-relaxed text-neutral-500">
-                      Pendaftaran lewat email sedang tidak tersedia. Masuk dengan
-                      Google — kalau kamu pernah daftar pakai email yang sama,
-                      akunmu tetap yang itu juga.
+                      Kalau kamu pernah pakai email yang sama, akunmu tetap yang
+                      itu juga — tinggal lanjutkan dengan Google.
                     </p>
                   )}
-                  <div className="flex items-center gap-3">
-                    <span className="h-px flex-1 bg-neutral-200" />
-                    <span className="text-xs text-neutral-400">atau</span>
-                    <span className="h-px flex-1 bg-neutral-200" />
-                  </div>
+                  {/* Divider only earns its place when something follows it. */}
+                  {options.emailPassword && (
+                    <div className="flex items-center gap-3">
+                      <span className="h-px flex-1 bg-neutral-200" />
+                      <span className="text-xs text-neutral-400">atau</span>
+                      <span className="h-px flex-1 bg-neutral-200" />
+                    </div>
+                  )}
                 </div>
               )}
 
-              <EmailAuthForm
-                inviteCode={inviteCode}
-                emailSignupEnabled={options.emailSignup}
-              />
+              {options.emailPassword && <EmailAuthForm inviteCode={inviteCode} />}
               <p className="text-center text-xs leading-relaxed text-neutral-500">
                 Dengan masuk, kamu menyetujui{" "}
                 <Link href="/terms" className="font-medium text-brand-600 hover:text-brand-700">

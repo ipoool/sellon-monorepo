@@ -109,10 +109,12 @@ change — no web rebuild.
   password account. That link is safe because a row only ever holds a password after its own
   email verification passed, and because Google has proved the address. A second Google
   identity claiming an address that another one already holds is refused outright.
-- **Email + password** → 6-digit code emailed → session cookie. Gated by
-  `AUTH_EMAIL_SIGNUP_ENABLED`: set it false and `/auth/register`,
-  `/auth/resend-verification` and `/auth/forgot-password` all answer 503 pointing at Google,
-  while login with an existing password keeps working.
+- **Email + password** → 6-digit code emailed → session cookie. The whole path — register,
+  verify, resend, forgot/reset AND login — is gated by `AUTH_EMAIL_PASSWORD_ENABLED`. Set it
+  false to run Google-only: every one of those endpoints answers 503 naming Google, and the
+  login page renders the Google button alone. The flag is IGNORED when `GOOGLE_CLIENT_ID` is
+  empty, so the app can never be left with no way to sign in. `AUTH_EMAIL_SIGNUP_ENABLED` is
+  still read as the former name.
 
 **The password is never written to `users.password_hash` before the mailbox is proven.**
 `POST /auth/register` parks the bcrypt hash (and name) on the `email_verifications` row

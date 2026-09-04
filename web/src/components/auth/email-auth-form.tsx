@@ -31,22 +31,11 @@ async function postJSON(path: string, body: unknown) {
   return { ok: res.ok, status: res.status, data };
 }
 
-export function EmailAuthForm({
-  inviteCode,
-  /**
-   * False while outbound mail is unavailable: registration and password
-   * reset both end on a code that would never arrive, so we hide them
-   * rather than let someone walk into a dead end. Signing in with an
-   * existing password still works — that needs no delivery.
-   */
-  emailSignupEnabled = true,
-}: {
-  inviteCode?: string;
-  emailSignupEnabled?: boolean;
-}) {
+// Only rendered when the email+password path is open (see the login page):
+// when it is closed the whole form is omitted, not disabled in place.
+export function EmailAuthForm({ inviteCode }: { inviteCode?: string }) {
   const { push, refresh } = useRouter();
-  const [modeState, setMode] = useState<Mode>("login");
-  const mode: Mode = emailSignupEnabled ? modeState : "login";
+  const [mode, setMode] = useState<Mode>("login");
   const [step, setStep] = useState<Step>("form");
   const [submitting, setSubmitting] = useState(false);
   const [resending, setResending] = useState(false);
@@ -362,7 +351,6 @@ export function EmailAuthForm({
 
   return (
     <div className="flex flex-col gap-5">
-      {emailSignupEnabled && (
       <div className="grid grid-cols-2 gap-1 rounded-lg bg-neutral-100 p-1 text-sm font-medium">
         {(["login", "register"] as Mode[]).map((m) => (
           <button
@@ -380,7 +368,6 @@ export function EmailAuthForm({
           </button>
         ))}
       </div>
-      )}
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         {mode === "register" && (
@@ -411,7 +398,7 @@ export function EmailAuthForm({
         <div className="flex flex-col gap-1.5">
           <div className="flex items-baseline justify-between gap-2">
             <Label htmlFor="password">Password</Label>
-            {mode === "login" && emailSignupEnabled && (
+            {mode === "login" && (
               <button
                 type="button"
                 onClick={() => setStep("forgot")}

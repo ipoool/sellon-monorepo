@@ -48,13 +48,15 @@ type Config struct {
 	S3Bucket    string
 	S3AccessKey string
 	S3SecretKey string
-	// AuthEmailSignupEnabled gates the email+password signup path
-	// (register, resend code, forgot password). Turn it OFF when outbound
-	// mail is down: those flows all dead-end on an email that never
-	// arrives, so the honest thing is to close them and point people at
-	// Google sign-in, which needs no delivery at all. Login with an
-	// existing password keeps working either way.
-	AuthEmailSignupEnabled bool
+	// AuthEmailPasswordEnabled gates the ENTIRE email+password path:
+	// register, verify, resend code, forgot password AND login. Turn it off
+	// to run Google-only — the state we want while outbound mail is down,
+	// since every one of those flows either needs a delivered code or
+	// leaves a half-usable account behind.
+	//
+	// Guarded in Load(): it is forced back on when no Google client id is
+	// configured, so the app can never end up with zero ways to sign in.
+	AuthEmailPasswordEnabled bool
 
 	// S3PublicBaseURL is the prefix of the asset URLs stored in the database
 	// and rendered in browsers. The bucket is PRIVATE, so this points at the
@@ -136,29 +138,30 @@ func Load() (*Config, error) {
 	v.SetDefault("postgres_sslmode", "disable")
 	v.SetDefault("cname_target", "cname.sellon.id")
 	v.SetDefault("order_expiry_hours", 1)
-	v.SetDefault("auth_email_signup_enabled", true)
+	v.SetDefault("auth_email_password_enabled", true)
+	v.SetDefault("auth_email_signup_enabled", true) // previous name, still honoured
 
 	cfg := &Config{
-		Port:                   v.GetString("api_port"),
-		Env:                    v.GetString("api_env"),
-		LogLevel:               v.GetString("api_log_level"),
-		DBHost:                 v.GetString("postgres_host"),
-		DBPort:                 v.GetString("postgres_port"),
-		DBUser:                 v.GetString("postgres_user"),
-		DBPassword:             v.GetString("postgres_password"),
-		DBName:                 v.GetString("postgres_db"),
-		DBSSLMode:              v.GetString("postgres_sslmode"),
-		RedisHost:              v.GetString("redis_host"),
-		RedisPort:              v.GetString("redis_port"),
-		GoogleClientID:         v.GetString("google_client_id"),
-		JWTSecret:              v.GetString("jwt_secret"),
-		JWTTTL:                 time.Duration(v.GetInt("jwt_ttl_hours")) * time.Hour,
-		WebOrigin:              v.GetString("web_origin"),
-		WebhookBaseURL:         strings.TrimRight(v.GetString("webhook_base_url"), "/"),
-		AuthEmailSignupEnabled: v.GetBool("auth_email_signup_enabled"),
-		S3Endpoint:             strings.TrimRight(v.GetString("s3_endpoint"), "/"),
-		S3Region:               v.GetString("s3_region"),
-		S3Bucket:               v.GetString("s3_bucket"),
+		Port:                     v.GetString("api_port"),
+		Env:                      v.GetString("api_env"),
+		LogLevel:                 v.GetString("api_log_level"),
+		DBHost:                   v.GetString("postgres_host"),
+		DBPort:                   v.GetString("postgres_port"),
+		DBUser:                   v.GetString("postgres_user"),
+		DBPassword:               v.GetString("postgres_password"),
+		DBName:                   v.GetString("postgres_db"),
+		DBSSLMode:                v.GetString("postgres_sslmode"),
+		RedisHost:                v.GetString("redis_host"),
+		RedisPort:                v.GetString("redis_port"),
+		GoogleClientID:           v.GetString("google_client_id"),
+		JWTSecret:                v.GetString("jwt_secret"),
+		JWTTTL:                   time.Duration(v.GetInt("jwt_ttl_hours")) * time.Hour,
+		WebOrigin:                v.GetString("web_origin"),
+		WebhookBaseURL:           strings.TrimRight(v.GetString("webhook_base_url"), "/"),
+		AuthEmailPasswordEnabled: emailPasswordEnabled(v),
+		S3Endpoint:               strings.TrimRight(v.GetString("s3_endpoint"), "/"),
+		S3Region:                 v.GetString("s3_region"),
+		S3Bucket:                 v.GetString("s3_bucket"),
 		// Accept the AWS-standard variable names too, so a deploy that
 		// already exports AWS_ACCESS_KEY_ID works without duplication.
 		S3AccessKey: firstNonEmpty(
@@ -239,4 +242,21 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// emailPasswordEnabled resolves the email+password switch.
+//
+// AUTH_EMAIL_PASSWORD_ENABLED is the current name; AUTH_EMAIL_SIGNUP_ENABLED
+// was the earlier one and is still honoured so an existing .env keeps
+// working. Either being explicitly false turns the path off.
+//
+// The Google guard is the important part: disabling email+password with no
+// Google client id configured would leave no way to sign in at all, so in
+// that case the switch is ignored and the path stays open.
+func emailPasswordEnabled(v *viper.Viper) bool {
+	enabled := v.GetBool("auth_email_password_enabled") && v.GetBool("auth_email_signup_enabled")
+	if !enabled && v.GetString("google_client_id") == "" {
+		return true
+	}
+	return enabled
 }

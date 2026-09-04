@@ -113,7 +113,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	metaClient := meta.NewClient(logger)
 	metaNotifier := meta.NewNotifier(stores, orders, subscriptions, encryptor, metaClient, publicWebURL, logger)
 
-	authHandler := handler.NewAuthHandler(users, emailVerifications, memberships, googleVerifier, jwtSvc, mailer, publicWebURL, logger, cfg.IsProd(), cfg.AuthEmailSignupEnabled)
+	authHandler := handler.NewAuthHandler(users, emailVerifications, memberships, googleVerifier, jwtSvc, mailer, publicWebURL, logger, cfg.IsProd(), cfg.AuthEmailPasswordEnabled)
 	storeHandler := handler.NewStoreHandler(stores, subscriptions, auditLogger, logger)
 	metaHandler := handler.NewMetaHandler(stores, encryptor, cfg.WebhookBaseURL, auditLogger, logger)
 	productHandler := handler.NewProductHandler(products, variants, stores, subscriptions, planRepo, bulkJobs, productDiscounts, modifierRepo, materialRepo, categories, courseVideos, storageClient, broker, auditLogger, logger)

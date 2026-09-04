@@ -31,22 +31,22 @@ type AuthHandler struct {
 	webOrigin     string
 	logger        *slog.Logger
 	cookieSecure  bool
-	// emailSignupEnabled gates the three flows that dead-end without
-	// outbound mail. Login with an existing password is deliberately NOT
-	// gated — it needs no delivery.
-	emailSignupEnabled bool
+	// emailPasswordEnabled gates the whole email+password path — register,
+	// verify, resend, forgot password AND login. Off means Google-only.
+	emailPasswordEnabled bool
 }
 
-// errEmailSignupDisabled is the copy shown while outbound mail is
-// unavailable. It names the alternative rather than just refusing.
-const errEmailSignupDisabled = "pendaftaran & reset password lewat email sedang tidak tersedia. " +
-	"Silakan masuk dengan Google — akun kamu tetap sama."
+// errEmailPasswordDisabled is the copy shown when the app is running
+// Google-only. It names the alternative rather than just refusing, and says
+// the account is the same one so nobody thinks they have to start over.
+const errEmailPasswordDisabled = "masuk & daftar lewat email sedang tidak tersedia. " +
+	"Silakan lanjutkan dengan Google — kalau kamu pernah pakai email yang sama, akunmu tetap yang itu juga."
 
 func (h *AuthHandler) emailFlowsOpen(w http.ResponseWriter) bool {
-	if h.emailSignupEnabled {
+	if h.emailPasswordEnabled {
 		return true
 	}
-	response.Error(w, http.StatusServiceUnavailable, errEmailSignupDisabled)
+	response.Error(w, http.StatusServiceUnavailable, errEmailPasswordDisabled)
 	return false
 }
 
@@ -60,19 +60,19 @@ func NewAuthHandler(
 	webOrigin string,
 	logger *slog.Logger,
 	cookieSecure bool,
-	emailSignupEnabled bool,
+	emailPasswordEnabled bool,
 ) *AuthHandler {
 	return &AuthHandler{
-		users:              users,
-		verifications:      verifications,
-		memberships:        memberships,
-		google:             google,
-		jwt:                jwt,
-		mailer:             mailer,
-		webOrigin:          webOrigin,
-		logger:             logger,
-		cookieSecure:       cookieSecure,
-		emailSignupEnabled: emailSignupEnabled,
+		users:                users,
+		verifications:        verifications,
+		memberships:          memberships,
+		google:               google,
+		jwt:                  jwt,
+		mailer:               mailer,
+		webOrigin:            webOrigin,
+		logger:               logger,
+		cookieSecure:         cookieSecure,
+		emailPasswordEnabled: emailPasswordEnabled,
 	}
 }
 
@@ -257,6 +257,9 @@ var dummyHash = []byte("$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17
 
 // POST /api/v1/auth/login
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
+	if !h.emailFlowsOpen(w) {
+		return
+	}
 	var req loginReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.Error(w, http.StatusBadRequest, "data tidak valid")
@@ -343,6 +346,9 @@ var errClaimPasswordMismatch = errors.New("password tidak cocok dengan yang kamu
 // registered could be entered by that owner and would install the password a
 // third party chose at register time.
 func (h *AuthHandler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
+	if !h.emailFlowsOpen(w) {
+		return
+	}
 	var req verifyEmailReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.Error(w, http.StatusBadRequest, "data tidak valid")
@@ -475,6 +481,9 @@ type resetPasswordReq struct {
 // The code is the proof of ownership here, so it sets the password outright
 // and revokes every session issued before now.
 func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
+	if !h.emailFlowsOpen(w) {
+		return
+	}
 	var req resetPasswordReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.Error(w, http.StatusBadRequest, "data tidak valid")

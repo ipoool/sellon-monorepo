@@ -27,11 +27,11 @@ func Info(cfg *config.Config, storageReady bool) http.HandlerFunc {
 				// dashboard show the "Bayar Sekarang" button next to the
 				// manual-transfer fallback.
 				"platform_billing": cfg.PlatformMidtransServerKey != "",
-				// Sign-in options. email_signup goes false when outbound mail
-				// is unavailable, so the UI stops offering a flow that would
-				// dead-end on a code that never arrives.
-				"google_signin": googleReady,
-				"email_signup":  cfg.AuthEmailSignupEnabled,
+				// Sign-in options. email_password covers the whole
+				// email+password path including login: false means the login
+				// page offers Google only.
+				"google_signin":  googleReady,
+				"email_password": cfg.AuthEmailPasswordEnabled,
 			},
 		}
 		// Public by design: this id is visible in any Google sign-in button.
