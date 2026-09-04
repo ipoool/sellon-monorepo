@@ -182,13 +182,21 @@ func (req *promoReq) toInput() (repository.PromoInput, error) {
 	if in.MinPurchaseCents < 0 {
 		return in, errors.New("minimum belanja tidak boleh negatif")
 	}
-	parseTime := func(s *string) (*time.Time, error) {
+	// Date-only input is a WIB wall-clock date — sellers pick "30 Sep" in
+	// a <input type="date"> and mean the whole day in Jakarta. Parsing it
+	// as UTC midnight made a promo expire at 07:00 WIB that morning and a
+	// promo starting 1 Oct stay dead until 07:00 WIB. `endOfDay` decides
+	// which edge of the WIB day a bare date snaps to. Full RFC3339 input
+	// is respected as-is.
+	parseTime := func(s *string, endOfDay bool) (*time.Time, error) {
 		if s == nil || strings.TrimSpace(*s) == "" {
 			return nil, nil
 		}
-		// Accept date-only ("2026-05-09") or full ISO with time.
 		v := strings.TrimSpace(*s)
-		if t, err := time.Parse("2006-01-02", v); err == nil {
+		if t, err := time.ParseInLocation("2006-01-02", v, wib); err == nil {
+			if endOfDay {
+				t = t.AddDate(0, 0, 1).Add(-time.Second)
+			}
 			return &t, nil
 		}
 		t, err := time.Parse(time.RFC3339, v)
@@ -197,11 +205,11 @@ func (req *promoReq) toInput() (repository.PromoInput, error) {
 		}
 		return &t, nil
 	}
-	startsAt, err := parseTime(req.StartsAt)
+	startsAt, err := parseTime(req.StartsAt, false)
 	if err != nil {
 		return in, err
 	}
-	expiresAt, err := parseTime(req.ExpiresAt)
+	expiresAt, err := parseTime(req.ExpiresAt, true)
 	if err != nil {
 		return in, err
 	}

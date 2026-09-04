@@ -3,15 +3,14 @@
 import { useMemo, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { Package, Trash2, Loader2, MoreHorizontal, Percent } from "lucide-react";
+import { Package, Trash2, Loader2, Percent } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ShareProductButton } from "@/components/dashboard/share-product-button";
-// note: per-row navigation lives inside ProductRowActions; no direct Link here.
-import { ProductRowActions } from "@/components/dashboard/product-row-actions";
-import { AnchoredMenu } from "@/components/ui/anchored-menu";
+// note: per-row navigation lives inside ProductRowMenu; no direct Link here.
+import { ProductRowMenu } from "@/components/dashboard/product-row-actions";
 import {
   TABLE_PAGE_SIZE,
   TablePagination,
@@ -51,6 +50,17 @@ export function ProductsTable({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showConfirm, setShowConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  // The component instance survives pagination + filter changes (same route,
+  // new server props), so a Set kept across them meant "Pilih semua" on page 1
+  // then a jump to page 2 would bulk-delete products the seller can no longer
+  // see. Reset the selection whenever the rendered list changes.
+  const listSignature = `${page}|${products.map((p) => p.id).join(",")}`;
+  const [lastSignature, setLastSignature] = useState(listSignature);
+  if (listSignature !== lastSignature) {
+    setLastSignature(listSignature);
+    if (selected.size > 0) setSelected(new Set());
+  }
 
   // Memoized helpers for "select all on this page" checkbox state.
   // `all` is checked when every row on this page is selected, else
@@ -235,32 +245,22 @@ export function ProductsTable({
                 </div>
                 {/* Mobile: popover berisi semua actions */}
                 <div className="shrink-0">
-                  <AnchoredMenu
-                    ariaLabel="Aksi produk"
-                    icon={<MoreHorizontal className="size-4" aria-hidden />}
-                    buttonClassName="inline-flex size-8 items-center justify-center rounded-md border border-neutral-200 text-neutral-600 transition-colors hover:border-brand-500 hover:bg-brand-50 hover:text-brand-700"
-                  >
-                    {(close) => (
-                      <>
-                        <ShareProductButton
-                          storeSlug={storeSlug}
-                          productSlug={p.slug}
-                          productName={p.name}
-                          asMenu
-                          onAction={close}
-                        />
-                        <ProductRowActions
-                          productId={p.id}
-                          productName={p.name}
-                          productType={p.product_type}
-                          storeSlug={storeSlug}
-                          quotaFull={quotaFull}
-                          asMenu
-                          onMenuClose={close}
-                        />
-                      </>
+                  <ProductRowMenu
+                    productId={p.id}
+                    productName={p.name}
+                    productType={p.product_type}
+                    storeSlug={storeSlug}
+                    quotaFull={quotaFull}
+                    extraItems={(close) => (
+                      <ShareProductButton
+                        storeSlug={storeSlug}
+                        productSlug={p.slug}
+                        productName={p.name}
+                        asMenu
+                        onAction={close}
+                      />
                     )}
-                  </AnchoredMenu>
+                  />
                 </div>
               </div>
             );
@@ -359,32 +359,22 @@ export function ProductsTable({
                   <td className="px-5 py-3 text-neutral-600">{formatDateID(p.created_at)}</td>
                   <td className="px-5 py-3">
                     <div className="flex justify-end">
-                      <AnchoredMenu
-                        ariaLabel="Aksi produk"
-                        icon={<MoreHorizontal className="size-4" aria-hidden />}
-                        buttonClassName="inline-flex size-8 items-center justify-center rounded-md border border-neutral-200 text-neutral-600 transition-colors hover:border-brand-500 hover:bg-brand-50 hover:text-brand-700"
-                      >
-                        {(close) => (
-                          <>
-                            <ShareProductButton
-                              storeSlug={storeSlug}
-                              productSlug={p.slug}
-                              productName={p.name}
-                              asMenu
-                              onAction={close}
-                            />
-                            <ProductRowActions
-                              productId={p.id}
-                              productName={p.name}
-                              productType={p.product_type}
-                              storeSlug={storeSlug}
-                              quotaFull={quotaFull}
-                              asMenu
-                              onMenuClose={close}
-                            />
-                          </>
+                      <ProductRowMenu
+                        productId={p.id}
+                        productName={p.name}
+                        productType={p.product_type}
+                        storeSlug={storeSlug}
+                        quotaFull={quotaFull}
+                        extraItems={(close) => (
+                          <ShareProductButton
+                            storeSlug={storeSlug}
+                            productSlug={p.slug}
+                            productName={p.name}
+                            asMenu
+                            onAction={close}
+                          />
                         )}
-                      </AnchoredMenu>
+                      />
                     </div>
                   </td>
                 </tr>

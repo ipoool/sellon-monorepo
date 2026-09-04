@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { QrCard, type QrCardConfig, type QrLayout } from "@/components/dashboard/qr-card";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { showError, showSuccess } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import type { RestaurantTable, DineInSettings } from "@/lib/types";
@@ -102,6 +103,8 @@ export function TablesManager({
   const [newLabel, setNewLabel] = useState("");
   const [newArea, setNewArea] = useState("");
   const [busy, setBusy] = useState(false);
+  // Deleting a table invalidates its printed QR, so it goes through a confirm.
+  const [delTarget, setDelTarget] = useState<RestaurantTable | null>(null);
 
   const qrConfig: QrCardConfig = {
     layout: qrLayout,
@@ -149,6 +152,8 @@ export function TablesManager({
       }
       showSuccess("Pengaturan disimpan");
       router.refresh();
+    } catch (err) {
+      showError(err);
     } finally {
       setSavingSettings(false);
     }
@@ -179,6 +184,8 @@ export function TablesManager({
       setNewArea("");
       showSuccess("Meja ditambahkan");
       router.refresh();
+    } catch (err) {
+      showError(err);
     } finally {
       setBusy(false);
     }
@@ -187,8 +194,19 @@ export function TablesManager({
   const delTable = async (id: string) => {
     setBusy(true);
     try {
-      await fetch(`${apiBase}/api/v1/tables/${id}`, { method: "DELETE", credentials: "include" });
+      const res = await fetch(`${apiBase}/api/v1/tables/${id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        showError("Gagal menghapus meja");
+        return;
+      }
+      setDelTarget(null);
+      showSuccess("Meja dihapus");
       router.refresh();
+    } catch (err) {
+      showError(err);
     } finally {
       setBusy(false);
     }
@@ -476,7 +494,7 @@ export function TablesManager({
                     {t.area && <p className="text-xs text-neutral-500">{t.area}</p>}
                   </div>
                   <button
-                    onClick={() => delTable(t.id)}
+                    onClick={() => setDelTarget(t)}
                     className="flex size-8 items-center justify-center rounded-md text-neutral-400 hover:bg-danger/10 hover:text-danger"
                     aria-label="Hapus meja"
                   >
@@ -495,6 +513,19 @@ export function TablesManager({
           </div>
         )}
       </Card>
+
+      <ConfirmDialog
+        open={delTarget !== null}
+        onClose={() => setDelTarget(null)}
+        onConfirm={() => {
+          if (delTarget) void delTable(delTarget.id);
+        }}
+        kind="danger"
+        title={`Hapus Meja ${delTarget?.label ?? ""}?`}
+        description="QR yang sudah dicetak untuk meja ini langsung berhenti berfungsi — pelanggan tidak bisa lagi memesan dari meja tersebut. Tindakan ini tidak bisa dibatalkan."
+        confirmLabel="Hapus Meja"
+        busy={busy}
+      />
     </div>
   );
 }

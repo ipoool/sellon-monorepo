@@ -102,8 +102,58 @@ export function CustomersTable({ customers }: { customers: Customer[] }) {
           Tidak ada pelanggan yang cocok.
         </p>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-card">
-          <table className="w-full text-left text-sm">
+        <>
+        {/* Mobile: the 6-column table is unreadable below md, so render the
+            same rows as cards (same pattern as the Pesanan list). */}
+        <ul className="flex flex-col gap-3 md:hidden">
+          {paged.map((c) => (
+            <li key={c.id}>
+              <Link
+                href={`/customers/${c.id}`}
+                className="flex flex-col gap-3 rounded-xl border border-neutral-200 bg-white p-4 shadow-card transition-colors hover:border-brand-300"
+              >
+                <div className="flex items-start gap-3">
+                  <Avatar name={c.name} size="sm" />
+                  <div className="min-w-0 flex-1">
+                    <p className="flex items-center gap-2 font-medium text-neutral-900">
+                      <span className="truncate">{c.name}</span>
+                      {c.is_blacklisted && <Badge variant="warning">Blacklist</Badge>}
+                    </p>
+                    <p className="truncate font-mono text-xs text-neutral-500">
+                      {c.whatsapp_number}
+                    </p>
+                  </div>
+                  <ArrowRight className="size-4 shrink-0 text-neutral-400" aria-hidden />
+                </div>
+                <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                  <div className="flex justify-between gap-2">
+                    <dt className="text-neutral-500">Order</dt>
+                    <dd className="font-medium text-neutral-800">{c.total_orders}</dd>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <dt className="text-neutral-500">Kota</dt>
+                    <dd className="truncate font-medium text-neutral-800">{c.city || "—"}</dd>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <dt className="text-neutral-500">Belanja</dt>
+                    <dd className="font-medium text-neutral-900">
+                      {formatRupiah(c.total_spent_cents)}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <dt className="text-neutral-500">Terakhir</dt>
+                    <dd className="font-medium text-neutral-800">
+                      {c.last_order_at ? formatDateID(c.last_order_at) : "—"}
+                    </dd>
+                  </div>
+                </dl>
+              </Link>
+            </li>
+          ))}
+        </ul>
+
+        <div className="hidden overflow-x-auto rounded-xl border border-neutral-200 bg-white shadow-card md:block">
+          <table className="w-full min-w-[46rem] text-left text-sm">
             <thead className="bg-neutral-50 text-xs font-semibold uppercase tracking-wider text-neutral-500">
               <tr>
                 <th className="px-5 py-3">Pelanggan</th>
@@ -118,7 +168,7 @@ export function CustomersTable({ customers }: { customers: Customer[] }) {
               {paged.map((c) => (
                 <tr
                   key={c.id}
-                  className="group/row cursor-pointer hover:bg-neutral-50"
+                  className="group/row hover:bg-neutral-50"
                 >
                   <td className="px-5 py-3">
                     <Link
@@ -185,6 +235,7 @@ export function CustomersTable({ customers }: { customers: Customer[] }) {
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       <TablePagination

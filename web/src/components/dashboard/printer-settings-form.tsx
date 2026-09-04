@@ -198,6 +198,7 @@ export function PrinterSettingsForm({ initial }: { initial: Config }) {
               </p>
             </div>
             <Switch
+              aria-label="Auto-print setelah transaksi"
               checked={autoPrint}
               onChange={(e) => setAutoPrint(e.target.checked)}
             />

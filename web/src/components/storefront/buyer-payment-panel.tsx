@@ -63,6 +63,11 @@ export function BuyerPaymentPanel({
 }: Props) {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [marked, setMarked] = useState(false);
+  // Snap link. Starts from the order but can be minted here — CreateOrder
+  // doesn't call Midtrans, so an order can legitimately arrive without one.
+  const [snapUrl, setSnapUrl] = useState(paymentURL);
+  const [creatingLink, setCreatingLink] = useState(false);
+  const [waSending, setWaSending] = useState(false);
   const [zoomQris, setZoomQris] = useState<string | null>(null);
   // Tahap konfirmasi: null = belum (tombol "Aku sudah bayar"),
   // "choose" = pilih channel (WA atau sistem), "upload" = form upload.
@@ -129,29 +134,74 @@ export function BuyerPaymentPanel({
     }
   }
 
-  async function sendViaWA() {
-    if (!sellerWA) return;
-    // Tetap kirim sinyal mark-paid ke backend supaya seller dapat
-    // trigger verifikasi di dashboard (status: pending). User akan
-    // attach screenshot sendiri di WhatsApp.
+  // Fired from the <a> click handler, NOT via window.open after an await:
+  // mobile Safari/Chrome block a popup opened outside the user-activation
+  // window, so the buyer never reached WhatsApp while the UI still claimed
+  // "Notifikasi terkirim". The anchor does the navigation natively; this only
+  // sends the mark-paid signal and reports success once it resolves.
+  function notifySellerViaWA() {
+    if (waSending) return;
+    setWaSending(true);
+    void (async () => {
+      try {
+        const res = await fetch(
+          `${apiBase}/api/v1/storefront/${storeSlug}/orders/${orderNumber}/mark-paid`,
+          { method: "POST" },
+        );
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        setMarked(true);
+        setStage(null);
+      } catch (err) {
+        showError(err);
+      } finally {
+        setWaSending(false);
+      }
+    })();
+  }
+
+  async function createPaymentLink() {
+    setCreatingLink(true);
     try {
-      await fetch(
-        `${apiBase}/api/v1/storefront/${storeSlug}/orders/${orderNumber}/mark-paid`,
+      const res = await fetch(
+        `${apiBase}/api/v1/storefront/${storeSlug}/orders/${orderNumber}/payment-link`,
         { method: "POST" },
       );
-    } catch {
-      // best-effort — open WA tetap lanjut
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.payment_url) {
+        throw new Error(data.error || "Gagal membuat link pembayaran");
+      }
+      setSnapUrl(data.payment_url as string);
+      showSuccess("Link pembayaran siap — klik 'Bayar Sekarang'.");
+    } catch (err) {
+      showError(err);
+    } finally {
+      setCreatingLink(false);
     }
-    window.open(sellerWA, "_blank", "noopener,noreferrer");
-    setMarked(true);
-    setStage(null);
   }
 
   // Determine which sections to show based on the chosen payment method.
+  // Derived from the METHOD, not from the presence of a Snap URL: an order can
+  // be Midtrans and still have no payment_url yet (CreateOrder never mints
+  // one), and keying off the URL made that order render as "penjual belum
+  // mengatur metode pembayaran".
   const pm = paymentMethod.toLowerCase();
   const isQrisStatis = pm.includes("qris statis") || pm.includes("qris_statis");
   const isTransferManual = pm.includes("transfer") || pm.includes("manual");
-  const isMidtrans = !!paymentURL && !isQrisStatis && !isTransferManual;
+  const isCashier = pm.includes("kasir") || pm.includes("cashier");
+  const isWaOnly = pm.includes("whatsapp") || pm.includes("wa_konfirmasi");
+  // "Pembayaran Otomatis" = the label the web checkout stores; "midtrans" =
+  // the code the kiosk + table self-order send. An existing Snap URL also
+  // counts, for orders recorded before either.
+  const isMidtrans =
+    !isQrisStatis &&
+    !isTransferManual &&
+    !isCashier &&
+    !isWaOnly &&
+    (pm.includes("midtrans") ||
+      pm.includes("otomatis") ||
+      pm.includes("snap") ||
+      !!snapUrl);
 
   // Sort: primary bank/QRIS first, then split into transfer + QRIS lists in
   // a single pass so the JSX doesn't iterate twice.
@@ -184,8 +234,9 @@ export function BuyerPaymentPanel({
       </p>
 
       <div className="mt-5 flex flex-col gap-3">
-        {/* Midtrans Snap link — only shown if buyer chose a Midtrans method */}
-        {paymentURL && (!paymentMethod || isMidtrans) && (
+        {/* Midtrans Snap — shown whenever the order's method is Midtrans, even
+            before a Snap link exists (the buyer mints it here). */}
+        {isMidtrans && (
           <div className="rounded-xl border border-brand-200 bg-brand-50/40 p-4">
             <div className="flex items-start gap-3">
               <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-brand-500 text-white">
@@ -199,20 +250,33 @@ export function BuyerPaymentPanel({
                   <Badge variant="brand">Otomatis</Badge>
                 </div>
                 <p className="mt-1 text-sm text-neutral-700">
-                  Klik tombol di bawah → bayar di halaman Midtrans → status
-                  otomatis ter-update tanpa perlu konfirmasi manual.
+                  {snapUrl
+                    ? "Klik tombol di bawah → bayar di halaman Midtrans → status otomatis ter-update tanpa perlu konfirmasi manual."
+                    : "Buat link pembayarannya dulu, lalu bayar di halaman Midtrans. Status otomatis ter-update setelah pembayaran berhasil."}
                 </p>
-                <a
-                  href={paymentURL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="mt-3 inline-flex"
-                >
-                  <Button size="md">
-                    Bayar Sekarang
-                    <ExternalLink className="size-4" aria-hidden />
+                {snapUrl ? (
+                  <Button asChild size="md" className="mt-3">
+                    <a href={snapUrl} target="_blank" rel="noopener noreferrer">
+                      Bayar Sekarang
+                      <ExternalLink className="size-4" aria-hidden />
+                    </a>
                   </Button>
-                </a>
+                ) : (
+                  <Button
+                    type="button"
+                    size="md"
+                    className="mt-3"
+                    onClick={createPaymentLink}
+                    disabled={creatingLink}
+                  >
+                    {creatingLink ? (
+                      <Loader2 className="size-4 animate-spin" aria-hidden />
+                    ) : (
+                      <CreditCard className="size-4" aria-hidden />
+                    )}
+                    {creatingLink ? "Menyiapkan…" : "Buat link pembayaran"}
+                  </Button>
+                )}
               </div>
             </div>
           </div>
@@ -303,7 +367,7 @@ export function BuyerPaymentPanel({
       </div>
 
       {/* Empty state: no payment methods configured */}
-      {sortedBanks.length === 0 && !paymentURL && (
+      {!isMidtrans && sortedBanks.length === 0 && !snapUrl && (
         <div className="mt-4 rounded-xl border border-warning/30 bg-warning/5 px-4 py-3 text-sm text-neutral-700">
           Penjual belum mengatur metode pembayaran. Hubungi penjual langsung
           untuk informasi rekening transfer.
@@ -378,29 +442,49 @@ export function BuyerPaymentPanel({
                     penjual lihat langsung di dashboard.
                   </span>
                 </button>
-                <button
-                  type="button"
-                  onClick={sendViaWA}
-                  disabled={!sellerWA}
-                  title={!sellerWA ? "Penjual belum mengatur nomor WhatsApp" : undefined}
-                  className={cn(
-                    "flex flex-col items-start gap-2 rounded-xl border bg-white p-4 text-left transition-colors",
-                    sellerWA
-                      ? "border-neutral-200 hover:border-success/40 hover:bg-success/5"
-                      : "cursor-not-allowed border-neutral-200 opacity-50",
-                  )}
-                >
-                  <span className="flex size-9 items-center justify-center rounded-lg bg-success/15 text-success">
-                    <MessageCircle className="size-5" aria-hidden />
-                  </span>
-                  <span className="font-semibold text-neutral-900">
-                    Kirim via WhatsApp
-                  </span>
-                  <span className="text-xs text-neutral-600">
-                    Buka chat dengan penjual — attach screenshot manual di
-                    sana. Cocok kalau kamu mau tanya juga.
-                  </span>
-                </button>
+                {sellerWA ? (
+                  <a
+                    href={sellerWA}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={notifySellerViaWA}
+                    className="flex flex-col items-start gap-2 rounded-xl border border-neutral-200 bg-white p-4 text-left transition-colors hover:border-success/40 hover:bg-success/5"
+                  >
+                    <span className="flex size-9 items-center justify-center rounded-lg bg-success/15 text-success">
+                      {waSending ? (
+                        <Loader2 className="size-5 animate-spin" aria-hidden />
+                      ) : (
+                        <MessageCircle className="size-5" aria-hidden />
+                      )}
+                    </span>
+                    <span className="font-semibold text-neutral-900">
+                      Kirim via WhatsApp
+                    </span>
+                    <span className="text-xs text-neutral-600">
+                      Buka chat dengan penjual — attach screenshot manual di
+                      sana. Cocok kalau kamu mau tanya juga.
+                    </span>
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    disabled
+                    title="Penjual belum mengatur nomor WhatsApp"
+                    className={cn(
+                      "flex cursor-not-allowed flex-col items-start gap-2 rounded-xl border border-neutral-200 bg-white p-4 text-left opacity-50",
+                    )}
+                  >
+                    <span className="flex size-9 items-center justify-center rounded-lg bg-success/15 text-success">
+                      <MessageCircle className="size-5" aria-hidden />
+                    </span>
+                    <span className="font-semibold text-neutral-900">
+                      Kirim via WhatsApp
+                    </span>
+                    <span className="text-xs text-neutral-600">
+                      Penjual belum mengatur nomor WhatsApp.
+                    </span>
+                  </button>
+                )}
               </div>
             </>
           ) : (

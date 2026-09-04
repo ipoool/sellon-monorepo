@@ -181,6 +181,7 @@ export function MembershipSettingsForm({ initial }: { initial: MembershipTier[] 
                     </td>
                     <td className="py-2 text-center">
                       <Switch
+                        aria-label={`Aktifkan tier ${t.name || i + 1}`}
                         checked={t.isActive}
                         onChange={(e) => update(i, { isActive: e.target.checked })}
                       />

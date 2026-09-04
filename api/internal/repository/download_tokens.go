@@ -14,6 +14,11 @@ import (
 
 var ErrDownloadTokenNotFound = errors.New("download token not found")
 
+// ErrDownloadTokenExists is returned by Create when a token was already minted
+// for the order item. Callers should treat it as "nothing new happened" and
+// skip any side effects (notably the delivery email) rather than as a failure.
+var ErrDownloadTokenExists = errors.New("download token already issued for order item")
+
 type DownloadToken struct {
 	ID             uuid.UUID
 	Token          string
@@ -71,9 +76,13 @@ func (r *DownloadTokenRepo) Create(ctx context.Context, in DownloadToken) (*Down
 		}
 		in.Token = t
 	}
+	// ON CONFLICT on the (order_item_id) unique index makes minting idempotent:
+	// a replayed webhook / a second mark-paid inserts nothing and gets
+	// ErrDownloadTokenExists, so no duplicate link and no duplicate email.
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO download_tokens (token, order_id, order_item_id, store_id, expires_at)
 		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (order_item_id) DO NOTHING
 		RETURNING id, token, order_id, order_item_id, store_id, expires_at,
 		          consumed_count, last_consumed_at, revoked_at, created_at
 	`, in.Token, in.OrderID, in.OrderItemID, in.StoreID, in.ExpiresAt)
@@ -82,6 +91,9 @@ func (r *DownloadTokenRepo) Create(ctx context.Context, in DownloadToken) (*Down
 		&t.ID, &t.Token, &t.OrderID, &t.OrderItemID, &t.StoreID,
 		&t.ExpiresAt, &t.ConsumedCount, &t.LastConsumedAt, &t.RevokedAt, &t.CreatedAt,
 	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrDownloadTokenExists
+		}
 		return nil, err
 	}
 	return &t, nil

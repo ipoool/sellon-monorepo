@@ -13,7 +13,7 @@ import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { JamBukaEditor } from "@/components/dashboard/jam-buka-editor";
 import { ImageUploadInput } from "@/components/dashboard/image-upload-input";
-import { deleteUploaded } from "@/lib/supabase";
+import { deleteUploaded } from "@/lib/uploads";
 import { showError, showSuccess } from "@/lib/toast";
 import type { OpenHours, Store } from "@/lib/types";
 
@@ -36,8 +36,10 @@ export function TokoForm({ initial }: { initial: Store | null }) {
   const [pending, setPending] = useState(false);
   const [logoUrl, setLogoUrl] = useState(initial?.logo_url ?? "");
   const [bannerUrl, setBannerUrl] = useState(initial?.banner_url ?? "");
+  // Mirrors the is_open switch so the badge next to it tells the truth.
+  const [isOpen, setIsOpen] = useState(initial?.is_open ?? true);
   // Track URL gambar yang sudah benar-benar tersimpan di server agar
-  // kalau seller ganti/hapus logo atau banner, file lama di Supabase
+  // kalau seller ganti/hapus logo atau banner, file lama di object storage
   // Storage ikut terhapus (no orphan files).
   const savedLogoRef = useRef<string>(initial?.logo_url ?? "");
   const savedBannerRef = useRef<string>(initial?.banner_url ?? "");
@@ -88,7 +90,7 @@ export function TokoForm({ initial }: { initial: Store | null }) {
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
 
       // Cleanup file lama setelah PUT sukses. Fire-and-forget; backend
-      // punya cross-tenant guard + skip non-Supabase URL.
+      // punya cross-tenant guard + skip URL dari host lain.
       if (savedLogoRef.current && savedLogoRef.current !== logoUrl) {
         void deleteUploaded(savedLogoRef.current);
       }
@@ -307,9 +309,12 @@ export function TokoForm({ initial }: { initial: Store | null }) {
                 <Switch
                   id="is_open_toggle"
                   name="is_open"
-                  defaultChecked={initial?.is_open ?? true}
+                  checked={isOpen}
+                  onChange={(e) => setIsOpen(e.target.checked)}
                 />
-                <Badge variant="success">Toko buka</Badge>
+                <Badge variant={isOpen ? "success" : "default"}>
+                  {isOpen ? "Toko buka" : "Toko tutup"}
+                </Badge>
               </label>
             </div>
           </Card>

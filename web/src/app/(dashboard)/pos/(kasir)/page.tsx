@@ -9,14 +9,35 @@ import type { Product, Category, Subscription, POSSession } from "@/lib/types";
 
 export const metadata = { title: "Kasir POS — SellOn" };
 
+// The POS catalog must hold EVERY active product: a single 200-row page hid the
+// rest of the menu from the cashier and left it out of the offline cache too.
+// Page until the server's `total` is covered, with a hard cap so a pathological
+// catalog can't stall the render.
+const PRODUCT_PAGE_SIZE = 200;
+const PRODUCT_FETCH_CAP = 2000;
+
+async function fetchAllProducts(): Promise<Product[]> {
+  const all: Product[] = [];
+  for (let offset = 0; offset < PRODUCT_FETCH_CAP; offset += PRODUCT_PAGE_SIZE) {
+    // include_variants=1 embeds full variant rows so the offline catalog cache
+    // is self-contained — the variant picker needs no network when offline.
+    const res = await serverApi<{ products: Product[]; total: number }>(
+      `/api/v1/products?limit=${PRODUCT_PAGE_SIZE}&offset=${offset}&status=active&include_variants=1`,
+    );
+    const page = res?.products ?? [];
+    all.push(...page);
+    if (page.length < PRODUCT_PAGE_SIZE) break;
+    if (typeof res?.total === "number" && all.length >= res.total) break;
+  }
+  return all;
+}
+
 export default async function POSPage() {
   const me = await getMe();
   if (!me) redirect("/login");
 
-  const [productsRes, categoriesRes, subRes, sessionRes] = await Promise.all([
-    // include_variants=1 embeds full variant rows so the offline catalog cache
-    // is self-contained — the variant picker needs no network when offline.
-    serverApi<{ products: Product[]; total: number }>("/api/v1/products?limit=200&status=active&include_variants=1"),
+  const [products, categoriesRes, subRes, sessionRes] = await Promise.all([
+    fetchAllProducts(),
     serverApi<{ categories: Category[] }>("/api/v1/categories"),
     serverApi<{ subscription: Subscription }>("/api/v1/subscription"),
     serverApi<{ session: POSSession | null }>("/api/v1/pos/sessions/active"),
@@ -61,7 +82,7 @@ export default async function POSPage() {
   return (
     <POSApp
       me={me}
-      products={productsRes?.products ?? []}
+      products={products}
       categories={categoriesRes?.categories ?? []}
       initialSession={sessionRes?.session ?? null}
     />

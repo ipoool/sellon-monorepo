@@ -1,13 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Package, Trash2, Edit3, Check } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { Package, Trash2, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { showSuccess, showError } from "@/lib/toast";
 import { formatRupiah } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import type { ResellerCatalogEntry, ResellerMembership, ProgramProduct } from "@/lib/types";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -123,11 +124,17 @@ function ImportModal({
   );
 }
 
+// `catalog` and `availableProducts` are rendered straight from props — no local
+// copy. The server component is the source of truth: after an import/removal we
+// `router.refresh()` and fresh props arrive. The page keys this component by the
+// active membership, so switching supplier remounts it with the right products
+// (a local useState copy would keep showing the previous supplier's list and
+// import with the wrong membership/product pairing).
 export function ResellerCatalogView({
-  catalog: initialCatalog,
+  catalog,
   memberships,
   activeMembershipID,
-  availableProducts: initialAvailable,
+  availableProducts: available,
 }: {
   catalog: ResellerCatalogEntry[];
   memberships: ResellerMembership[];
@@ -135,25 +142,37 @@ export function ResellerCatalogView({
   availableProducts: ProgramProduct[];
 }) {
   const router = useRouter();
+  const [isRefreshing, startRefresh] = useTransition();
   const [tab, setTab] = useState<Tab>(activeMembershipID ? "available" : "imported");
-  const [catalog, setCatalog] = useState(initialCatalog);
-  const [available] = useState(initialAvailable);
   const [importTarget, setImportTarget] = useState<ProgramProduct | null>(null);
+  const [removeTarget, setRemoveTarget] = useState<ResellerCatalogEntry | null>(null);
+  const [removing, setRemoving] = useState(false);
   const [selectedMembership, setSelectedMembership] = useState(activeMembershipID ?? memberships[0]?.id ?? "");
 
   const importedProductIDs = new Set(catalog.map((e) => e.product_id));
 
-  const handleRemove = async (catalogID: string, name: string) => {
-    if (!confirm(`Hapus "${name}" dari katalog?`)) return;
+  const refresh = () => startRefresh(() => router.refresh());
+
+  const handleRemove = async () => {
+    if (!removeTarget) return;
+    setRemoving(true);
     try {
-      await fetch(`${apiBase}/api/v1/reseller/catalog/${catalogID}`, {
+      const res = await fetch(`${apiBase}/api/v1/reseller/catalog/${removeTarget.id}`, {
         method: "DELETE",
         credentials: "include",
       });
-      setCatalog((prev) => prev.filter((e) => e.id !== catalogID));
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        showError(err.error || `HTTP ${res.status}`);
+        return;
+      }
+      setRemoveTarget(null);
       showSuccess("Produk dihapus dari katalog");
-    } catch {
-      showError("Gagal menghapus produk");
+      refresh();
+    } catch (err) {
+      showError(err);
+    } finally {
+      setRemoving(false);
     }
   };
 
@@ -170,11 +189,27 @@ export function ResellerCatalogView({
           membershipID={selectedMembership}
           onImported={() => {
             setImportTarget(null);
-            router.refresh();
+            refresh();
           }}
           onClose={() => setImportTarget(null)}
         />
       )}
+
+      <ConfirmDialog
+        open={!!removeTarget}
+        onClose={() => setRemoveTarget(null)}
+        onConfirm={handleRemove}
+        kind="danger"
+        busy={removing}
+        title="Hapus dari katalog?"
+        description={
+          <>
+            <strong>{removeTarget?.product_name}</strong> tidak akan tampil lagi di toko kamu.
+            Kamu bisa import ulang kapan saja dari tab Produk Supplier.
+          </>
+        }
+        confirmLabel="Ya, hapus"
+      />
 
       {/* Tabs */}
       <div className="flex gap-1 rounded-lg border border-neutral-200 bg-neutral-100 p-1 w-fit">
@@ -202,7 +237,7 @@ export function ResellerCatalogView({
 
       {/* Available products from supplier */}
       {tab === "available" && (
-        <div className="flex flex-col gap-4">
+        <div className={cn("flex flex-col gap-4", isRefreshing && "opacity-60")} aria-busy={isRefreshing}>
           {memberships.length > 1 && (
             <select
               value={selectedMembership}
@@ -275,10 +310,16 @@ export function ResellerCatalogView({
 
       {/* Imported catalog */}
       {tab === "imported" && (
-        <div className="overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-card">
+        <div
+          className={cn(
+            "overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-card",
+            isRefreshing && "opacity-60",
+          )}
+          aria-busy={isRefreshing}
+        >
           {catalog.length === 0 ? (
             <p className="py-12 text-center text-sm text-neutral-500">
-              Belum ada produk yang diimport. Pilih tab "Produk Supplier" untuk mulai.
+              Belum ada produk yang diimport. Pilih tab &ldquo;Produk Supplier&rdquo; untuk mulai.
             </p>
           ) : (
             <table className="w-full text-sm">
@@ -304,7 +345,7 @@ export function ResellerCatalogView({
                     <td className="px-4 py-3 text-right text-neutral-500">{entry.supplier_store_name}</td>
                     <td className="px-4 py-3 text-right">
                       <button
-                        onClick={() => handleRemove(entry.id, entry.product_name)}
+                        onClick={() => setRemoveTarget(entry)}
                         className="rounded p-1 text-neutral-400 transition-colors hover:bg-danger/10 hover:text-danger"
                         title="Hapus dari katalog"
                       >

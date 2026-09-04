@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	cryptorand "crypto/rand"
 	"errors"
 	"fmt"
 	"math"
@@ -54,7 +55,7 @@ type Order struct {
 	CustomerCity       string
 	Notes              string
 	SellerNotes        string
-	NeedsReview        bool   // offline-synced order that overdrew stock
+	NeedsReview        bool // offline-synced order that overdrew stock
 	ReviewReason       string
 	PaymentURL         string
 	PaidAt             *time.Time
@@ -84,8 +85,8 @@ type Order struct {
 	QueueNumber   *int
 	KitchenStatus *string
 	ServingType   string
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 type OrderItem struct {
@@ -151,6 +152,10 @@ type CreateOrderInput struct {
 	// Tax config snapshot. TaxBps=0 → no tax. Tax base = subtotal − discount.
 	TaxBps       int
 	TaxInclusive bool
+	// IdempotencyKey (optional, client-generated) makes a retried checkout
+	// return the original order instead of creating a second one. Backed by
+	// the partial unique index on (store_id, idempotency_key) from 0090.
+	IdempotencyKey string
 }
 
 type OrderRepo struct {
@@ -180,6 +185,19 @@ func (r *OrderRepo) ListByStore(ctx context.Context, storeID uuid.UUID, limit in
 // List returns rows + the total row count matching the filter (so callers
 // can render server-side pagination without a second query).
 func (r *OrderRepo) List(ctx context.Context, f ListOrdersFilter) ([]Order, int, error) {
+	rows, total, _, err := r.list(ctx, f, false)
+	return rows, total, err
+}
+
+// ListWithCounts is List plus the store-wide per-status counts the Pesanan tab
+// badges need. Both numbers come out of a SINGLE scan of the store's orders
+// (COUNT(*) FILTER for the filtered total, GROUP BY status for the badges) —
+// the page used to run two separate store-wide COUNT(*) queries per load.
+func (r *OrderRepo) ListWithCounts(ctx context.Context, f ListOrdersFilter) ([]Order, int, map[string]int, error) {
+	return r.list(ctx, f, true)
+}
+
+func (r *OrderRepo) list(ctx context.Context, f ListOrdersFilter, withCounts bool) ([]Order, int, map[string]int, error) {
 	if f.Limit <= 0 || f.Limit > 1000 {
 		f.Limit = 50
 	}
@@ -187,32 +205,65 @@ func (r *OrderRepo) List(ctx context.Context, f ListOrdersFilter) ([]Order, int,
 		f.Offset = 0
 	}
 	args := []any{f.StoreID}
-	where := "store_id = $1"
+	// `cond` holds every filter EXCEPT store_id, so the counting query can
+	// reuse it inside a COUNT(*) FILTER over the store's rows.
+	cond := ""
 	if f.Search != "" {
 		args = append(args, "%"+f.Search+"%")
-		where += " AND (order_number ILIKE $2 OR customer_name ILIKE $2)"
+		cond += " AND (order_number ILIKE $2 OR customer_name ILIKE $2)"
 	}
 	if len(f.Statuses) > 0 {
 		// Tab-style grouping (e.g. "Perlu Diproses" = pending+confirmed+processing).
 		args = append(args, f.Statuses)
-		where += " AND status = ANY($" + itoa(len(args)) + ")"
+		cond += " AND status = ANY($" + itoa(len(args)) + ")"
 	} else if f.Status != "" {
 		args = append(args, f.Status)
-		where += " AND status = $" + itoa(len(args))
+		cond += " AND status = $" + itoa(len(args))
 	}
 	if f.PaymentStatus != "" {
 		args = append(args, f.PaymentStatus)
-		where += " AND payment_status = $" + itoa(len(args))
+		cond += " AND payment_status = $" + itoa(len(args))
 	}
 	if f.NeedsReview {
-		where += " AND needs_review = true"
+		cond += " AND needs_review = true"
 	}
+	where := "store_id = $1" + cond
 
 	var total int
-	if err := r.pool.QueryRow(ctx,
+	counts := map[string]int{}
+	if withCounts {
+		// One pass: per-status badge counts (store-wide, filter-independent)
+		// and the filtered total, summed from the same GROUP BY.
+		filterExpr := "true"
+		if cond != "" {
+			filterExpr = strings.TrimPrefix(strings.TrimSpace(cond), "AND ")
+		}
+		cRows, err := r.pool.Query(ctx, `
+			SELECT status, COUNT(*), COUNT(*) FILTER (WHERE `+filterExpr+`)
+			FROM orders WHERE store_id = $1
+			GROUP BY status
+		`, args...)
+		if err != nil {
+			return nil, 0, nil, err
+		}
+		for cRows.Next() {
+			var status string
+			var all, matched int
+			if err := cRows.Scan(&status, &all, &matched); err != nil {
+				cRows.Close()
+				return nil, 0, nil, err
+			}
+			counts[status] = all
+			total += matched
+		}
+		cRows.Close()
+		if err := cRows.Err(); err != nil {
+			return nil, 0, nil, err
+		}
+	} else if err := r.pool.QueryRow(ctx,
 		"SELECT COUNT(*) FROM orders WHERE "+where, args...,
 	).Scan(&total); err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 
 	args = append(args, f.Limit, f.Offset)
@@ -227,7 +278,7 @@ func (r *OrderRepo) List(ctx context.Context, f ListOrdersFilter) ([]Order, int,
 
 	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	defer rows.Close()
 
@@ -239,11 +290,11 @@ func (r *OrderRepo) List(ctx context.Context, f ListOrdersFilter) ([]Order, int,
 			&o.SubtotalCents, &o.ShippingCents, &o.DiscountCents, &o.TaxCents, &o.TotalCents, &o.Courier,
 			&o.CustomerName, &o.CustomerWhatsApp, &o.CustomerCity, &o.NeedsReview, &o.ReviewReason, &o.CreatedAt,
 		); err != nil {
-			return nil, 0, err
+			return nil, 0, nil, err
 		}
 		out = append(out, o)
 	}
-	return out, total, rows.Err()
+	return out, total, counts, rows.Err()
 }
 
 func (r *OrderRepo) ListByCustomer(ctx context.Context, storeID, customerID uuid.UUID, limit int) ([]Order, error) {
@@ -551,6 +602,28 @@ func (r *OrderRepo) Complete(ctx context.Context, storeID, id uuid.UUID) error {
 
 // Cancel transitions any non-final order -> cancelled with optional reason.
 func (r *OrderRepo) Cancel(ctx context.Context, storeID, id uuid.UUID, reason string) error {
+	return r.cancel(ctx, storeID, id, reason, "")
+}
+
+// CancelIfUnpaid is Cancel with an extra payment guard applied inside the same
+// UPDATE: the row must still be payment_status='unpaid' AND carry no buyer
+// payment proof. Used by the lazy-expiry path on the public buyer order page,
+// which otherwise races the Midtrans webhook — the page reads "unpaid", the
+// webhook settles the order and mints download tokens, and the page's cancel
+// lands second, leaving status='cancelled' on a paid order whose stock, kuota
+// and promo allocation have all been released. Postgres re-evaluates the
+// UPDATE qual against the winning row version, so the guard is atomic with the
+// write. Returns ErrInvalidTransition when no row matches (i.e. it got paid,
+// or proof was uploaded, or it was already final).
+func (r *OrderRepo) CancelIfUnpaid(ctx context.Context, storeID, id uuid.UUID, reason string) error {
+	return r.cancel(ctx, storeID, id, reason,
+		" AND payment_status = 'unpaid' AND COALESCE(payment_proof_url, '') = ''")
+}
+
+// cancel does the actual work for Cancel / CancelIfUnpaid. extraGuard is
+// appended verbatim to the UPDATE's WHERE clause (callers only ever pass
+// constant SQL — never user input).
+func (r *OrderRepo) cancel(ctx context.Context, storeID, id uuid.UUID, reason, extraGuard string) error {
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
@@ -562,7 +635,7 @@ func (r *OrderRepo) Cancel(ctx context.Context, storeID, id uuid.UUID, reason st
 		    cancellation_reason = $3,
 		    cancelled_at = now(),
 		    updated_at = now()
-		WHERE id = $1 AND store_id = $2 AND status NOT IN ('completed', 'cancelled')
+		WHERE id = $1 AND store_id = $2 AND status NOT IN ('completed', 'cancelled')`+extraGuard+`
 	`, id, storeID, reason)
 	if err != nil {
 		return err
@@ -629,6 +702,12 @@ func (r *OrderRepo) Cancel(ctx context.Context, storeID, id uuid.UUID, reason st
 		return fmt.Errorf("decrement promo usage: %w", err)
 	}
 
+	// Give BOM materials back to stock (idempotent; writes compensating
+	// 'restore' ledger rows). Mirrors the product-stock restore above.
+	if err := reverseConsumptionTx(ctx, tx, storeID, id); err != nil {
+		return fmt.Errorf("restore material stock: %w", err)
+	}
+
 	return tx.Commit(ctx)
 }
 
@@ -674,9 +753,11 @@ func (r *OrderRepo) Refund(ctx context.Context, storeID, id uuid.UUID, amountCen
 		    refund_amount_cents = $3,
 		    refund_reason = $4,
 		    refunded_at = now(),
+		    refund_pending = false,
 		    updated_at = now()
 		WHERE id = $1 AND store_id = $2
 		  AND payment_status = 'paid'
+		  AND refunded_at IS NULL
 		  AND $3 <= total_cents
 		RETURNING status
 	`, id, storeID, amountCents, reason).Scan(&prevStatus)
@@ -744,9 +825,89 @@ func (r *OrderRepo) Refund(ctx context.Context, storeID, id uuid.UUID, amountCen
 		`, id); err != nil {
 			return fmt.Errorf("decrement promo usage on refund: %w", err)
 		}
+		if err := reverseConsumptionTx(ctx, tx, storeID, id); err != nil {
+			return fmt.Errorf("restore material stock on refund: %w", err)
+		}
 	}
 
 	return tx.Commit(ctx)
+}
+
+// RefundClaim is the snapshot returned by ClaimRefund — enough for the caller
+// to talk to the payment gateway without a second read.
+type RefundClaim struct {
+	OrderNumber   string
+	PaymentMethod string
+	TotalCents    int64
+}
+
+// ClaimRefund atomically reserves the refund slot for an order BEFORE any
+// money is moved. All the validation that used to live in Refund (and ran
+// only AFTER the gateway call) happens here: the order must be paid, not
+// already refunded, have no other refund in flight, and the amount must fit
+// inside the order total.
+//
+// The caller must either finish with Refund (which clears the flag) or call
+// ReleaseRefundClaim when the gateway rejects the refund. Returns
+// ErrRefundNotAllowed when nothing could be claimed — including the
+// double-submit case, which is exactly what stops money moving twice.
+func (r *OrderRepo) ClaimRefund(ctx context.Context, storeID, id uuid.UUID, amountCents int64) (*RefundClaim, error) {
+	if amountCents <= 0 {
+		return nil, ErrRefundNotAllowed
+	}
+	var c RefundClaim
+	err := r.pool.QueryRow(ctx, `
+		UPDATE orders
+		SET refund_pending = true, updated_at = now()
+		WHERE id = $1 AND store_id = $2
+		  AND payment_status = 'paid'
+		  AND refunded_at IS NULL
+		  AND refund_pending = false
+		  AND $3 <= total_cents
+		RETURNING order_number, payment_method, total_cents
+	`, id, storeID, amountCents).Scan(&c.OrderNumber, &c.PaymentMethod, &c.TotalCents)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrRefundNotAllowed
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+// ReleaseRefundClaim undoes ClaimRefund so the seller can retry after a
+// gateway rejection. Never clears the flag on an order that already settled
+// its refund.
+func (r *OrderRepo) ReleaseRefundClaim(ctx context.Context, storeID, id uuid.UUID) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE orders SET refund_pending = false, updated_at = now()
+		WHERE id = $1 AND store_id = $2 AND refunded_at IS NULL
+	`, id, storeID)
+	return err
+}
+
+// RecordPartialRefund books a partial refund that happened outside SellOn
+// (typically the seller refunding part of an order from the Midtrans
+// dashboard). payment_status stays 'paid' — the order is still a sale, just a
+// smaller one — so a later full refund is still possible. Flagged for review
+// so the seller sees the money moved.
+func (r *OrderRepo) RecordPartialRefund(ctx context.Context, storeID, id uuid.UUID, amountCents int64, reason string) error {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE orders
+		SET refund_amount_cents = $3,
+		    refund_reason = $4,
+		    needs_review = true,
+		    review_reason = 'Refund sebagian dari Midtrans — cek nominal & stok',
+		    updated_at = now()
+		WHERE id = $1 AND store_id = $2 AND payment_status = 'paid'
+	`, id, storeID, amountCents, reason)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrRefundNotAllowed
+	}
+	return nil
 }
 
 // ExpireStaleUnpaid auto-cancels orders left 'pending'/'unpaid' past the cutoff
@@ -912,6 +1073,71 @@ func (r *OrderRepo) SetPaymentStatus(ctx context.Context, storeID, id uuid.UUID,
 	return err
 }
 
+// PaymentStatusChange carries the pre-update snapshot returned by
+// SetPaymentStatusGuarded, so a webhook can decide what side effects to fire
+// based on values that are guaranteed to be atomic with the write.
+type PaymentStatusChange struct {
+	PrevStatus        string
+	PrevPaymentStatus string
+}
+
+// ErrPaymentStatusUnchanged means the guard rejected the transition — the
+// order is already in a stronger payment state (paid/refunded). Callers should
+// treat it as a replay: acknowledge, fire no side effects.
+var ErrPaymentStatusUnchanged = errors.New("payment status unchanged")
+
+// SetPaymentStatusGuarded is the webhook-safe version of SetPaymentStatus: the
+// guard, the write and the pre-update read all happen in one locking
+// statement, so nothing can slip between them.
+//
+// Two classes of bug this closes:
+//   - A retried 'pending' notification used to downgrade an already-settled
+//     order; the next settlement then looked "fresh" and re-fired fulfillment
+//     (duplicate tokens + emails).
+//   - The expiry worker cancelling an order between the handler's snapshot read
+//     and its write used to leave the handler on the normal-payment branch,
+//     minting tokens for a cancelled order whose stock was already released.
+//
+// The FOR UPDATE sub-select re-checks its qual against the winning row version
+// under concurrency, so the guard holds; the UPDATE then runs on the row we
+// already hold the lock for.
+func (r *OrderRepo) SetPaymentStatusGuarded(ctx context.Context, storeID, id uuid.UUID, paymentStatus, paymentMethod string) (*PaymentStatusChange, error) {
+	// 'paid' may overwrite anything except another 'paid'. Weaker states
+	// (pending/failed) may never overwrite a settled or refunded order.
+	guard := "payment_status <> 'paid'"
+	if paymentStatus != "paid" {
+		guard = "payment_status NOT IN ('paid', 'refunded')"
+	}
+	q := `
+		WITH locked AS (
+		    SELECT id, status, payment_status
+		    FROM orders
+		    WHERE id = $1 AND store_id = $2 AND ` + guard + `
+		    FOR UPDATE
+		), upd AS (
+		    UPDATE orders o
+		    SET payment_status = $3,
+		        payment_method = COALESCE(NULLIF($4, ''), o.payment_method),
+		        paid_at = CASE WHEN $3 = 'paid' AND o.paid_at IS NULL THEN now() ELSE o.paid_at END,
+		        updated_at = now()
+		    FROM locked l
+		    WHERE o.id = l.id
+		    RETURNING l.status AS prev_status, l.payment_status AS prev_payment_status
+		)
+		SELECT prev_status, prev_payment_status FROM upd
+	`
+	var c PaymentStatusChange
+	err := r.pool.QueryRow(ctx, q, id, storeID, paymentStatus, paymentMethod).
+		Scan(&c.PrevStatus, &c.PrevPaymentStatus)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrPaymentStatusUnchanged
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
 // FlagNeedsReview marks an order for seller attention — surfaced as a
 // "Perlu dicek" badge + filter in Pesanan. Used e.g. when a payment lands on
 // an already-cancelled order (late payment after auto-expiry).
@@ -996,16 +1222,36 @@ func (r *OrderRepo) SetPaymentURL(ctx context.Context, storeID, id uuid.UUID, ur
 	return err
 }
 
-// MarkPaid sets payment_status='paid', stamps paid_at. Used for manual confirmation.
+// ErrMarkPaidNotAllowed means the order is in a state where a manual
+// "tandai lunas" would corrupt it: already cancelled (stock/kuota already
+// released — paying it would mint tokens against inventory that is gone) or
+// already refunded (flipping back to paid would leave the refund fields set on
+// a "paid" order).
+var ErrMarkPaidNotAllowed = errors.New("mark paid not allowed")
+
+// MarkPaid sets payment_status='paid', stamps paid_at. Used for manual
+// confirmation. Mirrors the webhook's guards — a cancelled or refunded order
+// is never silently flipped back to paid.
 func (r *OrderRepo) MarkPaid(ctx context.Context, storeID, id uuid.UUID) error {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE orders SET payment_status = 'paid', paid_at = now(), updated_at = now()
-		WHERE id = $1 AND store_id = $2 AND payment_status != 'paid'
+		WHERE id = $1 AND store_id = $2
+		  AND payment_status NOT IN ('paid', 'refunded')
+		  AND status <> 'cancelled'
 	`, id, storeID)
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
+		// Distinguish "nothing to do / illegal state" from "not yours".
+		var status, paymentStatus string
+		if qErr := r.pool.QueryRow(ctx,
+			`SELECT status, payment_status FROM orders WHERE id = $1 AND store_id = $2`,
+			id, storeID).Scan(&status, &paymentStatus); qErr == nil {
+			if status == "cancelled" || paymentStatus == "refunded" {
+				return ErrMarkPaidNotAllowed
+			}
+		}
 		return ErrInvalidTransition
 	}
 	return nil
@@ -1061,11 +1307,15 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 			                       total_orders, total_spent_cents, last_order_at)
 			VALUES ($1, $2, $3, $4, $5, $6, 1, $7, now())
 			ON CONFLICT (store_id, whatsapp_number) DO UPDATE SET
-			    name = EXCLUDED.name,
+			    -- Checkout is unauthenticated: anyone who knows a buyer's WA
+			    -- number could otherwise rewrite that customer's name and
+			    -- address in the seller's CRM with a single anonymous POST.
+			    -- Only fill fields we don't already know.
+			    name = COALESCE(NULLIF(customers.name, ''), NULLIF(EXCLUDED.name, ''), customers.name),
 			    -- keep a previously-known email if this order didn't supply one
 			    email = COALESCE(NULLIF(EXCLUDED.email, ''), customers.email),
-			    address = EXCLUDED.address,
-			    city = EXCLUDED.city,
+			    address = COALESCE(NULLIF(EXCLUDED.address, ''), customers.address),
+			    city = COALESCE(NULLIF(EXCLUDED.city, ''), customers.city),
 			    total_orders = customers.total_orders + 1,
 			    total_spent_cents = customers.total_spent_cents + EXCLUDED.total_spent_cents,
 			    last_order_at = now(),
@@ -1075,6 +1325,15 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 			return nil, fmt.Errorf("upsert customer: %w", err)
 		}
 		customerID = &cid
+	}
+
+	// Idempotency: a retried submit (kiosk "coba lagi", a flaky mobile
+	// connection) must return the original order rather than creating a second
+	// one. Stored as NULL when empty so the partial unique index from
+	// migration 0090 ignores rows that don't use it.
+	var idemKey *string
+	if k := strings.TrimSpace(in.IdempotencyKey); k != "" {
+		idemKey = &k
 	}
 
 	// Generate human-friendly order number: SO-YYYYMMDD-XXXX (4-char random)
@@ -1119,9 +1378,10 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 		                   courier, customer_name, customer_whatsapp, customer_email,
 		                   customer_address, customer_city,
 		                   notes, table_id, serving_type, kitchen_status, queue_number, queue_date,
-		                   custom_fields, source, tax_cents, tax_bps, tax_inclusive)
+		                   custom_fields, source, tax_cents, tax_bps, tax_inclusive,
+		                   idempotency_key)
 		VALUES ($1, $2, $3, 'pending', 'unpaid', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
-		        $18, $19, $20, $21, $22::date, $23::jsonb, $24, $25, $26, $27)
+		        $18, $19, $20, $21, $22::date, $23::jsonb, $24, $25, $26, $27, $28)
 		RETURNING id, store_id, order_number, status, payment_status, payment_method,
 		          subtotal_cents, shipping_cents, discount_cents, promo_code, total_cents, courier,
 		          customer_name, customer_whatsapp, customer_email, customer_city, created_at,
@@ -1134,6 +1394,7 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 		in.CustomerAddress, in.CustomerCity, in.Notes,
 		in.TableID, servingType, kitchenStatus, queueNum, queueDate,
 		string(customFields), source, taxCents, in.TaxBps, in.TaxInclusive,
+		idemKey,
 	).Scan(
 		&o.ID, &o.StoreID, &o.OrderNumber, &o.Status, &o.PaymentStatus, &o.PaymentMethod,
 		&o.SubtotalCents, &o.ShippingCents, &o.DiscountCents, &o.PromoCode, &o.TotalCents, &o.Courier,
@@ -1220,11 +1481,60 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 		}
 	}
 
+	// Claim the promo redemption inside the same transaction. This used to be
+	// a read-then-write: CheckActive compared a stale used_count before the
+	// order was created, and IncrementUsage ran unconditionally AFTER commit —
+	// so a max_usage=1 flash sale handed the discount to every buyer who
+	// submitted in the same second, and a failed increment left the promo
+	// looking unused.
+	if in.PromoID != nil {
+		var claimed bool
+		err := tx.QueryRow(ctx, `
+			UPDATE promos
+			SET used_count = used_count + 1, updated_at = now()
+			WHERE id = $1 AND store_id = $2 AND is_active
+			  AND (max_usage = 0 OR used_count < max_usage)
+			  AND (starts_at   IS NULL OR starts_at   <= now())
+			  AND (expires_at  IS NULL OR expires_at  >= now())
+			RETURNING true
+		`, *in.PromoID, in.StoreID).Scan(&claimed)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrPromoExhausted
+		}
+		if err != nil {
+			return nil, fmt.Errorf("claim promo: %w", err)
+		}
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
 	return &o, nil
 }
+
+// FindByIdempotencyKey returns a previously-created order for this key, or
+// ErrOrderNotFound. Used by the storefront create path so a retried submit
+// answers with the original order instead of a duplicate.
+func (r *OrderRepo) FindByIdempotencyKey(ctx context.Context, storeID uuid.UUID, key string) (*Order, error) {
+	if strings.TrimSpace(key) == "" {
+		return nil, ErrOrderNotFound
+	}
+	var number string
+	err := r.pool.QueryRow(ctx,
+		`SELECT order_number FROM orders WHERE store_id = $1 AND idempotency_key = $2`,
+		storeID, key).Scan(&number)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrOrderNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return r.FindByOrderNumber(ctx, storeID, number)
+}
+
+// ErrPromoExhausted means the promo ran out (or expired) between the buyer
+// seeing it as valid and the order being written.
+var ErrPromoExhausted = errors.New("kuota kode promo sudah habis")
 
 // ErrStockInsufficient is returned by Create when a concurrent order or
 // stock change has just made one of the requested items unavailable.
@@ -1256,9 +1566,16 @@ func (r *OrderRepo) HasOrdersThisMonthAtLeast(ctx context.Context, storeID uuid.
 		return true, nil
 	}
 	var x int
+	// Cancelled orders must not consume the monthly quota: they include
+	// auto-expired unpaid checkouts, so counting them let anyone shut a Free
+	// store's storefront for the rest of the month with a handful of
+	// abandoned carts. Month boundary is WIB, matching the seller's calendar.
 	err := r.pool.QueryRow(ctx, `
 		SELECT 1 FROM orders
-		WHERE store_id = $1 AND created_at >= date_trunc('month', now())
+		WHERE store_id = $1
+		  AND created_at >= (date_trunc('month', now() AT TIME ZONE 'Asia/Jakarta')
+		                     AT TIME ZONE 'Asia/Jakarta')
+		  AND status <> 'cancelled'
 		OFFSET $2 LIMIT 1
 	`, storeID, n-1).Scan(&x)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -1267,8 +1584,29 @@ func (r *OrderRepo) HasOrdersThisMonthAtLeast(ctx context.Context, storeID uuid.
 	return err == nil, err
 }
 
+// generateOrderNumber builds SO-YYYYMMDD-XXXXXXXX.
+//
+// The suffix used to be 4 hex chars (65k values per store per day), which was
+// short enough to (a) collide in normal traffic — a store doing ~300 orders a
+// day had a coin-flip chance of a duplicate-key 500 at checkout every day —
+// and (b) enumerate: the buyer-facing order endpoints are public and keyed
+// only by {slug}/{number}, so a sweep of that space dumped every order's name,
+// WhatsApp number and address. 8 chars of crypto/rand base32 (~1e12) closes
+// both. Ambiguous characters are excluded so the number stays readable when a
+// buyer reads it back over the phone.
+const orderNumberAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
 func generateOrderNumber() string {
-	now := time.Now().UTC()
-	rand4 := strings.ToUpper(uuid.New().String()[:4])
-	return fmt.Sprintf("SO-%s-%s", now.Format("20060102"), rand4)
+	now := time.Now().In(time.FixedZone("WIB", 7*3600))
+	b := make([]byte, 8)
+	if _, err := cryptorand.Read(b); err != nil {
+		// crypto/rand failing is fatal for uniqueness; fall back to UUID
+		// entropy rather than emitting a predictable number.
+		return fmt.Sprintf("SO-%s-%s", now.Format("20060102"),
+			strings.ToUpper(strings.ReplaceAll(uuid.New().String(), "-", ""))[:8])
+	}
+	for i := range b {
+		b[i] = orderNumberAlphabet[int(b[i])%len(orderNumberAlphabet)]
+	}
+	return fmt.Sprintf("SO-%s-%s", now.Format("20060102"), string(b))
 }

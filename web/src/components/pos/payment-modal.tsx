@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { X, Banknote, QrCode, ArrowLeftRight, Split, Trash2, CreditCard, Sparkles } from "lucide-react";
 import { formatRupiah } from "@/lib/format";
 import { showError } from "@/lib/toast";
@@ -240,6 +240,16 @@ export function PaymentModal({ totalCents, onClose, onSuccess }: Props) {
     }
   };
 
+  // Keep the LATEST submit handler in a ref. The keydown listener below is
+  // only re-registered when canSubmit/submitting change, so capturing
+  // handleSubmit directly froze the method/amount/split state it closes over —
+  // pressing Enter after switching to QRIS recorded a CASH payment (or the
+  // wrong tendered amount).
+  const submitRef = useRef(handleSubmit);
+  useEffect(() => {
+    submitRef.current = handleSubmit;
+  });
+
   // ESC to close, Enter to submit. NO click-outside (kasir butuh fokus,
   // tidak boleh tutup gak sengaja).
   useEffect(() => {
@@ -247,7 +257,7 @@ export function PaymentModal({ totalCents, onClose, onSuccess }: Props) {
       if (e.key === "Escape") onClose();
       if (e.key === "Enter" && canSubmit && !submitting) {
         e.preventDefault();
-        handleSubmit();
+        void submitRef.current();
       }
     };
     window.addEventListener("keydown", onKey);

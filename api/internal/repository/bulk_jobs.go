@@ -131,12 +131,44 @@ func (r *BulkJobRepo) Fail(ctx context.Context, id uuid.UUID, msg string) error 
 	return err
 }
 
+// bulkJobStaleMinutes is how long a 'running' row may go without a progress
+// write before we treat it as dead. The worker flushes progress every ~200 ms
+// and its hard deadline is 10 minutes, so 20 minutes of silence means the
+// process died (deploy, OOM, panic before the terminal write).
+const bulkJobStaleMinutes = 20
+
+// ReapStale marks abandoned 'running' jobs as failed. Without it a process
+// restart leaves the row running forever and ListActive keeps returning it,
+// which the dashboard renders as a permanent "Mengimpor…" toast.
+func (r *BulkJobRepo) ReapStale(ctx context.Context, storeID uuid.UUID, olderThanMinutes int) error {
+	if olderThanMinutes <= 0 {
+		olderThanMinutes = bulkJobStaleMinutes
+	}
+	_, err := r.pool.Exec(ctx, `
+		UPDATE bulk_jobs
+		SET status = 'failed',
+		    error_message = 'Impor terhenti karena server restart. Silakan upload ulang.',
+		    updated_at = now(),
+		    completed_at = now()
+		WHERE store_id = $1
+		  AND status = 'running'
+		  AND updated_at < now() - ($2::int * interval '1 minute')
+	`, storeID, olderThanMinutes)
+	return err
+}
+
 // ListActive returns running jobs + recent completed/failed jobs for
 // a store. Recent = updated_at >= now() - sinceMinutes. Used by the
 // dashboard watcher to render persistent toasts.
 func (r *BulkJobRepo) ListActive(ctx context.Context, storeID uuid.UUID, sinceMinutes int) ([]BulkJob, error) {
 	if sinceMinutes <= 0 {
 		sinceMinutes = 5
+	}
+	// Best-effort reap first so a dead job can't be reported as running
+	// forever. Failure here is non-fatal — worst case the toast lingers.
+	if err := r.ReapStale(ctx, storeID, bulkJobStaleMinutes); err != nil {
+		// No logger on the repo; the caller's error path is enough signal.
+		_ = err
 	}
 	// Multiply int × interval instead of the older string-concat trick
 	// `($2 || ' minutes')::interval` — pgx may bind $2 as int4 which

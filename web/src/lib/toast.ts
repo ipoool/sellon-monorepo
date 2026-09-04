@@ -34,14 +34,54 @@ const ERROR_PATTERNS: Array<[RegExp, string]> = [
   [/http\s*\d{3}/i, "Permintaan gagal. Coba lagi."],
 ];
 
+// Pesan English generic yang dipakai Go API di ratusan handler. Ini lolos
+// dari heuristik pass-through di bawah (tidak mengandung "fetch"/"HTTP"/
+// dll) sehingga dulu tampil apa adanya di UI berbahasa Indonesia. Dicek
+// DULUAN, sebelum pass-through maupun ERROR_PATTERNS.
+//
+// Key = pesan backend di-lowercase + di-trim (match persis, bukan
+// substring, supaya pesan Indonesia yang kebetulan memuat kata ini tetap
+// lewat apa adanya).
+const BACKEND_MESSAGES: Record<string, string> = {
+  "internal error": "Ada masalah di sistem kami. Coba lagi sebentar.",
+  "internal server error": "Ada masalah di sistem kami. Coba lagi sebentar.",
+  "invalid body": "Data yang dikirim tidak lengkap atau formatnya salah.",
+  "invalid request": "Data yang dikirim tidak lengkap atau formatnya salah.",
+  "invalid id": "Data yang dituju tidak valid.",
+  "id invalid": "Data yang dituju tidak valid.",
+  "invalid uuid": "Data yang dituju tidak valid.",
+  unauthorized: "Sesi kamu sudah habis. Silakan login lagi.",
+  forbidden: "Kamu tidak punya akses untuk aksi ini.",
+  "not found": "Data tidak ditemukan.",
+  "bad request": "Permintaan tidak valid. Cek lagi isiannya.",
+};
+
+// Prefix English yang umum dari Go ("failed to save product", dst).
+const BACKEND_PREFIXES: Array<[RegExp, string]> = [
+  [/^failed to\b/i, "Aksi gagal diproses. Coba lagi sebentar."],
+  [/^could not\b/i, "Aksi gagal diproses. Coba lagi sebentar."],
+  [/^cannot\b/i, "Aksi ini tidak bisa dilakukan."],
+  [/^missing\b/i, "Ada data wajib yang belum diisi."],
+  [/^invalid\b/i, "Data yang dikirim tidak valid."],
+];
+
 // humanizeError converts an Error / string / unknown ke pesan ramah.
 // Kalau pesan asli sudah berbahasa Indonesia dari backend (mis. "Limit
 // produk tier free sudah tercapai..."), itu di-passthrough karena
 // sudah human-readable.
 export function humanizeError(err: unknown): string {
   const raw = errorMessage(err);
+  const key = raw.trim().toLowerCase();
 
-  // Backend errors yang sudah Indonesian + jelas: pass-through.
+  // 1) Pesan English standar dari Go API — harus dicek sebelum
+  //    pass-through, kalau tidak "internal error" / "invalid body" bocor
+  //    mentah ke user.
+  if (key in BACKEND_MESSAGES) return BACKEND_MESSAGES[key];
+  for (const [pattern, friendly] of BACKEND_PREFIXES) {
+    if (pattern.test(key)) return friendly;
+  }
+
+  // 2) Backend errors yang sudah Indonesian + jelas: pass-through.
   // Heuristik sederhana: ada huruf akar Indonesia + tidak mengandung
   // jejak technical (fetch, HTTP, dll).
   if (raw && !/fetch|HTTP|TypeError|undefined|null/i.test(raw)) {

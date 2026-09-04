@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { Upload, Loader2, X, ImageIcon, ImageOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { uploadImage, type UploadKind } from "@/lib/supabase";
+import { uploadImage, type UploadKind } from "@/lib/uploads";
 import { showError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 

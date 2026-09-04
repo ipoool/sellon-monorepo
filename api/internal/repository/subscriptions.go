@@ -117,6 +117,12 @@ func (r *SubscriptionRepo) GetOrCreate(ctx context.Context, storeID uuid.UUID) (
 		if (s.Plan == "pro" || s.Plan == "bisnis") &&
 			s.CurrentPeriodEnd != nil &&
 			s.CurrentPeriodEnd.Before(time.Now()) && s.Status != "expired" {
+			// Custom domain is a Bisnis-only feature — dropping to free
+			// must not leave an active domain serving the storefront.
+			// Best-effort: a failure here never blocks the plan transition.
+			if _, err := r.pool.Exec(ctx, suspendCustomDomainSQL, s.StoreID); err != nil {
+				_ = err
+			}
 			row := r.pool.QueryRow(ctx, `
 				UPDATE subscriptions
 				SET status = 'expired',`+snapshotLimitsSQL("$2")+`,
@@ -357,8 +363,18 @@ func (r *SubscriptionRepo) CreateCheckoutInvoice(
 	return scanInvoice(row)
 }
 
-// SettleInvoice marks an invoice paid AND extends the subscription's
-// period_end inside one transaction. Idempotent for repeat webhook calls.
+// SettleInvoice marks a PENDING invoice paid AND extends the subscription's
+// period_end inside one transaction.
+//
+// Idempotency is enforced by the `AND status = 'pending'` guard on the
+// invoice UPDATE: a second settle (admin double-click, duplicate Midtrans
+// delivery) matches 0 rows and returns ErrInvoiceNotPending BEFORE the
+// subscription is touched, so one payment can never buy two periods. The
+// same guard blocks flipping a failed/rejected invoice to paid.
+//
+// The covered billing window is written back onto the invoice so the
+// admin transactions table and the seller's invoice history show a real
+// period instead of "—".
 func (r *SubscriptionRepo) SettleInvoice(ctx context.Context, invoiceID uuid.UUID) (*Subscription, *SubscriptionInvoice, error) {
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -368,34 +384,56 @@ func (r *SubscriptionRepo) SettleInvoice(ctx context.Context, invoiceID uuid.UUI
 
 	row := tx.QueryRow(ctx, `
 		UPDATE subscription_invoices
-		SET status = 'paid', paid_at = COALESCE(paid_at, now())
-		WHERE id = $1
+		SET status = 'paid', paid_at = now()
+		WHERE id = $1 AND status = 'pending'
 		RETURNING `+invoiceCols, invoiceID)
 	inv, err := scanInvoice(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil, ErrInvoiceNotPending
+	}
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// Extend the matching subscription. Replays of the same webhook are
-	// safe because a paid invoice's webhook only fires once per Midtrans
-	// transaction, and once status is 'paid' we still re-extend — but the
-	// invoice flip above already short-circuits via paid_at COALESCE so
-	// only the first call writes paid_at.
+	// Lock the subscription row and read the start of the window this
+	// invoice pays for: the later of (existing period_end, now). FOR UPDATE
+	// also serialises two concurrent settles of DIFFERENT invoices for the
+	// same store so their periods stack instead of racing.
+	var coverStart time.Time
+	if err := tx.QueryRow(ctx, `
+		SELECT GREATEST(COALESCE(current_period_end, now()), now())
+		FROM subscriptions WHERE id = $1 FOR UPDATE
+	`, inv.SubscriptionID).Scan(&coverStart); err != nil {
+		return nil, nil, err
+	}
+
+	// NOTE: a tier CHANGE here is applied for the whole remaining period
+	// without proration — deliberately out of scope. Buying a LOWER tier
+	// while a paid period is running is rejected upstream (RequestUpgrade /
+	// Checkout) so this can only ever be a renewal or an upgrade.
 	subRow := tx.QueryRow(ctx, `
 		UPDATE subscriptions
 		SET `+snapshotLimitsSQL("$2")+`,
 		    plan = $2,
 		    status = 'active',
 		    current_period_start = COALESCE(current_period_start, now()),
-		    current_period_end = GREATEST(
-		        COALESCE(current_period_end, now()),
-		        now()
-		    ) + ($3::int * INTERVAL '1 month'),
+		    current_period_end = $4::timestamptz + ($3::int * INTERVAL '1 month'),
 		    cancelled_at = NULL,
 		    updated_at = now()
 		WHERE id = $1
-		RETURNING `+subscriptionCols, inv.SubscriptionID, inv.Plan, inv.Months)
+		RETURNING `+subscriptionCols,
+		inv.SubscriptionID, inv.Plan, inv.Months, coverStart)
 	sub, err := scanSubscription(subRow)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	invRow := tx.QueryRow(ctx, `
+		UPDATE subscription_invoices
+		SET period_start = $2, period_end = $3
+		WHERE id = $1
+		RETURNING `+invoiceCols, inv.ID, coverStart, sub.CurrentPeriodEnd)
+	settled, err := scanInvoice(invRow)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -403,7 +441,7 @@ func (r *SubscriptionRepo) SettleInvoice(ctx context.Context, invoiceID uuid.UUI
 	if err := tx.Commit(ctx); err != nil {
 		return nil, nil, err
 	}
-	return sub, inv, nil
+	return sub, settled, nil
 }
 
 // MarkInvoiceFailed flips a pending invoice to failed (e.g. expired Snap).
@@ -737,8 +775,24 @@ func (r *SubscriptionRepo) ClaimNotification(ctx context.Context,
 	return tag.RowsAffected() == 1, nil
 }
 
-// ErrInvoiceNotPending is returned by AdminMarkInvoiceFailed when the
-// invoice has already been settled or rejected.
+// ReleaseNotification deletes a claim taken by ClaimNotification. The
+// scheduler calls it when the send fails after claiming, so the next tick
+// retries instead of permanently suppressing that H-3/H-0 email.
+func (r *SubscriptionRepo) ReleaseNotification(ctx context.Context,
+	storeID uuid.UUID, notifType string, periodEnd time.Time,
+) error {
+	_, err := r.pool.Exec(ctx, `
+		DELETE FROM subscription_expiry_emails
+		WHERE store_id = $1 AND notification_type = $2 AND period_end = $3::date
+	`, storeID, notifType, periodEnd)
+	return err
+}
+
+// ErrInvoiceNotPending is returned by SettleInvoice and
+// AdminMarkInvoiceFailed when the invoice is no longer 'pending' — it was
+// already settled (admin double-click / duplicate webhook delivery) or
+// rejected. On the settle path this is the anti-double-charge signal:
+// callers must NOT extend the subscription period.
 var ErrInvoiceNotPending = errors.New("invoice not pending")
 
 // AdminMarkInvoiceFailed flips a pending invoice to failed. Used when

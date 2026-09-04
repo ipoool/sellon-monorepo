@@ -216,10 +216,12 @@ export default async function PesananPage({
           </p>
           {!isFiltered && (
             <div className="mt-6">
-              <Button>
-                <Send className="size-4" aria-hidden />
-                Bagikan Katalog
-              </Button>
+              <Link href="/settings/storefront">
+                <Button>
+                  <Send className="size-4" aria-hidden />
+                  Bagikan Katalog
+                </Button>
+              </Link>
             </div>
           )}
         </Card>

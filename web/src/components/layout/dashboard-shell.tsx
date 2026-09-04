@@ -64,7 +64,10 @@ export function DashboardShell({
               <Menu className="size-5" aria-hidden />
             </button>
 
-            <div className="min-w-0 flex-1">
+            {/* Mobile-only title. On lg+ the in-page header below renders the
+                same title + subtitle, so showing both duplicated the heading
+                ~40px apart on every dashboard page. */}
+            <div className="min-w-0 flex-1 lg:hidden">
               <h1 className="truncate font-display text-lg font-semibold tracking-tight text-neutral-900">
                 {pageTitle}
               </h1>
@@ -74,6 +77,9 @@ export function DashboardShell({
                 </p>
               )}
             </div>
+            {/* Keeps the topbar controls right-aligned on lg+ where the
+                title block is hidden. */}
+            <div className="hidden flex-1 lg:block" />
 
             {!isAdmin && (
               <form

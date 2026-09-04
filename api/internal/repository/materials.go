@@ -34,18 +34,18 @@ type Material struct {
 type MaterialMovement struct {
 	ID            uuid.UUID
 	MaterialID    uuid.UUID
-	MovementType  string // "restock" | "consume" | "adjust"
-	Quantity      int64  // signed: +restock, -consume
+	MovementType  string // "restock" | "consume" | "restore" | "adjust"
+	Quantity      int64  // signed: +restock/+restore, -consume
 	UnitCostCents int64
 	OrderID       *uuid.UUID
-	OrderNumber   string // resolved order number for consume rows ("" otherwise)
+	OrderNumber   string // resolved order number for consume/restore rows ("" otherwise)
 	Note          string
 	CreatedAt     time.Time
 }
 
 // MaterialMovementPoint is one WIB day of in/out aggregates for the per-material
-// movement chart. In = positive quantities (restock + positive adjust); Out =
-// magnitude of negative quantities (consume + negative adjust).
+// movement chart. In = positive quantities (restock + restore + positive
+// adjust); Out = magnitude of negative quantities (consume + negative adjust).
 type MaterialMovementPoint struct {
 	Date        string // YYYY-MM-DD (WIB)
 	InQty       int64
@@ -373,6 +373,10 @@ type MaterialConsumptionReport struct {
 
 // GetConsumptionReport aggregates the 'consume' ledger over [from, to) into
 // per-material totals (qty + cost) and a daily cost series (WIB buckets).
+//
+// 'restore' rows (compensating +qty rows written when an order is
+// cancelled/voided/returned, same unit_cost snapshot) are included so the
+// signed sums net to zero for reversed orders instead of overstating usage.
 func (r *MaterialRepo) GetConsumptionReport(ctx context.Context, storeID uuid.UUID, from, to time.Time) (*MaterialConsumptionReport, error) {
 	out := &MaterialConsumptionReport{}
 
@@ -382,9 +386,10 @@ func (r *MaterialRepo) GetConsumptionReport(ctx context.Context, storeID uuid.UU
 		       COALESCE(SUM(-mm.quantity * mm.unit_cost_cents), 0)  AS cost
 		FROM material_movements mm
 		JOIN materials m ON m.id = mm.material_id
-		WHERE mm.store_id = $1 AND mm.movement_type = 'consume'
+		WHERE mm.store_id = $1 AND mm.movement_type IN ('consume', 'restore')
 		  AND mm.created_at >= $2 AND mm.created_at < $3
 		GROUP BY m.id, m.name, m.base_unit, m.kind
+		HAVING COALESCE(SUM(-mm.quantity), 0) <> 0 OR COALESCE(SUM(-mm.quantity * mm.unit_cost_cents), 0) <> 0
 		ORDER BY cost DESC, qty DESC
 	`, storeID, from, to)
 	if err != nil {
@@ -407,7 +412,7 @@ func (r *MaterialRepo) GetConsumptionReport(ctx context.Context, storeID uuid.UU
 		SELECT TO_CHAR(date_trunc('day', mm.created_at AT TIME ZONE 'Asia/Jakarta'), 'YYYY-MM-DD') AS day,
 		       COALESCE(SUM(-mm.quantity * mm.unit_cost_cents), 0) AS cost
 		FROM material_movements mm
-		WHERE mm.store_id = $1 AND mm.movement_type = 'consume'
+		WHERE mm.store_id = $1 AND mm.movement_type IN ('consume', 'restore')
 		  AND mm.created_at >= $2 AND mm.created_at < $3
 		GROUP BY day
 		ORDER BY day ASC
@@ -437,7 +442,8 @@ type MovementFilter struct {
 
 // ListMovements returns the ledger for one material (newest first), optionally
 // windowed by [from, to), with the total row count for pagination. order_number
-// is resolved for consume rows via a LEFT JOIN (NULL→"" for non-sale rows).
+// is resolved for consume/restore rows via a LEFT JOIN (NULL→"" for rows
+// without an order).
 func (r *MaterialRepo) ListMovements(ctx context.Context, f MovementFilter) ([]MaterialMovement, int, error) {
 	clauses := []string{"mm.store_id = $1", "mm.material_id = $2"}
 	args := []any{f.StoreID, f.MaterialID}

@@ -50,7 +50,7 @@ type StorefrontHandler struct {
 	rajaongkir  *rajaongkir.Client
 	mailer      *email.Mailer
 	twilio      *notify.Twilio
-	storage     *storage.SupabaseClient
+	storage     storage.Client
 	auditLog    *audit.Logger
 	webOrigin   string
 	// orderExpiryHours mirrors cfg.OrderExpiryHours so the buyer order page can
@@ -74,7 +74,7 @@ func NewStorefrontHandler(
 	rk *rajaongkir.Client,
 	mailer *email.Mailer,
 	twilio *notify.Twilio,
-	storageCli *storage.SupabaseClient,
+	storageCli storage.Client,
 	auditLog *audit.Logger,
 	webOrigin string,
 	orderExpiryHours int,
@@ -668,23 +668,26 @@ type orderItemReq struct {
 }
 
 type createOrderReq struct {
-	CustomerName    string         `json:"customer_name"`
-	CustomerWA      string         `json:"customer_whatsapp"`
-	CustomerEmail   string         `json:"customer_email"`
-	CustomerAddress string         `json:"customer_address"`
-	CustomerCity    string         `json:"customer_city"`
-	Courier         string         `json:"courier"`
-	PaymentMethod   string         `json:"payment_method"`
-	Notes           string         `json:"notes"`
-	TableID         string         `json:"table_id"`
-	ServingType     string         `json:"serving_type"`
-	ShippingCents   int64          `json:"shipping_cents"`
-	PromoCode       string         `json:"promo_code"`
+	CustomerName    string `json:"customer_name"`
+	CustomerWA      string `json:"customer_whatsapp"`
+	CustomerEmail   string `json:"customer_email"`
+	CustomerAddress string `json:"customer_address"`
+	CustomerCity    string `json:"customer_city"`
+	Courier         string `json:"courier"`
+	PaymentMethod   string `json:"payment_method"`
+	Notes           string `json:"notes"`
+	TableID         string `json:"table_id"`
+	ServingType     string `json:"serving_type"`
+	ShippingCents   int64  `json:"shipping_cents"`
+	PromoCode       string `json:"promo_code"`
 	// Source marks the order channel. "kiosk" enables the anonymous in-store
 	// flow (no name/WA required, always gets a pickup number). Empty/other
 	// values are treated as the normal "storefront" channel.
-	Source string         `json:"source"`
-	Items  []orderItemReq `json:"items"`
+	Source string `json:"source"`
+	// IdempotencyKey (optional, client-generated UUID) makes a retried submit
+	// return the original order instead of creating a duplicate.
+	IdempotencyKey string         `json:"idempotency_key"`
+	Items          []orderItemReq `json:"items"`
 	// CustomFields: seller-configured field values keyed by field key.
 	CustomFields map[string]any `json:"custom_fields"`
 }
@@ -743,6 +746,71 @@ func resolveCustomFields(raw []byte, submitted map[string]any) ([]byte, string) 
 	return out, ""
 }
 
+// balanceSnapItems appends the discount / tax / rounding lines that make
+// sum(price x quantity) equal gross_amount, and returns the gross to send.
+//
+// Midtrans rejects the whole transaction when item_details is present and its
+// sum doesn't match gross_amount. The item list is built from line items plus
+// shipping only, so before this every order carrying a promo discount or
+// exclusive tax was refused — online payment was effectively unavailable to
+// any store using either. The per-item rupiah conversion (cents/100) is also
+// applied separately to the gross, so a tax-rounded total that isn't a whole
+// rupiah drifts by one; the reconciliation line absorbs that.
+func balanceSnapItems(items []payments.SnapItem, discountCents, taxCents int64, taxInclusive bool, totalCents int64) ([]payments.SnapItem, int64) {
+	if discountCents > 0 {
+		items = append(items, payments.SnapItem{
+			ID: "discount", Name: "Diskon", Price: -discountCents, Quantity: 1,
+		})
+	}
+	// Inclusive tax is already inside the line prices; only exclusive tax is
+	// an extra charge on top.
+	if taxCents > 0 && !taxInclusive {
+		items = append(items, payments.SnapItem{
+			ID: "tax", Name: "Pajak", Price: taxCents, Quantity: 1,
+		})
+	}
+	// Midtrans works in whole rupiah, so mirror its own rounding.
+	var sumRupiah int64
+	for _, it := range items {
+		sumRupiah += (it.Price / 100) * int64(it.Quantity)
+	}
+	targetRupiah := totalCents / 100
+	if diff := targetRupiah - sumRupiah; diff != 0 {
+		items = append(items, payments.SnapItem{
+			ID: "rounding", Name: "Penyesuaian", Price: diff * 100, Quantity: 1,
+		})
+		sumRupiah = targetRupiah
+	}
+	return items, sumRupiah * 100
+}
+
+// Bounds for the anonymous checkout endpoint. Everything here is attacker
+// controlled, and the columns behind them are unbounded TEXT / INT.
+const (
+	maxCheckoutBodyBytes = 64 << 10
+	maxCheckoutLines     = 100
+	maxCheckoutQty       = 999
+	maxCheckoutNameLen   = 120
+	maxCheckoutShortLen  = 60
+	maxCheckoutTextLen   = 1000
+)
+
+// tableBelongsToStore guards against a table UUID from another tenant being
+// attached to this store's order (the FK alone only proves the table exists
+// somewhere). Table counts per store are small, so a list scan is fine.
+func (h *StorefrontHandler) tableBelongsToStore(ctx context.Context, storeID, tableID uuid.UUID) bool {
+	tables, err := h.tables.ListByStore(ctx, storeID)
+	if err != nil {
+		return false
+	}
+	for _, t := range tables {
+		if t.ID == tableID {
+			return true
+		}
+	}
+	return false
+}
+
 // POST /api/v1/storefront/{slug}/orders
 func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) {
 	slug := chi.URLParam(r, "slug")
@@ -773,14 +841,30 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	// Anonymous endpoint: cap the body so a single request can't stream
+	// unbounded text into the order row.
+	r.Body = http.MaxBytesReader(w, r.Body, maxCheckoutBodyBytes)
 	var req createOrderReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.Error(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	req.CustomerName = strings.TrimSpace(req.CustomerName)
-	req.CustomerWA = strings.TrimSpace(req.CustomerWA)
-	isKiosk := strings.EqualFold(strings.TrimSpace(req.Source), "kiosk")
+	req.CustomerName = truncateRunes(strings.TrimSpace(req.CustomerName), maxCheckoutNameLen)
+	req.CustomerWA = truncateRunes(strings.TrimSpace(req.CustomerWA), maxCheckoutShortLen)
+	req.CustomerEmail = truncateRunes(strings.TrimSpace(req.CustomerEmail), maxCheckoutShortLen)
+	req.CustomerAddress = truncateRunes(strings.TrimSpace(req.CustomerAddress), maxCheckoutTextLen)
+	req.CustomerCity = truncateRunes(strings.TrimSpace(req.CustomerCity), maxCheckoutNameLen)
+	req.Notes = truncateRunes(strings.TrimSpace(req.Notes), maxCheckoutTextLen)
+	req.Courier = truncateRunes(strings.TrimSpace(req.Courier), maxCheckoutNameLen)
+	if req.CustomerEmail != "" && !validEmail(req.CustomerEmail) {
+		response.Error(w, http.StatusBadRequest, "format email tidak valid")
+		return
+	}
+	// "kiosk" waives the name/WA requirement and puts the order straight on
+	// the public queue board, so it must not be assertable by any client
+	// against any store — only stores actually running the kiosk layout.
+	isKiosk := strings.EqualFold(strings.TrimSpace(req.Source), "kiosk") &&
+		store.ProductLayout == "kiosk"
 	if isKiosk {
 		// Anonymous in-store kiosk order: no identity collected. Label the
 		// order and drop the WA so the repo skips the customer upsert
@@ -797,6 +881,25 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 		response.Error(w, http.StatusBadRequest, "tidak ada produk yang dipesan")
 		return
 	}
+	if len(req.Items) > maxCheckoutLines {
+		response.Error(w, http.StatusBadRequest, "terlalu banyak jenis produk dalam satu pesanan")
+		return
+	}
+	// Replay of a retried submit: hand back the original order. The partial
+	// unique index on (store_id, idempotency_key) is the backstop for a
+	// concurrent double-tap that gets past this read.
+	req.IdempotencyKey = truncateRunes(strings.TrimSpace(req.IdempotencyKey), maxCheckoutShortLen)
+	if req.IdempotencyKey != "" {
+		if existing, iErr := h.orders.FindByIdempotencyKey(r.Context(), store.ID, req.IdempotencyKey); iErr == nil && existing != nil {
+			response.JSON(w, http.StatusOK, map[string]any{
+				"order_number": existing.OrderNumber,
+				"total_cents":  existing.TotalCents,
+				"status":       existing.Status,
+				"replay":       true,
+			})
+			return
+		}
+	}
 
 	// Resolve products + validate stock
 	items := make([]repository.OrderItemInput, 0, len(req.Items))
@@ -806,8 +909,11 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 			response.Error(w, http.StatusBadRequest, "product_id invalid")
 			return
 		}
-		if it.Quantity <= 0 {
-			response.Error(w, http.StatusBadRequest, "quantity harus > 0")
+		// Upper bound too: an uncapped digital item is otherwise limited only
+		// by int32, and a huge quantity inflates the order total (and the
+		// customer's lifetime spend) without any stock check pushing back.
+		if it.Quantity <= 0 || it.Quantity > maxCheckoutQty {
+			response.Error(w, http.StatusBadRequest, "jumlah produk tidak valid")
 			return
 		}
 		p, err := h.products.FindByID(r.Context(), store.ID, pid)
@@ -910,8 +1016,15 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 		promoID       *uuid.UUID
 		promoCode     string
 		discountCents int64
+		// Never trust the client's shipping figure beyond its sign: a
+		// negative value would subtract from the total (buyer sets their own
+		// price), and the free-shipping threshold is re-applied below from
+		// the seller's own setting rather than from whatever the cart sent.
 		shippingCents = req.ShippingCents
 	)
+	if shippingCents < 0 {
+		shippingCents = 0
+	}
 	if code := strings.TrimSpace(req.PromoCode); code != "" {
 		var subtotal int64
 		for _, it := range items {
@@ -939,6 +1052,20 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 		promoCode = promo.Code
 		pid := promo.ID
 		promoID = &pid
+	}
+
+	// Re-apply the seller's free-shipping threshold server-side. The quote
+	// endpoint already does this for display; doing it here too means a
+	// client that skipped the quote can't be charged ongkir the seller
+	// promised to waive.
+	if store.FreeShippingThresholdCents > 0 {
+		var subtotal int64
+		for _, it := range items {
+			subtotal += it.UnitCents * int64(it.Quantity)
+		}
+		if subtotal >= store.FreeShippingThresholdCents {
+			shippingCents = 0
+		}
 	}
 
 	// Cart-level non-physical detection (digital + course). If every item is
@@ -989,7 +1116,8 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 	dineServing := ""
 	if strings.TrimSpace(req.TableID) != "" {
 		if tid, perr := uuid.Parse(req.TableID); perr == nil {
-			if ds, derr := h.tables.GetDineInSettings(r.Context(), store.ID); derr == nil && ds.Enabled {
+			if ds, derr := h.tables.GetDineInSettings(r.Context(), store.ID); derr == nil && ds.Enabled &&
+				h.tableBelongsToStore(r.Context(), store.ID, tid) {
 				tableID = &tid
 				if req.ServingType == "dine_in" || req.ServingType == "takeaway" {
 					dineServing = req.ServingType
@@ -1031,6 +1159,7 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 		Source:          orderSource,
 		TaxBps:          taxBpsFor(store),
 		TaxInclusive:    store.TaxInclusive,
+		IdempotencyKey:  req.IdempotencyKey,
 	})
 	if err != nil {
 		// Concurrency: another buyer just bought the last unit between our
@@ -1041,18 +1170,21 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 				"stok barusan habis — silakan refresh dan coba lagi")
 			return
 		}
+		// The promo ran out (or expired) between validation and the write.
+		// Create claims the redemption atomically, so this is the only place
+		// the buyer can lose that race — and the order was rolled back.
+		if errors.Is(err, repository.ErrPromoExhausted) {
+			response.Error(w, http.StatusConflict,
+				"kuota kode promo barusan habis — hapus kodenya lalu coba lagi")
+			return
+		}
 		h.logger.Error("storefront create order", "err", err)
 		response.Error(w, http.StatusInternalServerError, "gagal membuat pesanan")
 		return
 	}
 
-	// Bump promo usage AFTER the order is committed. Failure to bump shouldn't
-	// fail the order — log and move on.
-	if promoID != nil {
-		if err := h.promos.IncrementUsage(r.Context(), *promoID); err != nil {
-			h.logger.Error("increment promo usage", "err", err, "promo_id", promoID.String())
-		}
-	}
+	// Promo usage is claimed inside OrderRepo.Create's transaction (guarded by
+	// max_usage), so there is nothing to bump here.
 
 	// Push to dashboard SSE subscribers so the seller sees the order
 	// without refreshing.
@@ -1333,10 +1465,19 @@ func (h *StorefrontHandler) GetOrder(w http.ResponseWriter, r *http.Request) {
 		order.PaymentStatus == "unpaid" &&
 		strings.TrimSpace(order.PaymentProofURL) == "" &&
 		time.Now().After(order.CreatedAt.Add(time.Duration(h.orderExpiryHours)*time.Hour)) {
-		if cErr := h.orders.Cancel(r.Context(), store.ID, order.ID, "Kadaluwarsa — tidak dibayar"); cErr == nil {
-			if updated, fErr := h.orders.FindByOrderNumber(r.Context(), store.ID, orderNum); fErr == nil && updated != nil {
-				order = updated
-			}
+		// CancelIfUnpaid re-checks payment_status inside its own UPDATE. The
+		// Go-level check above is only a cheap short-circuit: this is a public
+		// GET, so a payment webhook can settle the order between the read and
+		// the write, and the plain Cancel would then leave it
+		// cancelled-but-paid with its stock and kuota already released.
+		cErr := h.orders.CancelIfUnpaid(r.Context(), store.ID, order.ID, "Kadaluwarsa — tidak dibayar")
+		if cErr != nil && !errors.Is(cErr, repository.ErrInvalidTransition) {
+			h.logger.Warn("lazy expire order", "err", cErr, "order", order.OrderNumber)
+		}
+		// Re-read either way: on a lost race the order is now paid, and the
+		// buyer should see that rather than a stale "unpaid" page.
+		if updated, fErr := h.orders.FindByOrderNumber(r.Context(), store.ID, orderNum); fErr == nil && updated != nil {
+			order = updated
 		}
 	}
 
@@ -1345,11 +1486,27 @@ func (h *StorefrontHandler) GetOrder(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+	// Chosen modifier options per line. Without these the buyer sees a bare
+	// "Kopi Susu — 1 x Rp 25.000" for a line whose price includes a topping,
+	// and two lines of the same product with different options are
+	// indistinguishable.
+	modsByItem, mErr := h.orders.ListModifiersByOrder(r.Context(), order.ID)
+	if mErr != nil {
+		h.logger.Warn("load order modifiers", "err", mErr, "order", order.ID)
+	}
 	itemsOut := make([]map[string]any, 0, len(items))
 	for _, it := range items {
 		pid := ""
 		if it.ProductID != nil {
 			pid = it.ProductID.String()
+		}
+		opts := make([]map[string]any, 0, len(modsByItem[it.ID]))
+		for _, m := range modsByItem[it.ID] {
+			opts = append(opts, map[string]any{
+				"group_name":        m.GroupName,
+				"option_name":       m.OptionName,
+				"price_delta_cents": m.PriceDeltaCents,
+			})
 		}
 		itemsOut = append(itemsOut, map[string]any{
 			"product_id":       pid,
@@ -1358,6 +1515,10 @@ func (h *StorefrontHandler) GetOrder(w http.ResponseWriter, r *http.Request) {
 			"unit_price_cents": it.UnitPriceCents,
 			"quantity":         it.Quantity,
 			"subtotal_cents":   it.SubtotalCents,
+			// Lets the buyer page tell a digital order from a physical one
+			// exactly, instead of inferring it from a missing address.
+			"product_type": it.ProductType,
+			"options":      opts,
 		})
 	}
 
@@ -1601,6 +1762,18 @@ func (h *StorefrontHandler) UploadPaymentProof(w http.ResponseWriter, r *http.Re
 		response.Error(w, http.StatusBadRequest, "pesanan sudah lunas — tidak perlu kirim bukti lagi")
 		return
 	}
+	// A cancelled/expired order has already released its stock, and a
+	// refunded one is closed. Accepting a proof for either would show the
+	// seller a "verify me" signal for goods that may have been re-sold.
+	if order.Status == "cancelled" {
+		response.Error(w, http.StatusConflict,
+			"pesanan ini sudah dibatalkan. Hubungi penjual lewat WhatsApp kalau kamu sudah terlanjur transfer.")
+		return
+	}
+	if order.PaymentStatus == "refunded" {
+		response.Error(w, http.StatusConflict, "pesanan ini sudah direfund.")
+		return
+	}
 	// One-shot guard: kalau bukti sudah pernah di-upload sebelumnya,
 	// tolak upload baru. Mencegah pihak jahil yang tahu URL endpoint
 	// (slug + order_number publik) spam-overwrite bukti yang sah.
@@ -1630,28 +1803,27 @@ func (h *StorefrontHandler) UploadPaymentProof(w http.ResponseWriter, r *http.Re
 	}
 	defer file.Close()
 
-	contentType := header.Header.Get("Content-Type")
-	switch contentType {
-	case "image/jpeg", "image/png", "image/webp":
-		// ok
-	default:
-		response.Error(w, http.StatusBadRequest, "format harus JPG / PNG / WebP")
-		return
-	}
-
 	body, err := io.ReadAll(file)
 	if err != nil {
 		response.Error(w, http.StatusBadRequest, "gagal baca file")
 		return
 	}
-
-	ext := "jpg"
+	// Sniff the bytes rather than trusting the multipart part's Content-Type,
+	// which the client sets freely.
+	contentType := http.DetectContentType(body)
+	ext := ""
 	switch contentType {
+	case "image/jpeg":
+		ext = "jpg"
 	case "image/png":
 		ext = "png"
 	case "image/webp":
 		ext = "webp"
+	default:
+		response.Error(w, http.StatusBadRequest, "format harus JPG / PNG / WebP")
+		return
 	}
+	_ = header
 	key, err := storage.RandomKey(store.ID.String()+"/payment_proofs/"+order.ID.String(), ext)
 	if err != nil {
 		h.logger.Error("random key", "err", err)
@@ -1754,7 +1926,7 @@ func (h *StorefrontHandler) GeneratePaymentLink(w http.ResponseWriter, r *http.R
 		response.Error(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	snapItems := make([]payments.SnapItem, 0, len(items))
+	snapItems := make([]payments.SnapItem, 0, len(items)+4)
 	for _, it := range items {
 		snapItems = append(snapItems, payments.SnapItem{
 			ID: it.ID.String(), Name: it.ProductName,
@@ -1767,10 +1939,12 @@ func (h *StorefrontHandler) GeneratePaymentLink(w http.ResponseWriter, r *http.R
 			Price: order.ShippingCents, Quantity: 1,
 		})
 	}
+	snapItems, grossCents := balanceSnapItems(snapItems, order.DiscountCents, order.TaxCents,
+		order.TaxInclusive, order.TotalCents)
 
 	snap, err := h.midtrans.CreateSnapTransaction(payments.SnapTransactionInput{
 		OrderID:       order.OrderNumber,
-		GrossAmount:   order.TotalCents,
+		GrossAmount:   grossCents,
 		CustomerName:  order.CustomerName,
 		CustomerPhone: order.CustomerWhatsApp,
 		Items:         snapItems,
@@ -1813,6 +1987,18 @@ func (h *StorefrontHandler) MarkPaymentPending(w http.ResponseWriter, r *http.Re
 		response.Error(w, http.StatusBadRequest, "pesanan sudah lunas")
 		return
 	}
+	// Without these, a cancelled order could be pushed back into the seller's
+	// "verify payment" queue after its stock was released, and a refunded one
+	// could be walked back to 'pending', hiding the refund.
+	if order.Status == "cancelled" {
+		response.Error(w, http.StatusConflict,
+			"pesanan ini sudah dibatalkan. Hubungi penjual lewat WhatsApp.")
+		return
+	}
+	if order.PaymentStatus == "refunded" {
+		response.Error(w, http.StatusConflict, "pesanan ini sudah direfund.")
+		return
+	}
 	if err := h.orders.SetPaymentStatus(r.Context(), store.ID, order.ID, "pending", order.PaymentMethod); err != nil {
 		h.logger.Error("buyer mark paid", "err", err)
 		response.Error(w, http.StatusInternalServerError, "internal error")
@@ -1850,7 +2036,36 @@ func (h *StorefrontHandler) DomainLookup(w http.ResponseWriter, r *http.Request)
 		response.Error(w, http.StatusNotFound, "domain belum aktif")
 		return
 	}
+	if !h.customDomainEntitled(r.Context(), store) {
+		response.Error(w, http.StatusNotFound, "domain belum aktif")
+		return
+	}
 	response.JSON(w, http.StatusOK, map[string]string{"slug": store.Slug})
+}
+
+// customDomainEntitled reports whether the store's plan still includes custom
+// domains (Bisnis). Setting and verifying a domain are plan-gated, but an
+// already-active one used to keep serving — with auto-TLS — forever after the
+// subscription lapsed. The expiry/downgrade paths suspend the domain; this is
+// the read-side backstop for a store whose plan changed without passing
+// through one of them. Fails OPEN on a lookup error so a transient DB hiccup
+// can't take a paying seller's storefront offline.
+func (h *StorefrontHandler) customDomainEntitled(ctx context.Context, store *repository.Store) bool {
+	if h.subs == nil {
+		return true
+	}
+	plan, err := h.subs.GetPlan(ctx, store.ID)
+	if err != nil {
+		return true
+	}
+	if plan == "bisnis" {
+		return true
+	}
+	// Stop advertising it, and stop issuing certs for it, from now on.
+	if _, sErr := h.stores.SuspendCustomDomain(ctx, store.ID); sErr != nil {
+		h.logger.Warn("suspend custom domain", "err", sErr, "store", store.ID)
+	}
+	return false
 }
 
 // GET /api/v1/internal/tls-check?domain=toko.brand.com
@@ -1870,7 +2085,8 @@ func (h *StorefrontHandler) TLSCheck(w http.ResponseWriter, r *http.Request) {
 		domain = domain[:i]
 	}
 	store, err := h.stores.FindByDomain(r.Context(), domain)
-	if err == nil && store != nil && store.DomainStatus == "active" {
+	if err == nil && store != nil && store.DomainStatus == "active" &&
+		h.customDomainEntitled(r.Context(), store) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}

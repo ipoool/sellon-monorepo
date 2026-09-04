@@ -1,7 +1,18 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Utensils, ShoppingBag, Plus, Minus, Package, CheckCircle2, ArrowLeft, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  Utensils,
+  ShoppingBag,
+  Plus,
+  Minus,
+  Package,
+  CheckCircle2,
+  ArrowLeft,
+  X,
+  ExternalLink,
+  Loader2,
+} from "lucide-react";
 import { formatRupiah } from "@/lib/format";
 import { BannerCarousel } from "@/components/storefront/banner-carousel";
 import type { PublicBanner } from "@/lib/types";
@@ -36,7 +47,10 @@ type Props = {
   banners?: PublicBanner[];
 };
 
-type Step = "choose" | "menu" | "identity" | "done";
+type Step = "choose" | "menu" | "identity" | "pay" | "done";
+
+// How often the pay screen re-checks whether Midtrans settled the order.
+const PAY_POLL_MS = 4_000;
 
 // A cart line is keyed by variant id when present, else by product id — so the
 // same product's different variants are distinct lines.
@@ -61,6 +75,15 @@ export function SelfOrderFlow({ slug, storeName, tableId, tableLabel, paymentMod
   const [busy, setBusy] = useState(false);
   const [queueNumber, setQueueNumber] = useState<number | null>(null);
   const [err, setErr] = useState("");
+  // Online payment mode: the created order + its Snap link, plus the settled
+  // flag the poller sets. In cashier mode these stay untouched.
+  const [created, setCreated] = useState<{
+    order_number: string;
+    total_cents: number;
+  } | null>(null);
+  const [payUrl, setPayUrl] = useState("");
+  const [payNote, setPayNote] = useState("");
+  const [paid, setPaid] = useState(false);
 
   const lines = useMemo(() => Object.values(cart).filter((l) => l.qty > 0), [cart]);
   const total = lines.reduce((sum, l) => sum + l.price_cents * l.qty, 0);
@@ -119,6 +142,37 @@ export function SelfOrderFlow({ slug, storeName, tableId, tableLabel, paymentMod
         return;
       }
       setQueueNumber(data.queue_number ?? null);
+
+      // Online mode: the seller expects the buyer to pay NOW — and the backend
+      // only queues the order into the kitchen once payment lands. Without a
+      // payment step the order just sat unpaid and un-queued while the screen
+      // told the buyer to "bayar di kasir".
+      if (paymentMode === "online" && data.order_number) {
+        const orderNumber = String(data.order_number);
+        setCreated({
+          order_number: orderNumber,
+          total_cents: data.total_cents ?? total,
+        });
+        try {
+          const linkRes = await fetch(
+            `${apiBase}/api/v1/storefront/${slug}/orders/${orderNumber}/payment-link`,
+            { method: "POST" },
+          );
+          const linkData = await linkRes.json().catch(() => ({}));
+          if (linkRes.ok && linkData.payment_url) {
+            setPayUrl(linkData.payment_url as string);
+            setStep("pay");
+            return;
+          }
+        } catch {
+          // fall through to the cashier fallback below
+        }
+        setPayNote(
+          "Pembayaran online belum bisa dibuka. Silakan bayar di kasir ya.",
+        );
+        setStep("done");
+        return;
+      }
       setStep("done");
     } catch {
       setErr("Gagal mengirim pesanan");
@@ -126,6 +180,35 @@ export function SelfOrderFlow({ slug, storeName, tableId, tableLabel, paymentMod
       setBusy(false);
     }
   };
+
+  // Online mode: poll until Midtrans settles the order (the webhook flips
+  // payment_status and queues the kitchen ticket).
+  useEffect(() => {
+    if (step !== "pay" || !created) return;
+    let alive = true;
+    const poll = setInterval(async () => {
+      try {
+        const res = await fetch(
+          `${apiBase}/api/v1/storefront/${slug}/orders/${created.order_number}`,
+        );
+        if (!res.ok || !alive) return;
+        // Response shape is { store, order, bank_accounts }.
+        const data = await res.json();
+        if (data.order?.payment_status === "paid") {
+          clearInterval(poll);
+          setPaid(true);
+          setQueueNumber((q) => data.order?.queue_number ?? q);
+          setStep("done");
+        }
+      } catch {
+        /* transient — keep polling */
+      }
+    }, PAY_POLL_MS);
+    return () => {
+      alive = false;
+      clearInterval(poll);
+    };
+  }, [step, created, slug]);
 
   // ── Step: choose serving type ──────────────────────────────────────────
   if (step === "choose") {
@@ -154,12 +237,48 @@ export function SelfOrderFlow({ slug, storeName, tableId, tableLabel, paymentMod
     );
   }
 
+  // ── Step: pay (online mode only) ───────────────────────────────────────
+  if (step === "pay" && created) {
+    return (
+      <div className="flex min-h-svh flex-col items-center justify-center gap-5 bg-neutral-50 p-6 text-center">
+        <p className="text-neutral-500">Total bayar</p>
+        <p className="font-display text-4xl font-bold tabular-nums text-neutral-900">
+          {formatRupiah(created.total_cents)}
+        </p>
+        <p className="max-w-sm text-sm text-neutral-600">
+          Selesaikan pembayaran (QRIS / e-wallet / VA). Pesananmu masuk ke dapur
+          otomatis begitu pembayaran berhasil — halaman ini update sendiri.
+        </p>
+        <a
+          href={payUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex h-14 w-full max-w-sm items-center justify-center gap-2 rounded-2xl bg-brand-600 text-base font-semibold text-white hover:bg-brand-700"
+        >
+          Bayar Sekarang
+          <ExternalLink className="size-4" aria-hidden />
+        </a>
+        <div className="flex items-center gap-2 text-sm text-neutral-400">
+          <Loader2 className="size-4 animate-spin" aria-hidden />
+          Menunggu pembayaran…
+        </div>
+        <p className="max-w-sm text-xs text-neutral-400">
+          Nomor pesanan {created.order_number} — jangan pesan ulang. Kalau ada
+          kendala, tunjukkan nomor ini ke staf.
+        </p>
+      </div>
+    );
+  }
+
   // ── Step: done ─────────────────────────────────────────────────────────
   if (step === "done") {
+    const onlineUnpaid = paymentMode === "online" && !paid;
     return (
       <div className="flex min-h-svh flex-col items-center justify-center gap-4 bg-neutral-50 p-6 text-center">
         <CheckCircle2 className="size-16 text-brand-600" aria-hidden />
-        <h1 className="font-display text-2xl font-bold text-neutral-900">Pesanan diterima!</h1>
+        <h1 className="font-display text-2xl font-bold text-neutral-900">
+          {paid ? "Pembayaran berhasil!" : "Pesanan diterima!"}
+        </h1>
         {queueNumber != null && (
           <div className="rounded-2xl bg-brand-600 px-10 py-6 text-white">
             <p className="text-sm">Nomor Antrian</p>
@@ -167,9 +286,14 @@ export function SelfOrderFlow({ slug, storeName, tableId, tableLabel, paymentMod
           </div>
         )}
         <p className="max-w-sm text-neutral-600">
-          {queueNumber != null
-            ? "Pesananmu sedang disiapkan dapur. Bayar di kasir ya. Pantau nomor antrianmu di layar."
-            : "Pesananmu sudah masuk. Silakan bayar di kasir ya — staf akan menyiapkan pesananmu."}
+          {paid
+            ? "Pesananmu sedang disiapkan dapur. Pantau nomor antrianmu di layar."
+            : onlineUnpaid
+              ? payNote ||
+                "Pesananmu sudah masuk, tinggal selesaikan pembayaran. Tunjukkan nomor pesanan ke staf kalau butuh bantuan."
+              : queueNumber != null
+                ? "Pesananmu sedang disiapkan dapur. Bayar di kasir ya. Pantau nomor antrianmu di layar."
+                : "Pesananmu sudah masuk. Silakan bayar di kasir ya — staf akan menyiapkan pesananmu."}
         </p>
       </div>
     );
@@ -403,7 +527,11 @@ export function SelfOrderFlow({ slug, storeName, tableId, tableLabel, paymentMod
             <button onClick={submit} disabled={busy} className="w-full rounded-xl bg-brand-600 px-5 py-3 font-semibold text-white disabled:bg-neutral-300">
               {busy ? "Mengirim..." : `Pesan Sekarang · ${formatRupiah(total)}`}
             </button>
-            <p className="text-center text-xs text-neutral-500">Bayar di kasir setelah pesan.</p>
+            <p className="text-center text-xs text-neutral-500">
+              {paymentMode === "online"
+                ? "Bayar online setelah pesan (QRIS / e-wallet / VA)."
+                : "Bayar di kasir setelah pesan."}
+            </p>
           </div>
         </div>
       )}

@@ -5,7 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"path"
+	"regexp"
 	"strings"
 
 	"github.com/sellon/sellon/api/internal/auth"
@@ -17,11 +17,11 @@ import (
 
 type UploadHandler struct {
 	stores  *repository.StoreRepo
-	storage *storage.SupabaseClient
+	storage storage.Client
 	logger  *slog.Logger
 }
 
-func NewUploadHandler(stores *repository.StoreRepo, storageCli *storage.SupabaseClient, logger *slog.Logger) *UploadHandler {
+func NewUploadHandler(stores *repository.StoreRepo, storageCli storage.Client, logger *slog.Logger) *UploadHandler {
 	return &UploadHandler{stores: stores, storage: storageCli, logger: logger}
 }
 
@@ -29,11 +29,12 @@ func NewUploadHandler(stores *repository.StoreRepo, storageCli *storage.Supabase
 // key: `{store_id}/{kindPath}/{stamp}-{hex}.{ext}` di bucket `stores`.
 //
 // Skema:
-//   stores/{store_id}/products/...      → katalog produk
-//   stores/{store_id}/commons/logos/... → branding (logo toko)
-//   stores/{store_id}/commons/banners/... → header storefront
-//   stores/{store_id}/commons/qris/...  → QRIS static toko
-//   stores/{store_id}/commons/misc/...  → upload bebas (footer image, dll)
+//
+//	stores/{store_id}/products/...      → katalog produk
+//	stores/{store_id}/commons/logos/... → branding (logo toko)
+//	stores/{store_id}/commons/banners/... → header storefront
+//	stores/{store_id}/commons/qris/...  → QRIS static toko
+//	stores/{store_id}/commons/misc/...  → upload bebas (footer image, dll)
 //
 // "commons" = bucket per-toko untuk asset non-katalog supaya audit /
 // quota / cleanup per-toko tetap mudah (delete folder = wipe semua
@@ -84,15 +85,6 @@ func (h *UploadHandler) Image(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	contentType := header.Header.Get("Content-Type")
-	switch contentType {
-	case "image/jpeg", "image/png", "image/webp", "image/gif":
-		// ok
-	default:
-		response.Error(w, http.StatusBadRequest, "format harus JPG/PNG/WebP/GIF")
-		return
-	}
-
 	kind := strings.ToLower(strings.TrimSpace(r.FormValue("kind")))
 	if kind == "" {
 		kind = "general"
@@ -106,6 +98,28 @@ func (h *UploadHandler) Image(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(file)
 	if err != nil {
 		response.Error(w, http.StatusBadRequest, "gagal baca file")
+		return
+	}
+
+	// Sniff the real type from the bytes instead of trusting the multipart
+	// part's Content-Type header (client-controlled — a .exe can claim
+	// image/png). The sniffed type also drives the stored extension so the
+	// public URL never disagrees with the body.
+	contentType := sniffContentType(body)
+	switch contentType {
+	case "image/jpeg", "image/png", "image/webp", "image/gif":
+		// ok
+	default:
+		response.Error(w, http.StatusBadRequest, "format harus JPG/PNG/WebP/GIF")
+		return
+	}
+
+	// Decompression-bomb guard: reject header-declared resolutions that would
+	// allocate gigabytes on decode, before anything touches image.Decode.
+	if err := imagex.ValidateDimensions(body); err != nil {
+		h.logger.Warn("reject oversized image",
+			"err", err, "store", store.ID.String(), "bytes", len(body))
+		response.Error(w, http.StatusBadRequest, "resolusi gambar terlalu besar")
 		return
 	}
 
@@ -130,24 +144,17 @@ func (h *UploadHandler) Image(w http.ResponseWriter, r *http.Request) {
 		contentType = newType
 	}
 
-	ext := strings.ToLower(strings.TrimPrefix(path.Ext(header.Filename), "."))
-	// Setelah compress, contentType bisa beda dari ext file asli
-	// (PNG → JPEG). Force ext sesuai content type final supaya URL
-	// publik konsisten dengan body-nya.
-	if kind == "product" {
-		ext = "jpg"
-	}
-	if ext == "" {
-		switch contentType {
-		case "image/png":
-			ext = "png"
-		case "image/webp":
-			ext = "webp"
-		case "image/gif":
-			ext = "gif"
-		default:
-			ext = "jpg"
-		}
+	// Extension always comes from the (post-compression) content type, never
+	// from the client filename — a crafted `foo.php` name must not become part
+	// of the object key.
+	ext := "jpg"
+	switch contentType {
+	case "image/png":
+		ext = "png"
+	case "image/webp":
+		ext = "webp"
+	case "image/gif":
+		ext = "gif"
 	}
 
 	// Path scheme: {store_id}/{prefix}/{stamp}-{hex}.{ext}.
@@ -231,4 +238,159 @@ func (h *UploadHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response.JSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// === Digital file upload ===
+
+// digitalFileMaxBytes caps a seller's digital deliverable. Bigger files belong
+// on Drive/Dropbox with the "Link Akses" field instead of our bucket.
+const digitalFileMaxBytes = 25 * 1024 * 1024
+
+// digitalTypeExts allowlists digital deliverables by SNIFFED content type and
+// maps each to the extensions we're willing to store. First entry is the
+// default; a client-supplied extension is honoured only when it appears in the
+// list for the sniffed type (epub/zip and jpg/jpeg are indistinguishable from
+// the magic bytes alone).
+//
+// Note: http.DetectContentType never returns text/csv — a CSV sniffs as
+// text/plain, hence csv/md living under that key.
+var digitalTypeExts = map[string][]string{
+	"application/pdf":      {"pdf"},
+	"application/zip":      {"zip", "epub"},
+	"application/epub+zip": {"epub"},
+	"audio/mpeg":           {"mp3"},
+	"video/mp4":            {"mp4"},
+	"image/png":            {"png"},
+	"image/jpeg":           {"jpg", "jpeg"},
+	"image/webp":           {"webp"},
+	"text/plain":           {"txt", "csv", "md"},
+}
+
+// safeExtRe keeps object keys boring: lowercase alphanumeric, at most 5 chars.
+var safeExtRe = regexp.MustCompile(`^[a-z0-9]{1,5}$`)
+
+// sniffContentType returns the media type detected from the first 512 bytes,
+// with any charset/boundary parameter stripped.
+func sniffContentType(body []byte) string {
+	head := body
+	if len(head) > 512 {
+		head = head[:512]
+	}
+	ct := http.DetectContentType(head)
+	if i := strings.IndexByte(ct, ';'); i >= 0 {
+		ct = ct[:i]
+	}
+	return strings.ToLower(strings.TrimSpace(ct))
+}
+
+// clientExt pulls a sanitized extension out of the uploaded filename. Returns
+// "" when the name has none or it fails the safe-extension shape.
+func clientExt(filename string) string {
+	i := strings.LastIndexByte(filename, '.')
+	if i < 0 || i == len(filename)-1 {
+		return ""
+	}
+	ext := strings.ToLower(filename[i+1:])
+	if !safeExtRe.MatchString(ext) {
+		return ""
+	}
+	return ext
+}
+
+// POST /api/v1/uploads/file (multipart "file")
+//
+// Seller-facing upload for DIGITAL product deliverables (kind = "digital").
+// Unlike /uploads/image this accepts non-image payloads (PDF/zip/audio/video/
+// text), caps at 25 MB, and never re-encodes the body — a JPEG re-encode of a
+// buyer's deliverable would corrupt it.
+//
+// Object key: {store_id}/digital/{stamp}-{hex}.{ext}
+func (h *UploadHandler) File(w http.ResponseWriter, r *http.Request) {
+	if h.storage == nil || !h.storage.IsConfigured() {
+		response.Error(w, http.StatusServiceUnavailable, "upload belum dikonfigurasi")
+		return
+	}
+	uid, _ := auth.UserIDFromContext(r.Context())
+	store, err := h.stores.FindByOwnerID(r.Context(), uid)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "toko belum dibuat")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, digitalFileMaxBytes)
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
+		response.Error(w, http.StatusBadRequest, "file terlalu besar (maks 25 MB)")
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "file tidak ada di body")
+		return
+	}
+	defer file.Close()
+	if header.Size > digitalFileMaxBytes {
+		response.Error(w, http.StatusBadRequest, "ukuran maks 25 MB")
+		return
+	}
+
+	body, err := io.ReadAll(file)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "gagal baca file")
+		return
+	}
+	if len(body) == 0 {
+		response.Error(w, http.StatusBadRequest, "file kosong")
+		return
+	}
+
+	contentType := sniffContentType(body)
+	exts, ok := digitalTypeExts[contentType]
+	if !ok || len(exts) == 0 {
+		response.Error(w, http.StatusBadRequest,
+			"format file tidak didukung. Pakai PDF, ZIP/EPUB, MP3, MP4, gambar (PNG/JPG/WebP), atau teks (TXT/CSV)")
+		return
+	}
+	// Images still go through the resolution guard — a digital "deliverable"
+	// that happens to be a PNG can be a decompression bomb just the same.
+	if strings.HasPrefix(contentType, "image/") {
+		if err := imagex.ValidateDimensions(body); err != nil {
+			response.Error(w, http.StatusBadRequest, "resolusi gambar terlalu besar")
+			return
+		}
+	}
+
+	ext := exts[0]
+	if ce := clientExt(header.Filename); ce != "" {
+		for _, allowed := range exts {
+			if ce == allowed {
+				ext = ce
+				break
+			}
+		}
+	}
+	if !safeExtRe.MatchString(ext) {
+		ext = "bin"
+	}
+
+	key, err := storage.RandomKey(store.ID.String()+"/digital", ext)
+	if err != nil {
+		h.logger.Error("random key", "err", err)
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	res, err := h.storage.Upload(r.Context(), key, contentType, body)
+	if err != nil {
+		h.logger.Error("supabase upload (digital)", "err", err, "store", store.ID.String())
+		response.Error(w, http.StatusBadGateway, "gagal upload ke storage")
+		return
+	}
+	h.logger.Info("uploaded digital file",
+		"store", store.ID.String(), "bytes", len(body), "type", contentType)
+	response.JSON(w, http.StatusCreated, map[string]any{
+		"url":  res.PublicURL,
+		"path": res.Path,
+		"size": len(body),
+		"type": contentType,
+	})
 }

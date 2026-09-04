@@ -8,6 +8,7 @@ import { AnalyticsDashboard } from "@/components/dashboard/analytics-dashboard";
 import { AnalyticsAiButton } from "@/components/dashboard/analytics-ai-button";
 import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
+import { daysAgoWIB, todayWIB } from "@/lib/format";
 import type {
   AnalyticsOverview,
   CashEntry,
@@ -20,11 +21,9 @@ export const metadata = { title: "Laporan & Analytics — SellOn" };
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
 function defaultRange() {
-  const now = new Date();
-  const to = now.toISOString().slice(0, 10);
-  const fromD = new Date(now);
-  fromD.setDate(fromD.getDate() - 29);
-  return { from: fromD.toISOString().slice(0, 10), to };
+  // WIB, not UTC: this runs server-side in a UTC container, so before 07:00
+  // WIB a UTC "today" is yesterday for the seller.
+  return { from: daysAgoWIB(29), to: todayWIB() };
 }
 
 export default async function LaporanAnalyticsPage({

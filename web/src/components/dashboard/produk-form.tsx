@@ -254,13 +254,35 @@ export function ProdukForm({ initial }: Props) {
 
       // Save tier discounts (separate endpoint). Skip jika new product (need id).
       const productId = isEditing ? initial.id : data?.product?.id;
+      // The follow-up PUTs used to swallow every failure, so a rejected tier /
+      // recipe save still showed "Produk tersimpan" and navigated away. Collect
+      // failures instead and surface them.
+      const failures: string[] = [];
+      const putSection = async (
+        path: string,
+        payload: unknown,
+        label: string,
+      ) => {
+        try {
+          const r = await fetch(`${apiBase}/api/v1/products/${productId}${path}`, {
+            method: "PUT",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (!r.ok) {
+            const d = await r.json().catch(() => ({}));
+            throw new Error(d.error || `HTTP ${r.status}`);
+          }
+        } catch (e) {
+          failures.push(
+            `${label} (${e instanceof Error ? e.message : "gagal disimpan"})`,
+          );
+        }
+      };
       if (productId) {
         const localToISO = (s: string) => (s ? new Date(s).toISOString() : null);
-        await fetch(`${apiBase}/api/v1/products/${productId}/discounts`, {
-          method: "PUT",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
+        await putSection("/discounts", {
             // Non-physical products have no volume discounts — send empty to
             // clear any left over from a previous physical config.
             discounts: (isPhysical ? discounts : []).map((d) => ({
@@ -271,15 +293,10 @@ export function ProdukForm({ initial }: Props) {
               ends_at: localToISO(d.ends_at),
               is_active: d.is_active,
             })),
-          }),
-        }).catch(() => {});
+          }, "Tier diskon");
 
         // Save base recipe (material consumption) — separate endpoint.
-        await fetch(`${apiBase}/api/v1/products/${productId}/modifiers`, {
-          method: "PUT",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
+        await putSection("/modifiers", {
             // Base recipe + product options are physical-only — cleared for
             // digital + course products.
             base_recipe: (isPhysical ? recipe : [])
@@ -308,8 +325,22 @@ export function ProdukForm({ initial }: Props) {
                       })),
                   })),
               })),
-          }),
-        }).catch(() => {});
+        }, "Resep bahan & opsi produk");
+      }
+
+      if (failures.length > 0) {
+        // Produk induk sudah tersimpan, jadi jangan lempar user balik ke form
+        // kosong: kalau ini create, pindah ke halaman edit produk barunya
+        // supaya retry meng-update (bukan bikin duplikat).
+        showError(
+          new Error(
+            `Produk tersimpan, tapi ${failures.join(" dan ")} — coba simpan ulang.`,
+          ),
+        );
+        if (!isEditing && productId) push(`/products/${productId}`);
+        refresh();
+        setPending(false);
+        return;
       }
 
       showSuccess(isEditing ? "Produk tersimpan" : "Produk baru ditambahkan");
@@ -455,7 +486,10 @@ export function ProdukForm({ initial }: Props) {
               required={!hasVariants}
               disabled={hasVariants}
               min={0}
-              step={500}
+              // step={1}: a 500-step made the browser REJECT prices like
+              // 12.750 / 9.900 with an English validation bubble, and blocked
+              // re-saving any product created via bulk/POS at such a price.
+              step={1}
               defaultValue={initial ? Math.round(initial.price_cents / 100) : ""}
               placeholder={hasVariants ? "Otomatis dari varian" : "35000"}
             />

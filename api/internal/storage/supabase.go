@@ -1,14 +1,13 @@
-// Package storage wraps the bits of Supabase Storage's REST API we need
-// for hosting product photos. We don't use a vendored SDK — the surface
-// is small (one PUT + a public-URL helper) and avoiding a new dep keeps
-// the binary lean.
 package storage
+
+// SupabaseClient is the LEGACY backend. New uploads go to S3Client; this is
+// kept wired only so assets uploaded before the migration can still be
+// resolved from their stored public URL and deleted. Once no rows reference
+// a Supabase URL, unset SUPABASE_* and this drops out via NewMultiClient.
 
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -39,29 +38,6 @@ func NewSupabaseClient(baseURL, serviceKey, bucket string) *SupabaseClient {
 // than attempting an upload that will obviously fail.
 func (c *SupabaseClient) IsConfigured() bool {
 	return c != nil && c.baseURL != "" && c.serviceKey != "" && c.bucket != ""
-}
-
-// RandomKey returns a random object key in the form `{prefix}/{stamp}-{hex}.{ext}`.
-// Caller passes the file extension (without leading dot).
-func RandomKey(prefix, ext string) (string, error) {
-	if ext == "" {
-		ext = "jpg"
-	}
-	var buf [8]byte
-	if _, err := rand.Read(buf[:]); err != nil {
-		return "", err
-	}
-	stamp := time.Now().UTC().Format("20060102-150405")
-	key := stamp + "-" + hex.EncodeToString(buf[:]) + "." + ext
-	if prefix != "" {
-		key = strings.Trim(prefix, "/") + "/" + key
-	}
-	return key, nil
-}
-
-type UploadResult struct {
-	Path      string `json:"path"`
-	PublicURL string `json:"url"`
 }
 
 // Upload puts the body bytes into the configured bucket at `path`.
@@ -163,4 +139,10 @@ func (c *SupabaseClient) DeleteObjects(ctx context.Context, paths []string) erro
 		return fmt.Errorf("supabase delete status %d: %s", resp.StatusCode, string(errBody))
 	}
 	return nil
+}
+
+// Get is not supported: legacy assets are served from their own public
+// Supabase URL, so the API read-proxy never resolves a key here.
+func (c *SupabaseClient) Get(ctx context.Context, key, ifNoneMatch string) (*Object, error) {
+	return nil, ErrObjectNotFound
 }

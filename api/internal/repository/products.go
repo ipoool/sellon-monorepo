@@ -153,13 +153,18 @@ func (r *ProductRepo) List(ctx context.Context, f ListProductsFilter) ([]Product
 
 // ListActiveByStore returns active products for storefront display (public).
 // Featured products are surfaced first; rest fall back to recency.
+//
+// The LIMIT is a blunt safety cap, not pagination: Pro/Bisnis are sold as
+// "produk tanpa batas", so a store past the cap would silently hide its tail
+// from both the storefront catalog and the Meta feed. TODO: real pagination
+// (keyset on (is_featured, created_at, id)) for both consumers.
 func (r *ProductRepo) ListActiveByStore(ctx context.Context, storeID uuid.UUID) ([]Product, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT `+productColumns+`
 		FROM products
 		WHERE store_id = $1 AND status = 'active'
 		ORDER BY is_featured DESC, created_at DESC
-		LIMIT 200
+		LIMIT 1000
 	`, storeID)
 	if err != nil {
 		return nil, err
@@ -172,6 +177,43 @@ func (r *ProductRepo) ListActiveByStore(ctx context.Context, storeID uuid.UUID) 
 			return nil, err
 		}
 		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// StillReferencedURLs returns the subset of `urls` that at least one OTHER
+// product in the same store still points at (photo_urls or digital_file_url),
+// ignoring the products in `excludeIDs`.
+//
+// Duplicate() clones a product's photo/file URLs verbatim, so two rows can
+// share the same storage object. Delete paths must consult this before firing
+// storage.DeleteObjects, otherwise deleting either twin wipes the other's
+// images out of the bucket.
+func (r *ProductRepo) StillReferencedURLs(ctx context.Context, storeID uuid.UUID, excludeIDs []uuid.UUID, urls []string) (map[string]struct{}, error) {
+	out := map[string]struct{}{}
+	if len(urls) == 0 {
+		return out, nil
+	}
+	if excludeIDs == nil {
+		excludeIDs = []uuid.UUID{}
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT DISTINCT u
+		FROM products p, unnest($3::text[]) AS u
+		WHERE p.store_id = $1
+		  AND NOT (p.id = ANY($2::uuid[]))
+		  AND (u = ANY(p.photo_urls) OR u = p.digital_file_url)
+	`, storeID, excludeIDs, urls)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var u string
+		if err := rows.Scan(&u); err != nil {
+			return nil, err
+		}
+		out[u] = struct{}{}
 	}
 	return out, rows.Err()
 }

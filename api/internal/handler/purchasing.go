@@ -286,6 +286,11 @@ func (h *PurchasingHandler) CreatePO(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	poID, err := h.pos.Create(r.Context(), store.ID, supplierID, in.Note, items)
+	if errors.Is(err, repository.ErrMaterialNotFound) {
+		// A line referenced a material outside this store (or a deleted one).
+		response.Error(w, http.StatusBadRequest, "ada bahan yang tidak ditemukan di toko ini")
+		return
+	}
 	if err != nil {
 		h.logger.Error("create PO", "err", err)
 		response.Error(w, http.StatusInternalServerError, "gagal buat PO")
@@ -455,7 +460,7 @@ func (h *PurchasingHandler) GetStockTake(w http.ResponseWriter, r *http.Request)
 	response.JSON(w, http.StatusOK, map[string]any{
 		"stock_take": map[string]any{
 			"id": st.ID.String(), "status": st.Status, "note": st.Note,
-			"posted_at": postedAt,
+			"posted_at":  postedAt,
 			"created_at": st.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		},
 		"items": itemsOut,
@@ -510,6 +515,40 @@ func (h *PurchasingHandler) PostStockTake(w http.ResponseWriter, r *http.Request
 	h.audit.Log(r.Context(), store.ID, audit.Event{
 		Action: "stock_take.posted", EntityType: "stock_take", EntityID: id.String(),
 		Summary: "Posting stok opname",
+	})
+	response.JSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// DELETE /api/v1/stock-takes/{id} — discard a draft opname (the FE "Batal"
+// button). Posted opnames are immutable → 409. Without this, every "Mulai
+// Opname" that was abandoned left an orphan draft row forever.
+func (h *PurchasingHandler) DeleteStockTake(w http.ResponseWriter, r *http.Request) {
+	store, err := h.requireStore(r)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "toko belum dibuat")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "id invalid")
+		return
+	}
+	if err := h.stockTakes.Delete(r.Context(), store.ID, id); err != nil {
+		if errors.Is(err, repository.ErrStockTakePosted) {
+			response.Error(w, http.StatusConflict, "opname yang sudah diposting tidak bisa dihapus")
+			return
+		}
+		if errors.Is(err, repository.ErrStockTakeNotFound) {
+			response.Error(w, http.StatusNotFound, "opname tidak ditemukan")
+			return
+		}
+		h.logger.Error("delete stock take", "err", err)
+		response.Error(w, http.StatusInternalServerError, "gagal membatalkan opname")
+		return
+	}
+	h.audit.Log(r.Context(), store.ID, audit.Event{
+		Action: "stock_take.discarded", EntityType: "stock_take", EntityID: id.String(),
+		Summary: "Batalkan draft stok opname",
 	})
 	response.JSON(w, http.StatusOK, map[string]any{"ok": true})
 }

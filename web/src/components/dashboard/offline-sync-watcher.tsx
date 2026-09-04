@@ -38,10 +38,21 @@ export function OfflineSyncWatcher() {
   const runningRef = useRef(false);
   const wasOnlineRef = useRef(online);
   const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Mount flag lives OUTSIDE the [online] effect. The old per-effect `alive`
+  // was flipped false whenever `online` changed, so a pass still in flight when
+  // the device dropped offline discarded its own result and left the card stuck
+  // on "Menyinkronkan…" forever — a state that hides the close button.
+  const mountedRef = useRef(true);
+  const requeuedOnMountRef = useRef(false);
 
   useEffect(() => {
-    let alive = true;
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
+  useEffect(() => {
     const clearDismissTimer = () => {
       if (dismissTimer.current) {
         clearTimeout(dismissTimer.current);
@@ -50,31 +61,33 @@ export function OfflineSyncWatcher() {
     };
 
     const run = async () => {
-      // On a reconnect, give previously-failed orders a fresh attempt — the
-      // transient cause (expired session, server hiccup) has likely cleared.
+      // Give previously-failed orders a fresh attempt on reconnect AND once per
+      // mount: an earlier session may have flagged real cash sales on a
+      // transient 401/409, and those would otherwise sit failed forever.
       const justReconnected = online && !wasOnlineRef.current;
       wasOnlineRef.current = online;
-      if (justReconnected) await requeueFailed();
+      if (online && (justReconnected || !requeuedOnMountRef.current)) {
+        requeuedOnMountRef.current = true;
+        await requeueFailed();
+      }
 
       if (!online) {
         // Offline: reassure the user their queued sales are safe on-device.
         const { active } = await queueCounts();
-        if (!alive) return;
-        if (active > 0) {
-          setState((p) =>
-            p.phase === "syncing"
+        if (!mountedRef.current) return;
+        setState((p) =>
+          active > 0
+            ? { ...IDLE, phase: "pending-offline", pendingOffline: active }
+            : p.phase === "done"
               ? p
-              : { ...IDLE, phase: "pending-offline", pendingOffline: active },
-          );
-        } else {
-          setState((p) => (p.phase === "done" ? p : IDLE));
-        }
+              : IDLE,
+        );
         return;
       }
 
       if (runningRef.current) return; // a pass is already in flight
       const { active } = await queueCounts();
-      if (!alive) return;
+      if (!mountedRef.current) return;
       if (active === 0) {
         setState((p) => (p.phase === "done" ? p : IDLE));
         return;
@@ -84,42 +97,53 @@ export function OfflineSyncWatcher() {
       clearDismissTimer();
       setDismissed(false);
       setState({ ...IDLE, phase: "syncing", total: active });
-      const result = await syncQueue((p) => {
-        if (alive)
-          setState((s) => ({
-            ...s,
-            phase: "syncing",
-            total: p.total,
-            synced: p.synced,
-            failed: p.failed,
-          }));
-      });
-      runningRef.current = false;
-      if (!alive) return;
-
-      if (result.synced === 0 && result.failed === 0) {
-        // Nothing actually moved (went offline immediately, or another tab
-        // drained it) — drop back to ambient state.
+      try {
+        const result = await syncQueue((p) => {
+          if (mountedRef.current)
+            setState((s) => ({
+              ...s,
+              phase: "syncing",
+              total: p.total,
+              synced: p.synced,
+              failed: p.failed,
+            }));
+        });
+        if (!mountedRef.current) return;
+        if (result.synced === 0 && result.failed === 0) {
+          // Nothing actually moved (went offline immediately, or another tab
+          // drained it) — the finally below drops back to ambient state.
+          return;
+        }
+        setState({
+          phase: "done",
+          total: result.synced + result.failed,
+          synced: result.synced,
+          failed: result.failed,
+          pendingOffline: result.remaining,
+        });
+        dismissTimer.current = setTimeout(() => {
+          if (mountedRef.current) setState((p) => (p.phase === "done" ? IDLE : p));
+        }, DISMISS_DELAY_MS);
+      } finally {
+        runningRef.current = false;
+        // Never leave the card pinned on "syncing" — that phase hides the close
+        // button. Whatever the try block already set (done / pending-offline)
+        // wins, since this only resets a still-syncing phase.
         setState((p) => (p.phase === "syncing" ? IDLE : p));
-        return;
       }
-      setState({
-        phase: "done",
-        total: result.synced + result.failed,
-        synced: result.synced,
-        failed: result.failed,
-        pendingOffline: result.remaining,
-      });
-      dismissTimer.current = setTimeout(() => {
-        if (alive) setState((p) => (p.phase === "done" ? IDLE : p));
-      }, DISMISS_DELAY_MS);
     };
 
     void run();
     const iv = setInterval(() => void run(), POLL_MS);
+    // A backgrounded tab throttles timers, so kick a pass the moment it comes
+    // back rather than making the cashier wait out the poll interval.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void run();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
-      alive = false;
       clearInterval(iv);
+      document.removeEventListener("visibilitychange", onVisible);
       clearDismissTimer();
     };
   }, [online]);

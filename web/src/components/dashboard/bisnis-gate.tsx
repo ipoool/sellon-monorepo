@@ -97,12 +97,12 @@ export function BisnisGateProvider({ children }: { children: ReactNode }) {
             Upgrade sekarang untuk membukanya — datamu yang sudah ada tetap aman.
           </p>
           <div className="mt-5 flex w-full flex-col gap-2 sm:flex-row sm:justify-center">
-            <Link href="/settings/subscription" onClick={close}>
-              <Button size="md" className="w-full sm:w-auto">
+            <Button asChild size="md" className="w-full sm:w-auto">
+              <Link href="/settings/subscription" onClick={close}>
                 <Crown className="size-4" aria-hidden />
                 Lihat Paket Bisnis
-              </Button>
-            </Link>
+              </Link>
+            </Button>
             <Button
               type="button"
               size="md"

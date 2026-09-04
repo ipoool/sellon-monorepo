@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/sellon/sellon/api/internal/audit"
@@ -16,6 +17,9 @@ import (
 // Pixel ID (browser-public), Conversions API access token (stored encrypted),
 // optional test-event code, and the catalog id. Mirrors the Midtrans
 // credential pattern (PaymentHandler.Save) for encrypt-on-write.
+// metaPixelIDPattern matches a Meta (Facebook) pixel id: digits only.
+var metaPixelIDPattern = regexp.MustCompile(`^[0-9]{6,20}$`)
+
 type MetaHandler struct {
 	stores         *repository.StoreRepo
 	encryptor      *auth.AESEncryptor
@@ -93,6 +97,13 @@ func (h *MetaHandler) Save(w http.ResponseWriter, r *http.Request) {
 
 	// Enabling requires a Pixel ID (events need it; the feed alone doesn't,
 	// but "enabled" means tracking is on).
+	// The storefront renders this id inside an inline fbq() script tag, so a
+	// non-numeric value would be executable JS on the platform origin (and
+	// on seller custom domains). Reject anything that isn't a Meta pixel id.
+	if req.PixelID != "" && !metaPixelIDPattern.MatchString(req.PixelID) {
+		response.Error(w, http.StatusBadRequest, "Pixel ID harus berupa angka (6-20 digit)")
+		return
+	}
 	if req.Enabled && req.PixelID == "" {
 		response.Error(w, http.StatusBadRequest, "Pixel ID wajib diisi untuk mengaktifkan")
 		return
@@ -128,10 +139,10 @@ func (h *MetaHandler) Save(w http.ResponseWriter, r *http.Request) {
 		EntityID:   store.ID.String(),
 		Summary:    "Update integrasi Meta (Pixel/CAPI)",
 		Metadata: map[string]any{
-			"enabled":      req.Enabled,
-			"pixel_id":     req.PixelID,
-			"token_set":    tokenBlob != nil || len(store.MetaAccessTokenEnc) > 0,
-			"catalog_id":   req.CatalogID,
+			"enabled":    req.Enabled,
+			"pixel_id":   req.PixelID,
+			"token_set":  tokenBlob != nil || len(store.MetaAccessTokenEnc) > 0,
+			"catalog_id": req.CatalogID,
 		},
 	})
 

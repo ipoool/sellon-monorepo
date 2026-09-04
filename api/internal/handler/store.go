@@ -62,19 +62,26 @@ type storeDTO struct {
 	CustomDomain               *string         `json:"custom_domain"`
 	DomainStatus               string          `json:"domain_status"`
 	DomainVerifiedAt           *string         `json:"domain_verified_at"`
-	LayoutConfig               json.RawMessage `json:"layout_config,omitempty"`
-	CheckoutConfig             json.RawMessage `json:"checkout_config,omitempty"`
-	TaxEnabled                 bool            `json:"tax_enabled"`
-	TaxBps                     int             `json:"tax_bps"`
-	TaxInclusive               bool            `json:"tax_inclusive"`
-	TaxLabel                   string          `json:"tax_label"`
-	OfflineEnabled             bool            `json:"offline_enabled"`
-	CapPOS                     bool            `json:"cap_pos"`
-	CapReseller                bool            `json:"cap_reseller"`
-	CapDigital                 bool            `json:"cap_digital"`
-	CapMaterials               bool            `json:"cap_materials"`
-	SellerTypes                string          `json:"seller_types"`
-	ProfilingCompletedAt       *string         `json:"profiling_completed_at"`
+	// Ownership proof the seller must publish at
+	// _sellon-verify.<custom_domain> before Verify will flip the domain
+	// active. Empty when no domain is set. toStoreDTO is only reachable
+	// from owner-authenticated endpoints, so this never leaks to a store
+	// that doesn't own the domain.
+	DomainVerifyTXTName  string          `json:"domain_verify_txt_name,omitempty"`
+	DomainVerifyTXTValue string          `json:"domain_verify_txt_value,omitempty"`
+	LayoutConfig         json.RawMessage `json:"layout_config,omitempty"`
+	CheckoutConfig       json.RawMessage `json:"checkout_config,omitempty"`
+	TaxEnabled           bool            `json:"tax_enabled"`
+	TaxBps               int             `json:"tax_bps"`
+	TaxInclusive         bool            `json:"tax_inclusive"`
+	TaxLabel             string          `json:"tax_label"`
+	OfflineEnabled       bool            `json:"offline_enabled"`
+	CapPOS               bool            `json:"cap_pos"`
+	CapReseller          bool            `json:"cap_reseller"`
+	CapDigital           bool            `json:"cap_digital"`
+	CapMaterials         bool            `json:"cap_materials"`
+	SellerTypes          string          `json:"seller_types"`
+	ProfilingCompletedAt *string         `json:"profiling_completed_at"`
 }
 
 func toStoreDTO(s *repository.Store) storeDTO {
@@ -86,13 +93,18 @@ func toStoreDTO(s *repository.Store) storeDTO {
 	if couriers == nil {
 		couriers = []string{}
 	}
+	var txtName, txtValue string
+	if s.CustomDomain != nil && *s.CustomDomain != "" {
+		txtName = domainVerifyPrefix + *s.CustomDomain
+		txtValue = domainVerifyToken(s.ID, *s.CustomDomain)
+	}
 	return storeDTO{
 		ID: s.ID.String(), Slug: s.Slug, Name: s.Name, Description: s.Description,
 		LogoURL: s.LogoURL, BannerURL: s.BannerURL, Tagline: s.Tagline,
 		Category: s.Category, City: s.City,
-		WhatsAppNumber: s.WhatsAppNumber,
+		WhatsAppNumber:             s.WhatsAppNumber,
 		NotificationWhatsAppNumber: s.NotificationWhatsAppNumber,
-		Instagram: s.Instagram, TikTok: s.TikTok,
+		Instagram:                  s.Instagram, TikTok: s.TikTok,
 		OpenHours: openHours, IsOpen: s.IsOpen,
 		ShippingOriginCity:         s.ShippingOriginCity,
 		ShippingOriginCityID:       s.ShippingOriginCityID,
@@ -109,23 +121,25 @@ func toStoreDTO(s *repository.Store) storeDTO {
 		SegmentBaruName:            s.SegmentBaruName,
 		SegmentRegulerName:         s.SegmentRegulerName,
 		SegmentLoyalName:           s.SegmentLoyalName,
-		SegmentVipName:    s.SegmentVipName,
-		CustomDomain:     s.CustomDomain,
-		DomainStatus:     s.DomainStatus,
-		DomainVerifiedAt: formatTimePtr(s.DomainVerifiedAt),
-		LayoutConfig:     json.RawMessage(s.LayoutConfig),
-		CheckoutConfig:   json.RawMessage(s.CheckoutConfig),
-		TaxEnabled:       s.TaxEnabled,
-		TaxBps:           s.TaxBps,
-		TaxInclusive:     s.TaxInclusive,
-		TaxLabel:         s.TaxLabel,
-		OfflineEnabled:   s.OfflineEnabled,
-		CapPOS:               s.CapPOS,
-		CapReseller:          s.CapReseller,
-		CapDigital:           s.CapDigital,
-		CapMaterials:         s.CapMaterials,
-		SellerTypes:          s.SellerTypes,
-		ProfilingCompletedAt: formatTimePtr(s.ProfilingCompletedAt),
+		SegmentVipName:             s.SegmentVipName,
+		CustomDomain:               s.CustomDomain,
+		DomainStatus:               s.DomainStatus,
+		DomainVerifiedAt:           formatTimePtr(s.DomainVerifiedAt),
+		DomainVerifyTXTName:        txtName,
+		DomainVerifyTXTValue:       txtValue,
+		LayoutConfig:               json.RawMessage(s.LayoutConfig),
+		CheckoutConfig:             json.RawMessage(s.CheckoutConfig),
+		TaxEnabled:                 s.TaxEnabled,
+		TaxBps:                     s.TaxBps,
+		TaxInclusive:               s.TaxInclusive,
+		TaxLabel:                   s.TaxLabel,
+		OfflineEnabled:             s.OfflineEnabled,
+		CapPOS:                     s.CapPOS,
+		CapReseller:                s.CapReseller,
+		CapDigital:                 s.CapDigital,
+		CapMaterials:               s.CapMaterials,
+		SellerTypes:                s.SellerTypes,
+		ProfilingCompletedAt:       formatTimePtr(s.ProfilingCompletedAt),
 	}
 }
 
@@ -521,9 +535,9 @@ func (h *StoreHandler) UpdateShipping(w http.ResponseWriter, r *http.Request) {
 		EntityID:   store.ID.String(),
 		Summary:    "Update setting pengiriman",
 		Metadata: map[string]any{
-			"origin_city":              store.ShippingOriginCityName,
-			"enabled_couriers":         clean,
-			"free_shipping_threshold":  store.FreeShippingThresholdCents,
+			"origin_city":             store.ShippingOriginCityName,
+			"enabled_couriers":        clean,
+			"free_shipping_threshold": store.FreeShippingThresholdCents,
 		},
 	})
 	response.JSON(w, http.StatusOK, map[string]any{"store": toStoreDTO(store)})
@@ -732,4 +746,3 @@ func sanitizeSlug(s string) string {
 	}
 	return s
 }
-

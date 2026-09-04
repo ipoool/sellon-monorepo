@@ -78,7 +78,15 @@ export default async function DigitalDownloadsPage({
       ) : (
         <>
           <DigitalDownloadsTable links={links} />
-          <TablePagination page={page} total={total} pageSize={PAGE_SIZE} />
+          {/* paramName is required — without it the prev/next buttons fall back
+              to the client-side `onPageChange` handler (which this page doesn't
+              pass) and page 2+ becomes unreachable. */}
+          <TablePagination
+            page={page}
+            total={total}
+            pageSize={PAGE_SIZE}
+            paramName="page"
+          />
         </>
       )}
     </DashboardShell>

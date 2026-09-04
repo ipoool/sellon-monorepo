@@ -12,6 +12,13 @@ type SwitchProps = Omit<
 // Switch is a checkbox styled as a toggle. The native input stays in the
 // DOM (as `peer`) so FormData / required / name still work, and assistive
 // tech treats it as a normal checkbox.
+//
+// The wrapper is a <span>, NOT a <label>: most call sites already wrap the
+// Switch in their own <label>, and label-inside-label is invalid HTML (the
+// inner label swallows the click and the outer one loses its target). The
+// input is therefore a transparent, full-size overlay instead of `sr-only`
+// so the visual track stays clickable on its own. Pass `id` (paired with an
+// external <label htmlFor>) or `aria-label` to give it an accessible name.
 export function Switch({
   className,
   size = "md",
@@ -24,10 +31,10 @@ export function Switch({
       ? { track: "h-5 w-9", thumb: "size-4 peer-checked:translate-x-4" }
       : { track: "h-6 w-11", thumb: "size-5 peer-checked:translate-x-5" };
   return (
-    <label
+    <span
       className={cn(
-        "relative inline-flex shrink-0 cursor-pointer select-none items-center",
-        disabled && "cursor-not-allowed opacity-50",
+        "relative inline-flex shrink-0 select-none items-center",
+        disabled && "opacity-50",
         className,
       )}
     >
@@ -35,7 +42,7 @@ export function Switch({
         ref={ref}
         type="checkbox"
         disabled={disabled}
-        className="peer sr-only"
+        className="peer absolute inset-0 z-10 m-0 size-full cursor-pointer appearance-none opacity-0 disabled:cursor-not-allowed"
         {...props}
       />
       <span
@@ -52,6 +59,6 @@ export function Switch({
           dims.thumb,
         )}
       />
-    </label>
+    </span>
   );
 }

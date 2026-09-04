@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -23,21 +25,21 @@ import (
 )
 
 type ProductHandler struct {
-	products  *repository.ProductRepo
-	variants  *repository.VariantRepo
-	stores    *repository.StoreRepo
-	subs      *repository.SubscriptionRepo
-	plans     *repository.PlanRepo
-	bulkJobs  *repository.BulkJobRepo
-	discounts  *repository.ProductDiscountRepo
-	modifiers  *repository.ModifierRepo
-	materials  *repository.MaterialRepo
-	categories *repository.CategoryRepo
+	products     *repository.ProductRepo
+	variants     *repository.VariantRepo
+	stores       *repository.StoreRepo
+	subs         *repository.SubscriptionRepo
+	plans        *repository.PlanRepo
+	bulkJobs     *repository.BulkJobRepo
+	discounts    *repository.ProductDiscountRepo
+	modifiers    *repository.ModifierRepo
+	materials    *repository.MaterialRepo
+	categories   *repository.CategoryRepo
 	courseVideos *repository.CourseVideoRepo
-	storage    *storage.SupabaseClient
-	broker    *events.Broker
-	audit     *audit.Logger
-	logger    *slog.Logger
+	storage      storage.Client
+	broker       *events.Broker
+	audit        *audit.Logger
+	logger       *slog.Logger
 	// pool buat goroutine background — Context dari request dibuang
 	// karena req sudah balas 202 sebelum job selesai. Worker punya
 	// context.Background() sendiri yang independen.
@@ -56,25 +58,25 @@ func NewProductHandler(
 	materials *repository.MaterialRepo,
 	categories *repository.CategoryRepo,
 	courseVideos *repository.CourseVideoRepo,
-	storageCli *storage.SupabaseClient,
+	storageCli storage.Client,
 	broker *events.Broker,
 	audit *audit.Logger,
 	logger *slog.Logger,
 ) *ProductHandler {
 	h := &ProductHandler{
 		products: products, variants: variants, stores: stores,
-		subs:       subs,
-		plans:      plans,
-		bulkJobs:   bulkJobs,
-		discounts:  discounts,
-		modifiers:  modifiers,
-		materials:  materials,
-		categories: categories,
+		subs:         subs,
+		plans:        plans,
+		bulkJobs:     bulkJobs,
+		discounts:    discounts,
+		modifiers:    modifiers,
+		materials:    materials,
+		categories:   categories,
 		courseVideos: courseVideos,
-		storage:    storageCli,
-		broker:    broker,
-		audit:     audit,
-		logger:    logger,
+		storage:      storageCli,
+		broker:       broker,
+		audit:        audit,
+		logger:       logger,
 	}
 	h.bulkPool = newBulkJobRunner(h)
 	return h
@@ -124,45 +126,45 @@ type variantDTO struct {
 }
 
 type productDTO struct {
-	ID                  string       `json:"id"`
-	CategoryID          string       `json:"category_id"`
-	Name                string       `json:"name"`
-	Slug                string       `json:"slug"`
-	Description         string       `json:"description"`
-	PriceCents          int64        `json:"price_cents"`
-	Stock               int          `json:"stock"`
-	LowStockThreshold   int          `json:"low_stock_threshold"`
-	WeightG             int          `json:"weight_g"`
-	LengthCm            int          `json:"length_cm"`
-	WidthCm             int          `json:"width_cm"`
-	HeightCm            int          `json:"height_cm"`
-	Status              string       `json:"status"`
-	PhotoURLs           []string     `json:"photo_urls"`
-	HasVariants         bool         `json:"has_variants"`
-	IsFeatured          bool         `json:"is_featured"`
-	ProductType         string       `json:"product_type"`
-	DigitalDeliveryURL  string       `json:"digital_delivery_url"`
-	DigitalFileURL      string       `json:"digital_file_url"`
-	DigitalInstructions string       `json:"digital_instructions"`
-	GTIN                string       `json:"gtin"`
-	TakeawayEnabled      bool   `json:"takeaway_enabled"`
-	TakeawayChargeCents  int64  `json:"takeaway_charge_cents"`
-	TakeawayMaterialID   string `json:"takeaway_material_id"`
-	TakeawayMaterialName string `json:"takeaway_material_name"`
-	AccessValidityValue  int    `json:"access_validity_value"`
-	AccessValidityUnit   string `json:"access_validity_unit"`
-	DigitalStockLimit    *int   `json:"digital_stock_limit"`
-	Variants            []variantDTO `json:"variants"`
+	ID                   string       `json:"id"`
+	CategoryID           string       `json:"category_id"`
+	Name                 string       `json:"name"`
+	Slug                 string       `json:"slug"`
+	Description          string       `json:"description"`
+	PriceCents           int64        `json:"price_cents"`
+	Stock                int          `json:"stock"`
+	LowStockThreshold    int          `json:"low_stock_threshold"`
+	WeightG              int          `json:"weight_g"`
+	LengthCm             int          `json:"length_cm"`
+	WidthCm              int          `json:"width_cm"`
+	HeightCm             int          `json:"height_cm"`
+	Status               string       `json:"status"`
+	PhotoURLs            []string     `json:"photo_urls"`
+	HasVariants          bool         `json:"has_variants"`
+	IsFeatured           bool         `json:"is_featured"`
+	ProductType          string       `json:"product_type"`
+	DigitalDeliveryURL   string       `json:"digital_delivery_url"`
+	DigitalFileURL       string       `json:"digital_file_url"`
+	DigitalInstructions  string       `json:"digital_instructions"`
+	GTIN                 string       `json:"gtin"`
+	TakeawayEnabled      bool         `json:"takeaway_enabled"`
+	TakeawayChargeCents  int64        `json:"takeaway_charge_cents"`
+	TakeawayMaterialID   string       `json:"takeaway_material_id"`
+	TakeawayMaterialName string       `json:"takeaway_material_name"`
+	AccessValidityValue  int          `json:"access_validity_value"`
+	AccessValidityUnit   string       `json:"access_validity_unit"`
+	DigitalStockLimit    *int         `json:"digital_stock_limit"`
+	Variants             []variantDTO `json:"variants"`
 	// VariantsCount + VariantsStock are list-only aggregates so the dashboard
 	// "Stok" column can show "N varian · stok M" instead of the parent's
 	// stale stock cell. Zero when has_variants=false.
-	VariantsCount int    `json:"variants_count"`
-	VariantsStock int    `json:"variants_stock"`
+	VariantsCount int              `json:"variants_count"`
+	VariantsStock int              `json:"variants_stock"`
 	Discounts     []map[string]any `json:"discounts,omitempty"`
 	BaseRecipe    []map[string]any `json:"base_recipe,omitempty"`
 	Modifiers     []map[string]any `json:"modifiers,omitempty"`
 	CourseVideos  []map[string]any `json:"course_videos,omitempty"`
-	CreatedAt     string `json:"created_at"`
+	CreatedAt     string           `json:"created_at"`
 }
 
 func courseVideosToDTO(videos []repository.CourseVideo) []map[string]any {
@@ -240,7 +242,7 @@ func toProductDTO(p *repository.Product, variants []repository.Variant) productD
 		Name: p.Name, Slug: p.Slug, Description: p.Description,
 		PriceCents: p.PriceCents, Stock: p.Stock,
 		LowStockThreshold: p.LowStockThreshold,
-		WeightG: p.WeightG, LengthCm: p.LengthCm, WidthCm: p.WidthCm, HeightCm: p.HeightCm,
+		WeightG:           p.WeightG, LengthCm: p.LengthCm, WidthCm: p.WidthCm, HeightCm: p.HeightCm,
 		Status: p.Status, PhotoURLs: p.PhotoURLs, HasVariants: p.HasVariants,
 		IsFeatured:          p.IsFeatured,
 		ProductType:         productType,
@@ -592,32 +594,32 @@ type variantInput struct {
 }
 
 type productInput struct {
-	CategoryID          string         `json:"category_id"`
-	Name                string         `json:"name"`
-	Slug                string         `json:"slug"`
-	Description         string         `json:"description"`
-	PriceCents          int64          `json:"price_cents"`
-	Stock               int            `json:"stock"`
-	LowStockThreshold   int            `json:"low_stock_threshold"`
-	WeightG             int            `json:"weight_g"`
-	LengthCm            int            `json:"length_cm"`
-	WidthCm             int            `json:"width_cm"`
-	HeightCm            int            `json:"height_cm"`
-	Status              string         `json:"status"`
-	PhotoURLs           []string       `json:"photo_urls"`
-	IsFeatured          bool           `json:"is_featured"`
-	ProductType         string         `json:"product_type"` // "physical" | "digital"
-	DigitalDeliveryURL  string         `json:"digital_delivery_url"`
-	DigitalFileURL      string         `json:"digital_file_url"`
-	DigitalInstructions string         `json:"digital_instructions"`
-	GTIN                string         `json:"gtin"`
-	TakeawayEnabled     bool           `json:"takeaway_enabled"`
-	TakeawayChargeCents int64          `json:"takeaway_charge_cents"`
-	TakeawayMaterialID  string         `json:"takeaway_material_id"`
-	AccessValidityValue int            `json:"access_validity_value"`
-	AccessValidityUnit  string         `json:"access_validity_unit"`
-	DigitalStockLimit   *int           `json:"digital_stock_limit"`
-	Variants            []variantInput `json:"variants"`
+	CategoryID          string             `json:"category_id"`
+	Name                string             `json:"name"`
+	Slug                string             `json:"slug"`
+	Description         string             `json:"description"`
+	PriceCents          int64              `json:"price_cents"`
+	Stock               int                `json:"stock"`
+	LowStockThreshold   int                `json:"low_stock_threshold"`
+	WeightG             int                `json:"weight_g"`
+	LengthCm            int                `json:"length_cm"`
+	WidthCm             int                `json:"width_cm"`
+	HeightCm            int                `json:"height_cm"`
+	Status              string             `json:"status"`
+	PhotoURLs           []string           `json:"photo_urls"`
+	IsFeatured          bool               `json:"is_featured"`
+	ProductType         string             `json:"product_type"` // "physical" | "digital"
+	DigitalDeliveryURL  string             `json:"digital_delivery_url"`
+	DigitalFileURL      string             `json:"digital_file_url"`
+	DigitalInstructions string             `json:"digital_instructions"`
+	GTIN                string             `json:"gtin"`
+	TakeawayEnabled     bool               `json:"takeaway_enabled"`
+	TakeawayChargeCents int64              `json:"takeaway_charge_cents"`
+	TakeawayMaterialID  string             `json:"takeaway_material_id"`
+	AccessValidityValue int                `json:"access_validity_value"`
+	AccessValidityUnit  string             `json:"access_validity_unit"`
+	DigitalStockLimit   *int               `json:"digital_stock_limit"`
+	Variants            []variantInput     `json:"variants"`
 	CourseVideos        []courseVideoInput `json:"course_videos"`
 }
 
@@ -669,6 +671,18 @@ func (in productInput) cleanCourseVideos() []repository.CourseVideoInput {
 	return out
 }
 
+// randomSlugSuffix returns a short random hex string used to build a fallback
+// slug when the product name normalizes to nothing.
+func randomSlugSuffix() string {
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// crypto/rand failing is effectively fatal, but a timestamp-derived
+		// suffix still keeps the slug unique enough to insert.
+		return strconv.FormatInt(time.Now().UnixNano()%100000000, 16)
+	}
+	return hex.EncodeToString(b[:])
+}
+
 func (in productInput) sanitize() (repository.SaveProductInput, error) {
 	in.Name = strings.TrimSpace(in.Name)
 	if in.Name == "" {
@@ -678,6 +692,14 @@ func (in productInput) sanitize() (repository.SaveProductInput, error) {
 		in.Slug = sanitizeSlug(in.Name)
 	} else {
 		in.Slug = sanitizeSlug(in.Slug)
+	}
+	if in.Slug == "" {
+		// A name with no [a-z0-9] runes (CJK, emoji, punctuation-only)
+		// normalizes to "". An empty slug yields an unreachable storefront URL
+		// and the SECOND such product 500s on the unique (store_id, slug)
+		// index — so fall back to a random but valid slug. The bulk importer
+		// already rejects this case outright.
+		in.Slug = "produk-" + randomSlugSuffix()
 	}
 	if in.PriceCents < 0 || in.Stock < 0 {
 		return repository.SaveProductInput{}, errors.New("harga dan stok tidak boleh negatif")
@@ -827,10 +849,10 @@ func (in productInput) sanitize() (repository.SaveProductInput, error) {
 
 	return repository.SaveProductInput{
 		CategoryID: categoryID,
-		Name: in.Name, Slug: in.Slug, Description: in.Description,
+		Name:       in.Name, Slug: in.Slug, Description: in.Description,
 		PriceCents: in.PriceCents, Stock: in.Stock,
 		LowStockThreshold: in.LowStockThreshold,
-		WeightG: in.WeightG, LengthCm: in.LengthCm, WidthCm: in.WidthCm, HeightCm: in.HeightCm,
+		WeightG:           in.WeightG, LengthCm: in.LengthCm, WidthCm: in.WidthCm, HeightCm: in.HeightCm,
 		Status: in.Status, PhotoURLs: in.PhotoURLs,
 		IsFeatured:          in.IsFeatured,
 		ProductType:         productType,
@@ -869,6 +891,13 @@ func (h *ProductHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if msg, ok := h.quotaCheck(r, store.ID, 1); !ok {
 		response.Error(w, http.StatusPaymentRequired, msg)
 		return
+	}
+
+	// Documented invariant: non-physical products have no variants. sanitize()
+	// already zeroes stock/dimensions; variants live outside SaveProductInput,
+	// so drop them here (the form hides the control — the API must too).
+	if saveIn.ProductType != "physical" {
+		in.Variants = nil
 	}
 
 	p, err := h.products.Create(r.Context(), saveIn)
@@ -931,6 +960,28 @@ func (h *ProductHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	saveIn.StoreID = store.ID
 
+	// Product type is immutable after create. Switching a course to another
+	// type would wipe its course_videos (ReplaceForProduct(nil)) while buyers
+	// still hold valid access tokens — an unrecoverable data loss triggerable
+	// from the API even though the FE locks the control.
+	existing, err := h.products.FindByID(r.Context(), store.ID, id)
+	if errors.Is(err, repository.ErrProductNotFound) {
+		response.Error(w, http.StatusNotFound, "produk tidak ditemukan")
+		return
+	}
+	if err != nil {
+		h.logger.Error("update product: load existing", "err", err)
+		response.Error(w, http.StatusInternalServerError, "gagal update")
+		return
+	}
+	if existing.ProductType != saveIn.ProductType {
+		response.Error(w, http.StatusConflict, "tipe produk tidak bisa diubah setelah dibuat")
+		return
+	}
+	if saveIn.ProductType != "physical" {
+		in.Variants = nil
+	}
+
 	p, err := h.products.Update(r.Context(), id, saveIn)
 	if errors.Is(err, repository.ErrProductNotFound) {
 		response.Error(w, http.StatusNotFound, "produk tidak ditemukan")
@@ -944,8 +995,9 @@ func (h *ProductHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if err := h.syncVariants(r, p, in.Variants); err != nil {
 		h.logger.Error("sync variants on update", "err", err)
 	}
-	// Replace course videos when course (clears them otherwise so a type
-	// switch away from course doesn't orphan rows).
+	// Replace course videos when course. The else-branch is now only a
+	// no-op cleanup for legacy/stray rows — the type can't change anymore
+	// (409 above), so it can no longer destroy a live course's content.
 	if p.ProductType == "course" {
 		if err := h.courseVideos.ReplaceForProduct(r.Context(), p.ID, in.cleanCourseVideos()); err != nil {
 			h.logger.Error("sync course videos on update", "err", err)
@@ -990,6 +1042,53 @@ func (h *ProductHandler) syncVariants(r *http.Request, p *repository.Product, in
 	return h.variants.ReplaceForProduct(r.Context(), p.ID, clean)
 }
 
+// storagePathsToPurge maps snapshotted product asset URLs (photos +
+// digital file) to bucket object paths, dropping every URL that ANOTHER
+// product in the store still references.
+//
+// Duplicate() clones photo_urls / digital_file_url verbatim, so two rows can
+// point at the same storage object. Without this filter, deleting either twin
+// would strip the survivor's images out of the bucket.
+func (h *ProductHandler) storagePathsToPurge(ctx context.Context, storeID uuid.UUID, deletedIDs []uuid.UUID, urls []string) []string {
+	if len(urls) == 0 || h.storage == nil || !h.storage.IsConfigured() {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	uniq := make([]string, 0, len(urls))
+	for _, u := range urls {
+		u = strings.TrimSpace(u)
+		if u == "" {
+			continue
+		}
+		if _, dup := seen[u]; dup {
+			continue
+		}
+		seen[u] = struct{}{}
+		uniq = append(uniq, u)
+	}
+	if len(uniq) == 0 {
+		return nil
+	}
+	stillUsed, err := h.products.StillReferencedURLs(ctx, storeID, deletedIDs, uniq)
+	if err != nil {
+		// Fail CLOSED: if we can't prove an object is unreferenced, keep it.
+		// An orphan file is cheap; nuking a live product's photos is not.
+		h.logger.Warn("storage purge probe failed — skipping cleanup",
+			"err", err, "store", storeID.String())
+		return nil
+	}
+	paths := make([]string, 0, len(uniq))
+	for _, u := range uniq {
+		if _, used := stillUsed[u]; used {
+			continue
+		}
+		if objPath := h.storage.PathFromPublicURL(u); objPath != "" {
+			paths = append(paths, objPath)
+		}
+	}
+	return paths
+}
+
 // POST /api/v1/products/bulk-delete
 //
 // Body: {"ids": ["uuid1", "uuid2", ...]}. Deletes all products yang
@@ -1023,40 +1122,39 @@ func (h *ProductHandler) BulkDelete(w http.ResponseWriter, r *http.Request) {
 	// Kumpulkan semua object path Supabase dari produk yang berhasil
 	// dihapus. Storage cleanup dijalankan setelah DB delete selesai
 	// agar kalau cleanup gagal (mis. Supabase 5xx) DB tetap konsisten.
-	photoPaths := make([]string, 0)
+	assetURLs := make([]string, 0)
+	deletedIDs := make([]uuid.UUID, 0, len(body.IDs))
 	for _, raw := range body.IDs {
 		id, err := uuid.Parse(raw)
 		if err != nil {
 			failed++
 			continue
 		}
-		// Capture name + photo URLs before delete (cascade akan hapus
+		// Capture name + asset URLs before delete (cascade akan hapus
 		// rows; URL-nya bukan FK ke storage jadi harus di-snapshot dulu).
 		preName := ""
 		var preURLs []string
 		if existing, _ := h.products.FindByID(r.Context(), store.ID, id); existing != nil {
 			preName = existing.Name
-			preURLs = existing.PhotoURLs
+			preURLs = append(append([]string{}, existing.PhotoURLs...), existing.DigitalFileURL)
 		}
 		if err := h.products.Delete(r.Context(), store.ID, id); err != nil {
 			failed++
 			continue
 		}
 		deleted++
+		deletedIDs = append(deletedIDs, id)
 		if preName != "" {
 			names = append(names, preName)
 		}
-		for _, u := range preURLs {
-			if p := h.storage.PathFromPublicURL(u); p != "" {
-				photoPaths = append(photoPaths, p)
-			}
-		}
+		assetURLs = append(assetURLs, preURLs...)
 	}
 
 	// Async storage cleanup — DB sudah committed, gambar yang gagal
 	// dihapus jadi orphan tapi tidak break UX. Pakai context.Background
-	// karena request ctx bisa cancel saat respons keburu balik.
-	if len(photoPaths) > 0 && h.storage != nil && h.storage.IsConfigured() {
+	// karena request ctx bisa cancel saat respons keburu balik. Objects a
+	// surviving duplicate still points at are kept (storagePathsToPurge).
+	if photoPaths := h.storagePathsToPurge(r.Context(), store.ID, deletedIDs, assetURLs); len(photoPaths) > 0 {
 		paths := photoPaths
 		go func() {
 			if err := h.storage.DeleteObjects(context.Background(), paths); err != nil {
@@ -1100,7 +1198,9 @@ func (h *ProductHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	var preURLs []string
 	if existing, _ := h.products.FindByID(r.Context(), store.ID, id); existing != nil {
 		preName = existing.Name
-		preURLs = existing.PhotoURLs
+		// digital_file_url is an uploaded object too — it was never cleaned up
+		// before, leaking a file per deleted digital product.
+		preURLs = append(append([]string{}, existing.PhotoURLs...), existing.DigitalFileURL)
 	}
 	if err := h.products.Delete(r.Context(), store.ID, id); err != nil {
 		if errors.Is(err, repository.ErrProductNotFound) {
@@ -1112,21 +1212,14 @@ func (h *ProductHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 	// Async storage cleanup — gambar yang gagal dihapus jadi orphan
 	// tapi tidak block UX. Pakai context.Background karena request ctx
-	// bisa cancel saat respons sudah balik.
-	if len(preURLs) > 0 && h.storage != nil && h.storage.IsConfigured() {
-		paths := make([]string, 0, len(preURLs))
-		for _, u := range preURLs {
-			if p := h.storage.PathFromPublicURL(u); p != "" {
-				paths = append(paths, p)
+	// bisa cancel saat respons sudah balik. Objects still referenced by a
+	// duplicated product are skipped (storagePathsToPurge).
+	if paths := h.storagePathsToPurge(r.Context(), store.ID, []uuid.UUID{id}, preURLs); len(paths) > 0 {
+		go func() {
+			if err := h.storage.DeleteObjects(context.Background(), paths); err != nil {
+				h.logger.Warn("supabase delete objects", "err", err, "count", len(paths))
 			}
-		}
-		if len(paths) > 0 {
-			go func() {
-				if err := h.storage.DeleteObjects(context.Background(), paths); err != nil {
-					h.logger.Warn("supabase delete objects", "err", err, "count", len(paths))
-				}
-			}()
-		}
+		}()
 	}
 	summary := "Hapus produk"
 	if preName != "" {
@@ -1221,6 +1314,20 @@ func (h *ProductHandler) Duplicate(w http.ResponseWriter, r *http.Request) {
 		DigitalDeliveryURL:  src.DigitalDeliveryURL,
 		DigitalFileURL:      src.DigitalFileURL,
 		DigitalInstructions: src.DigitalInstructions,
+		// Take-away packaging + access validity + non-physical quota were
+		// silently dropped before, so duplicating a "1 bulan, 20 kursi" course
+		// produced a lifetime, unlimited one.
+		TakeawayEnabled:     src.TakeawayEnabled,
+		TakeawayChargeCents: src.TakeawayChargeCents,
+		TakeawayMaterialID:  src.TakeawayMaterialID,
+		AccessValidityValue: src.AccessValidityValue,
+		AccessValidityUnit:  src.AccessValidityUnit,
+		// GTIN is deliberately NOT copied — a barcode must identify exactly one
+		// product or the POS scanner becomes ambiguous.
+	}
+	if src.DigitalStockLimit != nil {
+		limit := *src.DigitalStockLimit
+		copyIn.DigitalStockLimit = &limit
 	}
 	created, err := h.products.Create(r.Context(), copyIn)
 	if err != nil {
@@ -1268,6 +1375,67 @@ func (h *ProductHandler) Duplicate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Clone volume-discount tiers (previously dropped, so the copy silently
+	// sold at full price).
+	if tiers, err := h.discounts.ListByProduct(r.Context(), src.ID); err == nil && len(tiers) > 0 {
+		inputs := make([]repository.ProductDiscountInput, 0, len(tiers))
+		for _, d := range tiers {
+			inputs = append(inputs, repository.ProductDiscountInput{
+				MinQuantity:   d.MinQuantity,
+				DiscountType:  d.DiscountType,
+				DiscountValue: d.DiscountValue,
+				StartsAt:      d.StartsAt,
+				EndsAt:        d.EndsAt,
+				IsActive:      d.IsActive,
+			})
+		}
+		if err := h.discounts.Replace(r.Context(), created.ID, inputs); err != nil {
+			h.logger.Error("duplicate: clone discounts", "err", err)
+		}
+	}
+
+	// Clone the base recipe (material consumption) so COGS/stock deduction
+	// behave the same on the copy.
+	if recipe, err := h.modifiers.GetBaseRecipe(r.Context(), src.ID); err == nil && len(recipe) > 0 {
+		items := make([]repository.RecipeItem, 0, len(recipe))
+		for _, it := range recipe {
+			items = append(items, repository.RecipeItem{MaterialID: it.MaterialID, Quantity: it.Quantity})
+		}
+		if err := h.modifiers.ReplaceBaseRecipe(r.Context(), store.ID, created.ID, items); err != nil {
+			h.logger.Error("duplicate: clone base recipe", "err", err)
+		}
+	}
+
+	// Clone modifier groups + options (with their per-option recipes).
+	if groups, err := h.modifiers.GetForProduct(r.Context(), src.ID); err == nil && len(groups) > 0 {
+		inputs := make([]repository.ModifierGroupInput, 0, len(groups))
+		for _, g := range groups {
+			opts := make([]repository.ModifierOptionInput, 0, len(g.Options))
+			for _, o := range g.Options {
+				items := make([]repository.RecipeItem, 0, len(o.Recipe))
+				for _, it := range o.Recipe {
+					items = append(items, repository.RecipeItem{MaterialID: it.MaterialID, Quantity: it.Quantity})
+				}
+				opts = append(opts, repository.ModifierOptionInput{
+					Name:            o.Name,
+					PriceDeltaCents: o.PriceDeltaCents,
+					SortOrder:       o.SortOrder,
+					Recipe:          items,
+				})
+			}
+			inputs = append(inputs, repository.ModifierGroupInput{
+				Name:       g.Name,
+				Selection:  g.Selection,
+				IsRequired: g.IsRequired,
+				SortOrder:  g.SortOrder,
+				Options:    opts,
+			})
+		}
+		if err := h.modifiers.ReplaceModifierGroups(r.Context(), store.ID, created.ID, inputs); err != nil {
+			h.logger.Error("duplicate: clone modifier groups", "err", err)
+		}
+	}
+
 	h.audit.Log(r.Context(), store.ID, audit.Event{
 		Action:     "product.duplicated",
 		EntityType: "product",
@@ -1284,4 +1452,3 @@ func (h *ProductHandler) Duplicate(w http.ResponseWriter, r *http.Request) {
 		"product": toProductDTO(created, nil),
 	})
 }
-

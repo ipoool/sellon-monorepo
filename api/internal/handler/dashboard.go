@@ -23,12 +23,12 @@ func NewDashboardHandler(s *repository.StoreRepo, p *repository.ProductRepo, o *
 }
 
 type dashboardStatsDTO struct {
-	HasStore           bool  `json:"has_store"`
-	OrdersTodayCount   int   `json:"orders_today_count"`
-	RevenueMonthCents  int64 `json:"revenue_month_cents"`
-	ProductsActive     int   `json:"products_active"`
-	ProductsLowStock   int   `json:"products_low_stock"`
-	CustomersTotal     int   `json:"customers_total"`
+	HasStore          bool  `json:"has_store"`
+	OrdersTodayCount  int   `json:"orders_today_count"`
+	RevenueMonthCents int64 `json:"revenue_month_cents"`
+	ProductsActive    int   `json:"products_active"`
+	ProductsLowStock  int   `json:"products_low_stock"`
+	CustomersTotal    int   `json:"customers_total"`
 }
 
 // GET /api/v1/dashboard/stats

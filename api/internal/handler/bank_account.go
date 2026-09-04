@@ -100,11 +100,11 @@ func (h *BankAccountHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a, err := h.accounts.Create(r.Context(), repository.SaveBankAccountInput{
-		StoreID: store.ID,
-		BankName: strings.TrimSpace(req.BankName),
+		StoreID:    store.ID,
+		BankName:   strings.TrimSpace(req.BankName),
 		HolderName: strings.TrimSpace(req.HolderName),
-		AccountNo: strings.TrimSpace(req.AccountNo),
-		IsPrimary: req.IsPrimary, QRISURL: strings.TrimSpace(req.QRISURL),
+		AccountNo:  strings.TrimSpace(req.AccountNo),
+		IsPrimary:  req.IsPrimary, QRISURL: strings.TrimSpace(req.QRISURL),
 	})
 	if err != nil {
 		h.logger.Error("create bank account", "err", err)
@@ -152,11 +152,11 @@ func (h *BankAccountHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.accounts.Update(r.Context(), store.ID, id, repository.SaveBankAccountInput{
-		StoreID: store.ID,
-		BankName: strings.TrimSpace(req.BankName),
+		StoreID:    store.ID,
+		BankName:   strings.TrimSpace(req.BankName),
 		HolderName: strings.TrimSpace(req.HolderName),
-		AccountNo: strings.TrimSpace(req.AccountNo),
-		IsPrimary: req.IsPrimary, QRISURL: strings.TrimSpace(req.QRISURL),
+		AccountNo:  strings.TrimSpace(req.AccountNo),
+		IsPrimary:  req.IsPrimary, QRISURL: strings.TrimSpace(req.QRISURL),
 	}); err != nil {
 		if errors.Is(err, repository.ErrBankAccountNotFound) {
 			response.Error(w, http.StatusNotFound, "rekening tidak ditemukan")

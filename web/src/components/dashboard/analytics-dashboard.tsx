@@ -37,6 +37,7 @@ import { Select } from "@/components/ui/select";
 import { Avatar } from "@/components/ui/avatar";
 import { formatRupiah } from "@/lib/format";
 import { showError, showSuccess } from "@/lib/toast";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import type { AnalyticsOverview, CashEntry, ReportOverview } from "@/lib/types";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -103,6 +104,7 @@ export function AnalyticsDashboard({
     setT(to);
   }
   const [busy, setBusy] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   // New cash entry form.
   const [dir, setDir] = useState<"in" | "out">("out");
   const [amount, setAmount] = useState(0);
@@ -166,14 +168,26 @@ export function AnalyticsDashboard({
     }
   };
 
-  const delEntry = async (id: string) => {
+  // Deleting a cash-ledger row is irreversible and the trash icon sits right
+  // beside the amount, so it goes through a confirm; the response is checked
+  // too (a 4xx used to refresh() silently and look like success).
+  const delEntry = async () => {
+    const id = pendingDelete;
+    if (!id) return;
     setBusy(true);
     try {
-      await fetch(`${apiBase}/api/v1/cash-entries/${id}`, {
+      const res = await fetch(`${apiBase}/api/v1/cash-entries/${id}`, {
         method: "DELETE",
         credentials: "include",
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      setPendingDelete(null);
       router.refresh();
+    } catch (err) {
+      showError(err);
     } finally {
       setBusy(false);
     }
@@ -546,7 +560,7 @@ export function AnalyticsDashboard({
                         <td className="py-2 text-right font-medium tabular-nums">{formatRupiah(e.amount_cents)}</td>
                         <td className="py-2">
                           <button
-                            onClick={() => delEntry(e.id)}
+                            onClick={() => setPendingDelete(e.id)}
                             className="flex size-8 items-center justify-center rounded-md text-neutral-400 hover:bg-danger/10 hover:text-danger"
                             aria-label="Hapus"
                           >
@@ -583,6 +597,17 @@ export function AnalyticsDashboard({
           </Link>
         </Card>
       )}
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        onClose={() => setPendingDelete(null)}
+        onConfirm={delEntry}
+        title="Hapus catatan kas?"
+        description="Catatan ini akan dihapus permanen dan ikut mengubah ringkasan arus kas."
+        confirmLabel="Hapus"
+        kind="danger"
+        busy={busy}
+      />
     </div>
   );
 }

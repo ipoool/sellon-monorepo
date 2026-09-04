@@ -113,6 +113,10 @@ export function CheckoutFieldsManager({ initial }: { initial: CheckoutConfig }) 
       }
       showSuccess("Field checkout disimpan");
       router.refresh();
+    } catch (err) {
+      // Without this the seller sees no toast at all and assumes the
+      // config saved.
+      showError(err);
     } finally {
       setSaving(false);
     }

@@ -24,7 +24,12 @@ type Props = {
 // (e.g. the rounded table wrapper) that would otherwise clip it — the bug
 // where the row "…" menu got cut off at the container edge. The panel
 // right-aligns to the trigger and flips above it when there isn't room below.
-// Closes on outside-click, Escape, scroll, or resize. No deps.
+// Closes on outside-click, Escape, ancestor scroll, or resize (scrolling
+// inside the panel itself is ignored). No deps.
+//
+// NOTE: children are unmounted when the menu closes, so NEVER render a dialog
+// or any other state-owning UI inside the render-prop — hoist it to the parent
+// (see ProductRowMenu).
 export function AnchoredMenu({
   ariaLabel,
   icon,
@@ -73,7 +78,16 @@ export function AnchoredMenu({
 
   useEffect(() => {
     if (!open) return;
-    const onScrollOrResize = () => setOpen(false);
+    const onResize = () => setOpen(false);
+    // Close on scroll of an ANCESTOR (the panel is fixed-positioned, so it
+    // would visually detach), but ignore scrolling INSIDE the panel itself —
+    // a capture-phase listener otherwise sees the menu's own overflow scroll
+    // and closes it mid-interaction.
+    const onScroll = (e: Event) => {
+      const t = e.target as Node | null;
+      if (t && menuRef.current && menuRef.current.contains(t)) return;
+      setOpen(false);
+    };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
     };
@@ -83,13 +97,13 @@ export function AnchoredMenu({
       setOpen(false);
     };
     // Capture so we also catch scrolls on any scrollable ancestor.
-    window.addEventListener("scroll", onScrollOrResize, true);
-    window.addEventListener("resize", onScrollOrResize);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onResize);
     document.addEventListener("keydown", onKey);
     document.addEventListener("mousedown", onPointer);
     return () => {
-      window.removeEventListener("scroll", onScrollOrResize, true);
-      window.removeEventListener("resize", onScrollOrResize);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onResize);
       document.removeEventListener("keydown", onKey);
       document.removeEventListener("mousedown", onPointer);
     };

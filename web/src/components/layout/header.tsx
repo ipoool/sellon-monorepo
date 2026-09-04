@@ -68,12 +68,12 @@ export function Header({ me, variant = "marketing" }: HeaderProps) {
 
             {me ? (
               <div className="flex items-center gap-2">
-                <Link href="/dashboard">
-                  <Button size="sm">
+                <Button asChild size="sm">
+                  <Link href="/dashboard">
                     <LayoutDashboard className="size-4" aria-hidden />
                     Buka Dasbor
-                  </Button>
-                </Link>
+                  </Link>
+                </Button>
                 <Link
                   href="/dashboard"
                   className="hidden items-center sm:inline-flex"
@@ -88,14 +88,12 @@ export function Header({ me, variant = "marketing" }: HeaderProps) {
               </div>
             ) : (
               <div className="flex items-center gap-2">
-                <Link href="/login">
-                  <Button size="sm" variant="ghost">
-                    Masuk
-                  </Button>
-                </Link>
-                <Link href="/login">
-                  <Button size="sm">Mulai Gratis</Button>
-                </Link>
+                <Button asChild size="sm" variant="ghost">
+                  <Link href="/login">Masuk</Link>
+                </Button>
+                <Button asChild size="sm">
+                  <Link href="/login">Mulai Gratis</Link>
+                </Button>
               </div>
             )}
           </nav>

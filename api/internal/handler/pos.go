@@ -22,15 +22,15 @@ import (
 )
 
 type POSHandler struct {
-	pos         *repository.POSRepo
-	stores      *repository.StoreRepo
-	products    *repository.ProductRepo
-	variants    *repository.VariantRepo
-	orders      *repository.OrderRepo
-	customers   *repository.CustomerRepo
-	memberships *repository.MembershipRepo
-	subs        *repository.SubscriptionRepo
-	waTemplates *repository.WATemplateRepo
+	pos            *repository.POSRepo
+	stores         *repository.StoreRepo
+	products       *repository.ProductRepo
+	variants       *repository.VariantRepo
+	orders         *repository.OrderRepo
+	customers      *repository.CustomerRepo
+	memberships    *repository.MembershipRepo
+	subs           *repository.SubscriptionRepo
+	waTemplates    *repository.WATemplateRepo
 	users          *repository.UserRepo
 	modifiers      *repository.ModifierRepo
 	materials      *repository.MaterialRepo
@@ -116,6 +116,52 @@ func (h *POSHandler) requireProPlan(w http.ResponseWriter, r *http.Request, stor
 	return true
 }
 
+// Row caps for the shift transaction endpoints. Without them a busy shift
+// streams an unbounded result set (and, before, ran two extra queries per row).
+const (
+	sessionOrdersPageCap = 500
+	sessionCSVRowCap     = 5000
+)
+
+// wibZone matches the Asia/Jakarta buckets the POS report SQL uses
+// (AT TIME ZONE 'Asia/Jakarta'). Parsing filter dates as UTC midnight shifted
+// every window by 7 hours, silently dropping the first hours of the "from" day
+// and including 7 hours of the day after "to".
+var wibZone = time.FixedZone("WIB", 7*60*60)
+
+// parseWIBDate parses a YYYY-MM-DD filter param in WIB. endOfDay returns the
+// exclusive upper bound (start of the next day). nil for empty/invalid input.
+func parseWIBDate(v string, endOfDay bool) *time.Time {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return nil
+	}
+	t, err := time.ParseInLocation("2006-01-02", v, wibZone)
+	if err != nil {
+		return nil
+	}
+	if endOfDay {
+		t = t.AddDate(0, 0, 1)
+	}
+	return &t
+}
+
+// isManager reports whether the actor may run privileged POS actions: loyalty
+// and printer config, returns, and voiding/closing someone else's shift.
+func (c *posContext) isManager() bool {
+	return c.role == repository.RoleOwner || c.role == repository.RoleAdmin
+}
+
+// requireManager writes a 403 and returns false when the actor is plain staff.
+func (h *POSHandler) requireManager(w http.ResponseWriter, c *posContext) bool {
+	if !c.isManager() {
+		response.Error(w, http.StatusForbidden,
+			"Hanya pemilik atau admin toko yang bisa melakukan aksi ini")
+		return false
+	}
+	return true
+}
+
 // ─── Sessions ────────────────────────────────────────────────────────────────
 
 func (h *POSHandler) OpenSession(w http.ResponseWriter, r *http.Request) {
@@ -194,17 +240,8 @@ func (h *POSHandler) ListSessions(w http.ResponseWriter, r *http.Request) {
 			filter.CashierID = &cid
 		}
 	}
-	if v := r.URL.Query().Get("from"); v != "" {
-		if t, err := time.Parse("2006-01-02", v); err == nil {
-			filter.From = &t
-		}
-	}
-	if v := r.URL.Query().Get("to"); v != "" {
-		if t, err := time.Parse("2006-01-02", v); err == nil {
-			next := t.AddDate(0, 0, 1)
-			filter.To = &next
-		}
-	}
+	filter.From = parseWIBDate(r.URL.Query().Get("from"), false)
+	filter.To = parseWIBDate(r.URL.Query().Get("to"), true)
 
 	sessions, total, err := h.pos.ListSessionsFiltered(r.Context(), filter)
 	if err != nil {
@@ -229,7 +266,7 @@ func (h *POSHandler) ListSessionOrders(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	orders, err := h.pos.ListOrdersBySession(r.Context(), id, c.storeID)
+	orders, err := h.pos.ListOrdersBySession(r.Context(), id, c.storeID, sessionOrdersPageCap)
 	if errors.Is(err, repository.ErrPOSSessionNotFound) {
 		response.Error(w, http.StatusNotFound, "sesi tidak ditemukan")
 		return
@@ -270,17 +307,8 @@ func (h *POSHandler) ListPOSOrders(w http.ResponseWriter, r *http.Request) {
 			filter.CashierID = &cid
 		}
 	}
-	if v := r.URL.Query().Get("from"); v != "" {
-		if t, err := time.Parse("2006-01-02", v); err == nil {
-			filter.From = &t
-		}
-	}
-	if v := r.URL.Query().Get("to"); v != "" {
-		if t, err := time.Parse("2006-01-02", v); err == nil {
-			next := t.AddDate(0, 0, 1) // exclusive next-day bound
-			filter.To = &next
-		}
-	}
+	filter.From = parseWIBDate(r.URL.Query().Get("from"), false)
+	filter.To = parseWIBDate(r.URL.Query().Get("to"), true)
 
 	orders, total, err := h.pos.ListPOSOrders(r.Context(), filter)
 	if err != nil {
@@ -305,13 +333,16 @@ func (h *POSHandler) ExportSessionOrdersCSV(w http.ResponseWriter, r *http.Reque
 		response.Error(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	orders, err := h.pos.ListOrdersBySession(r.Context(), id, c.storeID)
+	orders, err := h.pos.ListOrdersBySession(r.Context(), id, c.storeID, sessionCSVRowCap)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="shift-%s.csv"`, id.String()[:8]))
+	// UTF-8 BOM so Excel opens the file as UTF-8 instead of the system codepage
+	// (otherwise Indonesian copy and the — separators come out mojibake).
+	_, _ = w.Write([]byte("\xef\xbb\xbf"))
 	cw := csv.NewWriter(w)
 	defer cw.Flush()
 	_ = cw.Write([]string{
@@ -332,6 +363,12 @@ func (h *POSHandler) ExportSessionOrdersCSV(w http.ResponseWriter, r *http.Reque
 			o.PaymentMethod,
 			o.Notes,
 		})
+	}
+	// Say so when the export was truncated, rather than silently under-reporting.
+	if len(orders) >= sessionCSVRowCap {
+		_ = cw.Write([]string{})
+		_ = cw.Write([]string{fmt.Sprintf(
+			"Catatan: ekspor dibatasi %d transaksi terbaru dalam shift ini.", sessionCSVRowCap)})
 	}
 }
 
@@ -355,6 +392,11 @@ func (h *POSHandler) ReturnOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSpace(body.Reason) == "" {
 		response.Error(w, http.StatusBadRequest, "alasan retur wajib diisi")
+		return
+	}
+	// Retur reverses stock, materials, loyalty and customer totals — restrict
+	// it to owner/admin, not every cashier on shift.
+	if !h.requireManager(w, c) {
 		return
 	}
 	if err := h.pos.ReturnOrder(r.Context(), id, c.storeID, body.Reason); err != nil {
@@ -414,17 +456,8 @@ func (h *POSHandler) GetReport(w http.ResponseWriter, r *http.Request) {
 			f.CashierID = &cid
 		}
 	}
-	if v := r.URL.Query().Get("from"); v != "" {
-		if t, err := time.Parse("2006-01-02", v); err == nil {
-			f.From = &t
-		}
-	}
-	if v := r.URL.Query().Get("to"); v != "" {
-		if t, err := time.Parse("2006-01-02", v); err == nil {
-			next := t.AddDate(0, 0, 1)
-			f.To = &next
-		}
-	}
+	f.From = parseWIBDate(r.URL.Query().Get("from"), false)
+	f.To = parseWIBDate(r.URL.Query().Get("to"), true)
 	report, err := h.pos.GetPOSReport(r.Context(), f)
 	if err != nil {
 		h.logger.Error("pos: get report", "err", err)
@@ -446,17 +479,8 @@ func (h *POSHandler) ExportReportCSV(w http.ResponseWriter, r *http.Request) {
 			f.CashierID = &cid
 		}
 	}
-	if v := r.URL.Query().Get("from"); v != "" {
-		if t, err := time.Parse("2006-01-02", v); err == nil {
-			f.From = &t
-		}
-	}
-	if v := r.URL.Query().Get("to"); v != "" {
-		if t, err := time.Parse("2006-01-02", v); err == nil {
-			next := t.AddDate(0, 0, 1)
-			f.To = &next
-		}
-	}
+	f.From = parseWIBDate(r.URL.Query().Get("from"), false)
+	f.To = parseWIBDate(r.URL.Query().Get("to"), true)
 	report, err := h.pos.GetPOSReport(r.Context(), f)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "internal error")
@@ -550,13 +574,18 @@ func (h *POSHandler) CloseSession(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusBadRequest, "kas akhir tidak boleh negatif")
 		return
 	}
-	if err := h.pos.CloseSession(r.Context(), id, c.storeID, c.userID, body.ClosingCashCents); err != nil {
+	if err := h.pos.CloseSession(r.Context(), id, c.storeID, c.userID, body.ClosingCashCents, c.isManager()); err != nil {
 		if errors.Is(err, repository.ErrPOSSessionNotFound) {
 			response.Error(w, http.StatusNotFound, "sesi tidak ditemukan")
 			return
 		}
 		if errors.Is(err, repository.ErrPOSSessionNotOpen) {
 			response.Error(w, http.StatusBadRequest, "sesi sudah ditutup")
+			return
+		}
+		if errors.Is(err, repository.ErrPOSForbidden) {
+			response.Error(w, http.StatusForbidden,
+				"Hanya kasir pemilik shift ini, pemilik, atau admin toko yang bisa menutup shift")
 			return
 		}
 		response.Error(w, http.StatusInternalServerError, "internal error")
@@ -595,6 +624,14 @@ func (h *POSHandler) AddCashMovement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m, err := h.pos.AddCashMovement(r.Context(), sessionID, c.storeID, c.userID, body.Type, body.AmountCents, body.Reason)
+	if errors.Is(err, repository.ErrPOSSessionNotFound) {
+		response.Error(w, http.StatusNotFound, "sesi tidak ditemukan")
+		return
+	}
+	if errors.Is(err, repository.ErrPOSSessionNotOpen) {
+		response.Error(w, http.StatusConflict, "sesi kasir sudah ditutup")
+		return
+	}
 	if err != nil {
 		response.Error(w, http.StatusBadRequest, err.Error())
 		return
@@ -708,6 +745,12 @@ func (h *POSHandler) CreatePOSOrder(w http.ResponseWriter, r *http.Request) {
 			response.Error(w, http.StatusBadRequest, "quantity harus > 0")
 			return
 		}
+		// Never trust a client price sign: a negative unit price would make the
+		// line a credit and shrink the subtotal the cashier collects against.
+		if it.UnitCents < 0 {
+			response.Error(w, http.StatusBadRequest, "harga item tidak valid")
+			return
+		}
 		productID := pid
 		servingType := ""
 		if it.ServingType == "dine_in" || it.ServingType == "takeaway" {
@@ -799,39 +842,56 @@ func (h *POSHandler) CreatePOSOrder(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// Tax config snapshot (applied to POS sales too, per store setting).
+	// Tax config snapshot (applied to POS sales too, per store setting) plus the
+	// store's offline flag. `offline` arrives from the client, so it is honored
+	// ONLY when the seller actually turned Offline Mode on — otherwise a crafted
+	// request could relax the stock and payment guards on a normal online sale.
 	taxBps, taxInclusive := 0, false
-	if posStore, serr := h.stores.FindByID(r.Context(), c.storeID); serr == nil && posStore.TaxEnabled {
-		taxBps, taxInclusive = posStore.TaxBps, posStore.TaxInclusive
+	offlineOK := false
+	if posStore, serr := h.stores.FindByID(r.Context(), c.storeID); serr == nil && posStore != nil {
+		if posStore.TaxEnabled {
+			taxBps, taxInclusive = posStore.TaxBps, posStore.TaxInclusive
+		}
+		offlineOK = body.Offline && posStore.OfflineEnabled
 	}
 	// Offline orders were rung up against the tax in effect at sale time. Honor
 	// the snapshot the client queued so the synced total matches what the cashier
-	// actually collected — otherwise a tax change between sale and sync would
-	// recompute a different total and could trip the payment guard.
-	if body.Offline && body.OfflineTaxBps != nil {
+	// actually collected — clamped to [0, 10000] bps so a crafted value can't
+	// warp the total.
+	if offlineOK && body.OfflineTaxBps != nil {
 		taxBps = *body.OfflineTaxBps
+		if taxBps < 0 {
+			taxBps = 0
+		}
+		if taxBps > 10000 {
+			taxBps = 10000
+		}
 		taxInclusive = body.OfflineTaxInclusive != nil && *body.OfflineTaxInclusive
 	}
 
 	result, err := h.pos.CreatePOSOrder(r.Context(), repository.CreatePOSOrderInput{
-		StoreID:       c.storeID,
-		SessionID:     sessionID,
-		CashierID:     c.userID,
-		CustomerName:  body.CustomerName,
-		CustomerWA:    body.CustomerWA,
-		Items:         items,
-		Payments:      payments,
-		DiscountType:  body.DiscountType,
-		DiscountValue: body.DiscountValue,
+		StoreID:        c.storeID,
+		SessionID:      sessionID,
+		CashierID:      c.userID,
+		CustomerName:   body.CustomerName,
+		CustomerWA:     body.CustomerWA,
+		Items:          items,
+		Payments:       payments,
+		DiscountType:   body.DiscountType,
+		DiscountValue:  body.DiscountValue,
 		RedeemPoints:   body.RedeemPoints,
 		Notes:          body.Notes,
 		TaxBps:         taxBps,
 		TaxInclusive:   taxInclusive,
 		IdempotencyKey: strings.TrimSpace(body.IdempotencyKey),
-		Offline:        body.Offline,
+		Offline:        offlineOK,
 	})
 	if errors.Is(err, repository.ErrPOSPaymentShort) {
 		response.Error(w, http.StatusBadRequest, "Total pembayaran kurang dari total transaksi")
+		return
+	}
+	if errors.Is(err, repository.ErrPOSItemNotFound) {
+		response.Error(w, http.StatusBadRequest, "produk tidak ditemukan")
 		return
 	}
 	if errors.Is(err, repository.ErrStockInsufficient) {
@@ -894,9 +954,14 @@ func (h *POSHandler) VoidOrder(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusBadRequest, "alasan void wajib diisi")
 		return
 	}
-	if err := h.pos.VoidPOSOrder(r.Context(), id, c.storeID, body.Reason); err != nil {
+	if err := h.pos.VoidPOSOrder(r.Context(), id, c.storeID, c.userID, c.isManager(), body.Reason); err != nil {
 		if errors.Is(err, repository.ErrOrderNotFound) {
 			response.Error(w, http.StatusNotFound, "pesanan tidak ditemukan")
+			return
+		}
+		if errors.Is(err, repository.ErrPOSForbidden) {
+			response.Error(w, http.StatusForbidden,
+				"Hanya kasir pemilik shift ini, pemilik, atau admin toko yang bisa void transaksi")
 			return
 		}
 		if errors.Is(err, repository.ErrPOSOrderNotVoidable) {
@@ -994,6 +1059,14 @@ func (h *POSHandler) CreateHeldOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	held, err := h.pos.CreateHeldOrder(r.Context(), c.storeID, sessionID, c.userID, body.Label, body.CartSnapshot)
+	if errors.Is(err, repository.ErrPOSSessionNotFound) {
+		response.Error(w, http.StatusNotFound, "sesi tidak ditemukan")
+		return
+	}
+	if errors.Is(err, repository.ErrPOSSessionNotOpen) {
+		response.Error(w, http.StatusConflict, "sesi kasir sudah ditutup")
+		return
+	}
 	if err != nil {
 		h.logger.Error("pos: create held", "err", err)
 		response.Error(w, http.StatusInternalServerError, "internal error")
@@ -1172,7 +1245,7 @@ func reportToDTO(r *repository.POSReportMetrics) map[string]any {
 		"order_count":      r.OrderCount,
 		"total_gross":      r.TotalGross,
 		"total_refunded":   r.TotalRefunded,
-		"avg_transaction": r.AvgTransaction,
+		"avg_transaction":  r.AvgTransaction,
 		"total_cash":       r.TotalCash,
 		"total_qris":       r.TotalQRIS,
 		"total_transfer":   r.TotalTransfer,
@@ -1354,6 +1427,9 @@ func (h *POSHandler) UpdateLoyaltyConfig(w http.ResponseWriter, r *http.Request)
 	if !h.requireProPlan(w, r, c.storeID) {
 		return
 	}
+	if !h.requireManager(w, c) {
+		return
+	}
 	var body struct {
 		Enabled         bool  `json:"enabled"`
 		EarnRateCents   int64 `json:"earn_rate_cents"`
@@ -1401,6 +1477,9 @@ func (h *POSHandler) GetPrinterConfig(w http.ResponseWriter, r *http.Request) {
 func (h *POSHandler) UpdatePrinterConfig(w http.ResponseWriter, r *http.Request) {
 	c := h.ctx(w, r)
 	if c == nil {
+		return
+	}
+	if !h.requireManager(w, c) {
 		return
 	}
 	var body struct {

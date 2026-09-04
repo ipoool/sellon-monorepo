@@ -1,6 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { showError } from "@/lib/toast";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -10,35 +15,34 @@ import {
   Eye,
   Trash2,
   Loader2,
+  MoreHorizontal,
   AlertTriangle,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
+import { AnchoredMenu } from "@/components/ui/anchored-menu";
 import { ProductPreviewDialog } from "@/components/dashboard/product-preview-dialog";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
-type Props = {
+type RowTarget = {
   productId: string;
   productName: string;
   productType?: string;
   storeSlug?: string;
-  quotaFull?: boolean;
-  // asMenu: render as vertical menu items instead of icon row (mobile popover)
-  asMenu?: boolean;
-  onMenuClose?: () => void;
 };
 
-export function ProductRowActions({
-  productId,
-  productName,
-  productType,
-  storeSlug,
-  quotaFull,
-  asMenu = false,
-  onMenuClose,
-}: Props) {
+type Props = RowTarget & {
+  quotaFull?: boolean;
+};
+
+// useRowActions owns every piece of state the row actions need plus the
+// dialogs they open. It's split out from the presentation so the dialogs can be
+// rendered OUTSIDE an AnchoredMenu: that component unmounts its children on
+// close (and closes on scroll), which previously meant "Duplikat" never showed
+// its dialog and Preview/Delete vanished as soon as the page scrolled.
+function useRowActions({ productId, productName, productType, storeSlug }: RowTarget) {
   const { push, refresh } = useRouter();
   const [pendingDelete, setPendingDelete] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
@@ -81,7 +85,6 @@ export function ProductRowActions({
   function handlePreview() {
     if (productType === "course") {
       window.open(`/products/${productId}/course-preview`, "_blank", "noopener");
-      onMenuClose?.();
       return;
     }
     setShowPreview(true);
@@ -135,9 +138,7 @@ export function ProductRowActions({
     }
   }
 
-  // Shared dialogs — always mounted so showModal() fires even when the
-  // popover that triggered them has already been closed/unmounted.
-  const sharedDialogs = (
+  const dialogs = (
     <>
       {/* Duplicate name dialog */}
       {showDuplicateDialog && (
@@ -224,47 +225,31 @@ export function ProductRowActions({
     </>
   );
 
-  if (asMenu) {
-    return (
-      <>
-        <button
-          type="button"
-          onClick={handlePreview}
-          className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-neutral-700 hover:bg-neutral-50"
-        >
-          <Eye className="size-4" aria-hidden />
-          Preview
-        </button>
-        <button
-          type="button"
-          onClick={() => { openDuplicateDialog(); onMenuClose?.(); }}
-          disabled={duplicating || quotaFull}
-          className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-neutral-700 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {duplicating ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <CopyPlus className="size-4" aria-hidden />}
-          {quotaFull ? "Duplikat (limit tercapai)" : "Duplikat"}
-        </button>
-        <Link
-          href={`/products/${productId}`}
-          onClick={() => onMenuClose?.()}
-          className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-neutral-700 hover:bg-neutral-50"
-        >
-          <Edit2 className="size-4" aria-hidden />
-          Edit produk
-        </Link>
-        <div className="my-1 border-t border-neutral-100" />
-        <button
-          type="button"
-          onClick={() => setPendingDelete(true)}
-          className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-danger hover:bg-danger/5"
-        >
-          <Trash2 className="size-4" aria-hidden />
-          Hapus produk
-        </button>
-        {sharedDialogs}
-      </>
-    );
-  }
+  return {
+    dialogs,
+    duplicating,
+    handlePreview,
+    openDuplicateDialog,
+    requestDelete: () => setPendingDelete(true),
+  };
+}
+
+// ProductRowActions renders the desktop icon row (preview / duplicate / edit /
+// delete) with its dialogs mounted alongside — no portal involved.
+export function ProductRowActions({
+  productId,
+  productName,
+  productType,
+  storeSlug,
+  quotaFull,
+}: Props) {
+  const {
+    dialogs,
+    duplicating,
+    handlePreview,
+    openDuplicateDialog,
+    requestDelete,
+  } = useRowActions({ productId, productName, productType, storeSlug });
 
   return (
     <>
@@ -312,9 +297,7 @@ export function ProductRowActions({
         <Tooltip label="Hapus produk" align="end">
           <button
             type="button"
-            onClick={() => {
-              setPendingDelete(true);
-            }}
+            onClick={requestDelete}
             aria-label="Hapus produk"
             className="inline-flex size-8 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-danger/10 hover:text-danger"
           >
@@ -323,7 +306,95 @@ export function ProductRowActions({
         </Tooltip>
       </div>
 
-      {sharedDialogs}
+      {dialogs}
+    </>
+  );
+}
+
+// ProductRowMenu is the "…" dropdown variant used by the products table. The
+// AnchoredMenu only renders MENU ITEMS (plain callbacks); every dialog lives
+// outside it, so closing the menu — or scrolling, which closes it — can no
+// longer unmount a dialog that was just opened.
+export function ProductRowMenu({
+  productId,
+  productName,
+  productType,
+  storeSlug,
+  quotaFull,
+  extraItems,
+}: Props & { extraItems?: (close: () => void) => ReactNode }) {
+  const {
+    dialogs,
+    duplicating,
+    handlePreview,
+    openDuplicateDialog,
+    requestDelete,
+  } = useRowActions({ productId, productName, productType, storeSlug });
+
+  const itemClass =
+    "flex w-full items-center gap-2.5 px-4 py-2 text-sm text-neutral-700 hover:bg-neutral-50";
+
+  return (
+    <>
+      <AnchoredMenu
+        ariaLabel="Aksi produk"
+        icon={<MoreHorizontal className="size-4" aria-hidden />}
+        buttonClassName="inline-flex size-8 items-center justify-center rounded-md border border-neutral-200 text-neutral-600 transition-colors hover:border-brand-500 hover:bg-brand-50 hover:text-brand-700"
+      >
+        {(close) => (
+          <>
+            {extraItems?.(close)}
+            <button
+              type="button"
+              onClick={() => {
+                handlePreview();
+                close();
+              }}
+              className={itemClass}
+            >
+              <Eye className="size-4" aria-hidden />
+              Preview
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                openDuplicateDialog();
+                close();
+              }}
+              disabled={duplicating || quotaFull}
+              className={`${itemClass} disabled:cursor-not-allowed disabled:opacity-40`}
+            >
+              {duplicating ? (
+                <Loader2 className="size-4 animate-spin" aria-hidden />
+              ) : (
+                <CopyPlus className="size-4" aria-hidden />
+              )}
+              {quotaFull ? "Duplikat (limit tercapai)" : "Duplikat"}
+            </button>
+            <Link
+              href={`/products/${productId}`}
+              onClick={close}
+              className={itemClass}
+            >
+              <Edit2 className="size-4" aria-hidden />
+              Edit produk
+            </Link>
+            <div className="my-1 border-t border-neutral-100" />
+            <button
+              type="button"
+              onClick={() => {
+                requestDelete();
+                close();
+              }}
+              className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-danger hover:bg-danger/5"
+            >
+              <Trash2 className="size-4" aria-hidden />
+              Hapus produk
+            </button>
+          </>
+        )}
+      </AnchoredMenu>
+      {dialogs}
     </>
   );
 }

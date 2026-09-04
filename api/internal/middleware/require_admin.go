@@ -29,7 +29,11 @@ func RequireAdmin(users *repository.UserRepo) func(http.Handler) http.Handler {
 					"keluar dari mode impersonation untuk akses admin")
 				return
 			}
-			user, err := users.FindByID(r.Context(), uid)
+			user, ok := auth.SessionUserFromContext(r.Context())
+			var err error
+			if !ok {
+				user, err = users.FindByID(r.Context(), uid)
+			}
 			if err != nil || user.IsBanned() || !user.IsAdmin() {
 				response.Error(w, http.StatusForbidden, "akses admin diperlukan")
 				return

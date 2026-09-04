@@ -92,6 +92,9 @@ export default async function ResellerCatalogPage({
         </div>
       ) : (
         <ResellerCatalogView
+          // Remount on supplier switch so per-membership UI state never leaks
+          // across suppliers (see the note on the component).
+          key={sp.membership ?? "all"}
           catalog={catalog}
           memberships={memberships}
           activeMembershipID={sp.membership}

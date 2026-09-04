@@ -170,7 +170,10 @@ func (h *StaffHandler) Invite(w http.ResponseWriter, r *http.Request) {
 	// Quota check. Snapshot lives on the subscription.
 	sub := h.subFor(r, store.ID)
 	limit := staffLimitForSub(sub)
-	if limit > 0 {
+	// -1 = unlimited (migrations 0021/0022/0024). 0 means "tidak boleh
+	// sama sekali", exactly as the admin plan editor documents it — the
+	// old `> 0` test inverted that and turned 0 into unlimited.
+	if limit >= 0 {
 		members, _ := h.memberships.ListByStore(r.Context(), store.ID)
 		invites, _ := h.memberships.ListInvitesByStore(r.Context(), store.ID)
 		if len(members)+len(invites) >= limit {
@@ -412,4 +415,3 @@ func (h *StaffHandler) DeleteInvite(w http.ResponseWriter, r *http.Request) {
 	})
 	response.JSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
-

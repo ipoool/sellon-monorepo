@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { formatRupiah } from "@/lib/format";
 import { waLink } from "@/lib/whatsapp";
 import { useCart, cartItemKey } from "./cart-context";
+import { CartNotices } from "./cart-notices";
 
 type Props = {
   storeSlug: string;
@@ -49,11 +50,9 @@ export function CartView({
               Keranjang&rdquo;.
             </p>
           </div>
-          <Link href={`/${storeSlug}`}>
-            <Button size="sm" className="mt-2">
-              Lihat produk
-            </Button>
-          </Link>
+          <Button asChild size="sm" className="mt-2">
+            <Link href={`/${storeSlug}`}>Lihat produk</Link>
+          </Button>
         </div>
       </Card>
     );
@@ -61,15 +60,17 @@ export function CartView({
 
   return (
     <div className="flex flex-col gap-4">
+      <CartNotices />
       <Card className="p-0">
         <ul className="divide-y divide-neutral-100">
           {items.map((it) => {
             const key = cartItemKey(it);
             const lineTotal = it.unit_price_cents * it.qty;
+            // available_stock > 0 means the line has a finite cap — physical
+            // stock OR a capped digital's remaining quota. Physical-only here
+            // left the "+" on a capped digital enabled but inert.
             const reachedStock =
-              it.product_type === "physical" &&
-              it.available_stock > 0 &&
-              it.qty >= it.available_stock;
+              it.available_stock > 0 && it.qty >= it.available_stock;
             return (
               <li key={key} className="flex items-start gap-3 p-4 sm:p-5">
                 <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-neutral-200 bg-neutral-50 sm:size-20">
@@ -160,7 +161,9 @@ export function CartView({
                   </div>
                   {reachedStock && (
                     <p className="text-[11px] font-medium text-warning">
-                      Sudah pas stok maksimal ({it.available_stock} pcs)
+                      {it.product_type === "physical"
+                        ? `Sudah pas stok maksimal (${it.available_stock} pcs)`
+                        : `Sudah pas kuota maksimal (${it.available_stock})`}
                     </p>
                   )}
                 </div>

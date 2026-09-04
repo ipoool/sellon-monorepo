@@ -35,9 +35,20 @@ type Props = {
   initial: Store;
   isBisnis: boolean;
   cnameTarget: string;
+  // Per-store ownership proof. Verification requires BOTH the CNAME and a
+  // TXT record at `verifyTxtName` holding `verifyTxtValue` — the CNAME
+  // alone only proves the name points at our edge, not who owns it.
+  verifyTxtName: string;
+  verifyTxtValue: string;
 };
 
-export function CustomDomainForm({ initial, isBisnis, cnameTarget }: Props) {
+export function CustomDomainForm({
+  initial,
+  isBisnis,
+  cnameTarget,
+  verifyTxtName,
+  verifyTxtValue,
+}: Props) {
   const { refresh } = useRouter();
   const [domain, setDomain] = useState(initial.custom_domain ?? "");
   const [status, setStatus] = useState<DomainStatus>(
@@ -47,6 +58,11 @@ export function CustomDomainForm({ initial, isBisnis, cnameTarget }: Props) {
   const [verifying, setVerifying] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copiedCname, setCopiedCname] = useState(false);
+  const [copiedTxt, setCopiedTxt] = useState(false);
+  // Seeded from the server; refreshed inline from the save/verify
+  // responses so the row is right the moment the domain changes.
+  const [txtName, setTxtName] = useState(verifyTxtName);
+  const [txtValue, setTxtValue] = useState(verifyTxtValue);
   const [showGuide, setShowGuide] = useState(false);
   const [showConfirmDelete, setShowConfirmDelete] = useState(false);
   const [showDnsGuide, setShowDnsGuide] = useState(false);
@@ -125,6 +141,8 @@ export function CustomDomainForm({ initial, isBisnis, cnameTarget }: Props) {
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       setDomain(data.store?.custom_domain ?? trimmed);
       setStatus(data.store?.domain_status ?? "pending");
+      if (data.verify_txt_name) setTxtName(data.verify_txt_name);
+      if (data.verify_txt_value) setTxtValue(data.verify_txt_value);
       showSuccess("Domain disimpan. Sekarang arahkan DNS sesuai petunjuk di bawah.");
       refresh();
     } catch (err) { showError(err); }
@@ -142,10 +160,16 @@ export function CustomDomainForm({ initial, isBisnis, cnameTarget }: Props) {
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       const newStatus: DomainStatus = data.domain_status ?? "failed";
       setStatus(newStatus);
+      if (data.verify_txt_name) setTxtName(data.verify_txt_name);
+      if (data.verify_txt_value) setTxtValue(data.verify_txt_value);
       if (newStatus === "active") {
         showSuccess("Domain berhasil diverifikasi dan sekarang aktif!");
+      } else if (data.cname_ok && !data.txt_ok) {
+        showError("CNAME sudah benar, tapi record TXT verifikasi belum terdeteksi. Cek baris TXT di tabel DNS di bawah.");
+      } else if (!data.cname_ok && data.txt_ok) {
+        showError("Record TXT sudah benar, tapi CNAME belum mengarah ke server kami.");
       } else {
-        showError("DNS belum terdeteksi. Pastikan CNAME sudah diatur dan tunggu propagasi (5–30 menit).");
+        showError("DNS belum terdeteksi. Pastikan record CNAME dan TXT sudah diatur, lalu tunggu propagasi (5–30 menit).");
       }
       refresh();
     } catch (err) { showError(err); }
@@ -177,6 +201,12 @@ export function CustomDomainForm({ initial, isBisnis, cnameTarget }: Props) {
     navigator.clipboard.writeText(cnameTarget).catch(() => {});
     setCopiedCname(true);
     setTimeout(() => setCopiedCname(false), 2000);
+  }
+
+  function copyTxt() {
+    navigator.clipboard.writeText(txtValue).catch(() => {});
+    setCopiedTxt(true);
+    setTimeout(() => setCopiedTxt(false), 2000);
   }
 
   function copyDomain() {
@@ -364,7 +394,9 @@ export function CustomDomainForm({ initial, isBisnis, cnameTarget }: Props) {
             </div>
             <p className="text-sm text-neutral-600">
               Login ke panel DNS domain provider kamu (Niagahoster, Cloudflare, Dewaweb, dll)
-              dan tambahkan record berikut:
+              dan tambahkan <strong>kedua</strong> record berikut. Record TXT
+              membuktikan domain ini benar milikmu — tanpa itu verifikasi
+              tidak akan berhasil.
             </p>
 
             <div className="mt-4 overflow-x-auto rounded-lg border border-neutral-200 bg-white">
@@ -406,6 +438,32 @@ export function CustomDomainForm({ initial, isBisnis, cnameTarget }: Props) {
                     </td>
                     <td className="px-4 py-3 text-neutral-500">Auto</td>
                   </tr>
+                  {txtValue && (
+                    <tr className="border-t border-neutral-100">
+                      <td className="px-4 py-3 font-mono font-bold text-brand-700">TXT</td>
+                      <td className="px-4 py-3 font-mono text-neutral-700 whitespace-nowrap">
+                        {txtName || `_sellon-verify.${domain}`}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <code className="font-mono break-all text-neutral-800">{txtValue}</code>
+                          <button
+                            type="button"
+                            onClick={copyTxt}
+                            aria-label="Salin nilai TXT"
+                            className="shrink-0 rounded p-0.5 text-neutral-400 transition-colors hover:text-brand-600"
+                          >
+                            {copiedTxt ? (
+                              <Check className="size-3.5 text-success" aria-hidden />
+                            ) : (
+                              <Copy className="size-3.5" aria-hidden />
+                            )}
+                          </button>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-neutral-500">Auto</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>

@@ -78,7 +78,11 @@ export function LoyaltySettingsForm({ initial }: { initial: Config }) {
               </p>
             </div>
           </div>
-          <Switch checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+          <Switch
+            aria-label="Aktifkan Loyalty Point"
+            checked={enabled}
+            onChange={(e) => setEnabled(e.target.checked)}
+          />
         </div>
       </Card>
 

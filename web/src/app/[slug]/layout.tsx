@@ -1,9 +1,7 @@
 import type { ReactNode } from "react";
 
 import { CartProvider } from "@/components/storefront/cart-context";
-import { CartFab } from "@/components/storefront/cart-fab";
-import { CookieConsent } from "@/components/storefront/cookie-consent";
-import { MetaPixel } from "@/components/storefront/meta-pixel";
+import { StorefrontChrome } from "@/components/storefront/storefront-chrome";
 
 type Params = Promise<{ slug: string }>;
 
@@ -45,10 +43,10 @@ export default async function StorefrontLayout({
   const pixelId = await fetchPixelId(slug);
   return (
     <CartProvider storeSlug={slug}>
-      {pixelId && <MetaPixel pixelId={pixelId} />}
       {children}
-      <CartFab storeSlug={slug} />
-      <CookieConsent />
+      {/* Pixel + cart FAB + cookie banner. Consent-gated and hidden on the
+          private course viewer — see StorefrontChrome. */}
+      <StorefrontChrome storeSlug={slug} pixelId={pixelId} />
     </CartProvider>
   );
 }

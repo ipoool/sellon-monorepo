@@ -134,7 +134,13 @@ export function AddToCartPanel({
   // Variant disabled via Select tetap berlaku (variant kosong stoknya
   // tidak masuk akal di-add).
   const disabled =
-    !acceptingOrders || outOfStock || variantNotPicked || requiredUnmet;
+    !acceptingOrders ||
+    outOfStock ||
+    variantNotPicked ||
+    requiredUnmet ||
+    // Guard the qty too: switching from a high-stock variant to a low-stock one
+    // must not let an impossible line through to the cart.
+    (tracked && qty > availableStock);
 
   function buildItem(): CartItem {
     const selected_options: SelectedOption[] = modifiers.flatMap((g) => {
@@ -255,7 +261,17 @@ export function AddToCartPanel({
           <Select
             id="variant_id"
             value={variantId}
-            onChange={(e) => setVariantId(e.target.value)}
+            onChange={(e) => {
+              const nextId = e.target.value;
+              setVariantId(nextId);
+              // Clamp the already-picked qty to the NEW variant's stock —
+              // picking variant A (stock 10) at qty 8 then switching to
+              // variant B (stock 2) previously kept qty 8.
+              const nextStock = variants.find((v) => v.id === nextId)?.stock ?? 0;
+              if (tracked) {
+                setQty((q) => Math.max(1, Math.min(q, Math.max(1, nextStock))));
+              }
+            }}
             disabled={false}
           >
             <option value="">- Pilih varian -</option>

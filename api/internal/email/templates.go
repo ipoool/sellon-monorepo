@@ -51,13 +51,13 @@ func RenderRupiah(cents int64) string {
 // === Templates ===
 
 type NewOrderData struct {
-	StoreName       string
-	OrderNumber     string
-	CustomerName    string
-	CustomerWA      string
-	TotalCents      int64
-	ItemSummary     string // pre-formatted, one line per item
-	PaymentMethod   string
+	StoreName         string
+	OrderNumber       string
+	CustomerName      string
+	CustomerWA        string
+	TotalCents        int64
+	ItemSummary       string // pre-formatted, one line per item
+	PaymentMethod     string
 	OrderDashboardURL string
 }
 
@@ -651,6 +651,36 @@ Selamat berkembang bareng SellOn!
 		html.EscapeString(d.DashboardURL),
 		html.EscapeString(planLabel),
 		html.EscapeString(expiresStr),
+	))
+	return
+}
+
+// RenderPasswordReset is the "lupa password" code email. Same shape as the
+// verification code email, different intent + a warning for the case where
+// the recipient did not ask for it.
+func RenderPasswordReset(name, code string, expiryMinutes int) (subject, text, htmlBody string) {
+	greeting := "Halo!"
+	if strings.TrimSpace(name) != "" {
+		greeting = "Halo " + name + "!"
+	}
+	subject = fmt.Sprintf("Kode reset password SellOn: %s", code)
+	text = fmt.Sprintf(`%s
+
+Kode untuk mengatur ulang password akun SellOn-mu:
+
+%s
+
+Berlaku %d menit. Jangan bagikan kode ini ke siapa pun.
+Kalau kamu tidak meminta reset password, abaikan email ini — password kamu tidak berubah.
+`, greeting, code, expiryMinutes)
+	htmlBody = wrapHTML(fmt.Sprintf(`
+<h2 style="margin:0 0 8px;font-size:20px;color:#0f172a;">%s</h2>
+<p style="margin:0 0 16px;color:#475569;">Masukkan kode ini untuk mengatur ulang password akun SellOn-mu:</p>
+<p style="margin:0 0 16px;font-size:32px;font-weight:700;letter-spacing:6px;color:#0f172a;text-align:center;">%s</p>
+<p style="margin:0;color:#475569;font-size:13px;">Berlaku %d menit. Jangan bagikan kode ini. Kalau kamu tidak meminta reset password, abaikan email ini — password kamu tidak berubah.</p>`,
+		html.EscapeString(greeting),
+		html.EscapeString(code),
+		expiryMinutes,
 	))
 	return
 }

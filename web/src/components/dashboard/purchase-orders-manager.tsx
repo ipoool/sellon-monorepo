@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { formatRupiah } from "@/lib/format";
 import { formatDateID } from "@/lib/format";
 import { showError, showSuccess } from "@/lib/toast";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import type { PurchaseOrder, Supplier, Material } from "@/lib/types";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -39,6 +40,9 @@ export function PurchaseOrdersManager({
   const router = useRouter();
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Receiving a PO adds material stock and snapshots unit cost — there is no
+  // undo, so it gets a confirm instead of being one click away.
+  const [pendingReceive, setPendingReceive] = useState<string | null>(null);
   const [supplierId, setSupplierId] = useState("");
   const [note, setNote] = useState("");
   const [lines, setLines] = useState<Line[]>([{ material_id: "", quantity: 1, unitCostRupiah: 0 }]);
@@ -272,7 +276,7 @@ export function PurchaseOrdersManager({
                             </button>
                           )}
                           <button
-                            onClick={() => act(po.id, "receive")}
+                            onClick={() => setPendingReceive(po.id)}
                             disabled={busy}
                             title="Terima & restock"
                             className="inline-flex items-center gap-1 rounded-md border border-brand-200 px-2.5 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50"
@@ -290,6 +294,21 @@ export function PurchaseOrdersManager({
           </table>
         </div>
       )}
+
+      <ConfirmDialog
+        open={pendingReceive !== null}
+        onClose={() => setPendingReceive(null)}
+        onConfirm={async () => {
+          const id = pendingReceive;
+          if (!id) return;
+          await act(id, "receive");
+          setPendingReceive(null);
+        }}
+        title="Terima PO ini?"
+        description="Stok bahan akan langsung bertambah sesuai jumlah di PO, dan harga satuannya dipakai sebagai harga modal terbaru. Aksi ini tidak bisa dibatalkan."
+        confirmLabel="Terima & Restock"
+        busy={busy}
+      />
     </div>
   );
 }

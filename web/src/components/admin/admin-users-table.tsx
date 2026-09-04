@@ -198,7 +198,14 @@ export function AdminUsersTable({ initial, initialQuery }: Props) {
     try {
       const res = await fetch(
         `${apiBase}/api/v1/admin/users/${user.id}`,
-        { method: "DELETE", credentials: "include" },
+        {
+          method: "DELETE",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          // The backend now enforces the typed phrase itself — a bare
+          // DELETE without this body is rejected with 400.
+          body: JSON.stringify({ confirm: "DELETE NOW" }),
+        },
       );
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);

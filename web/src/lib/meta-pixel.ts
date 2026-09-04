@@ -10,8 +10,21 @@ declare global {
   }
 }
 
+// Cookie-consent gate. Mirrors CONSENT_KEY in components/storefront/cookie-consent
+// (duplicated as a literal so this module stays free of React imports). The base
+// Pixel script is only mounted after consent, but a stale `window.fbq` can
+// survive a "Tolak" click in the same tab — so every track call re-checks.
+function consentGranted(): boolean {
+  try {
+    return localStorage.getItem("sellon:cookie-consent") === "accepted";
+  } catch {
+    return false;
+  }
+}
+
 function fbq(...args: unknown[]) {
-  if (typeof window !== "undefined" && typeof window.fbq === "function") {
+  if (typeof window === "undefined" || !consentGranted()) return;
+  if (typeof window.fbq === "function") {
     window.fbq(...args);
   }
 }

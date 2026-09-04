@@ -10,8 +10,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"github.com/sellon/sellon/api/internal/auth"
 	"github.com/sellon/sellon/api/internal/audit"
+	"github.com/sellon/sellon/api/internal/auth"
 	"github.com/sellon/sellon/api/internal/email"
 	"github.com/sellon/sellon/api/internal/notify"
 	"github.com/sellon/sellon/api/internal/pkg/response"
@@ -153,6 +153,9 @@ func (h *ResellerHandler) UpdateProgram(w http.ResponseWriter, r *http.Request) 
 	if store == nil {
 		return
 	}
+	if !h.requireProPlan(w, r, store.ID) {
+		return
+	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		response.Error(w, http.StatusBadRequest, "invalid id")
@@ -187,6 +190,9 @@ func (h *ResellerHandler) RegenerateInviteCode(w http.ResponseWriter, r *http.Re
 	if store == nil {
 		return
 	}
+	if !h.requireProPlan(w, r, store.ID) {
+		return
+	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		response.Error(w, http.StatusBadRequest, "invalid id")
@@ -212,6 +218,9 @@ func (h *ResellerHandler) SetProgramProducts(w http.ResponseWriter, r *http.Requ
 	if store == nil {
 		return
 	}
+	if !h.requireProPlan(w, r, store.ID) {
+		return
+	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		response.Error(w, http.StatusBadRequest, "invalid id")
@@ -220,9 +229,9 @@ func (h *ResellerHandler) SetProgramProducts(w http.ResponseWriter, r *http.Requ
 
 	var body struct {
 		Products []struct {
-			ProductID           string `json:"product_id"`
-			ResellerPriceCents  int64  `json:"reseller_price_cents"`
-			IsActive            bool   `json:"is_active"`
+			ProductID          string `json:"product_id"`
+			ResellerPriceCents int64  `json:"reseller_price_cents"`
+			IsActive           bool   `json:"is_active"`
 		} `json:"products"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -248,7 +257,15 @@ func (h *ResellerHandler) SetProgramProducts(w http.ResponseWriter, r *http.Requ
 		})
 	}
 
-	if err := h.reseller.SetProgramProducts(r.Context(), id, inputs); err != nil {
+	if err := h.reseller.SetProgramProducts(r.Context(), id, store.ID, inputs); err != nil {
+		if errors.Is(err, repository.ErrResellerProgramNotFound) {
+			response.Error(w, http.StatusNotFound, "program tidak ditemukan")
+			return
+		}
+		if errors.Is(err, repository.ErrProgramProductNotOwned) {
+			response.Error(w, http.StatusBadRequest, "produk tidak ditemukan")
+			return
+		}
 		h.logger.Error("reseller: set program products", "err", err)
 		response.Error(w, http.StatusInternalServerError, "internal error")
 		return
@@ -266,7 +283,11 @@ func (h *ResellerHandler) ListProgramProducts(w http.ResponseWriter, r *http.Req
 		response.Error(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	products, err := h.reseller.ListProgramProducts(r.Context(), id)
+	products, err := h.reseller.ListProgramProducts(r.Context(), id, store.ID)
+	if errors.Is(err, repository.ErrResellerProgramNotFound) {
+		response.Error(w, http.StatusNotFound, "program tidak ditemukan")
+		return
+	}
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "internal error")
 		return
@@ -288,7 +309,11 @@ func (h *ResellerHandler) ListProgramMembers(w http.ResponseWriter, r *http.Requ
 		response.Error(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	members, err := h.reseller.ListProgramMembers(r.Context(), id)
+	members, err := h.reseller.ListProgramMembers(r.Context(), id, store.ID)
+	if errors.Is(err, repository.ErrResellerProgramNotFound) {
+		response.Error(w, http.StatusNotFound, "program tidak ditemukan")
+		return
+	}
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "internal error")
 		return
@@ -435,13 +460,20 @@ func (h *ResellerHandler) ListMemberships(w http.ResponseWriter, r *http.Request
 }
 
 func (h *ResellerHandler) ListAvailableProducts(w http.ResponseWriter, r *http.Request) {
-	h.requireStore(w, r) // just auth check
+	store := h.requireStore(w, r)
+	if store == nil {
+		return
+	}
 	mid, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		response.Error(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	products, err := h.reseller.ListAvailableProducts(r.Context(), mid)
+	products, err := h.reseller.ListAvailableProducts(r.Context(), mid, store.ID)
+	if errors.Is(err, repository.ErrResellerMembershipNotFound) {
+		response.Error(w, http.StatusNotFound, "keanggotaan tidak ditemukan")
+		return
+	}
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "internal error")
 		return
@@ -479,7 +511,7 @@ func (h *ResellerHandler) ImportProduct(w http.ResponseWriter, r *http.Request) 
 		response.Error(w, http.StatusBadRequest, "program_product_id tidak valid")
 		return
 	}
-	entry, err := h.reseller.ImportProduct(r.Context(), mid, ppid, body.ResellerPriceCents)
+	entry, err := h.reseller.ImportProduct(r.Context(), store.ID, mid, ppid, body.ResellerPriceCents)
 	if errors.Is(err, repository.ErrPriceBelowModal) {
 		response.Error(w, http.StatusUnprocessableEntity, err.Error())
 		return

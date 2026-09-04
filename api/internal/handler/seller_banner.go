@@ -29,11 +29,11 @@ type SellerBannerHandler struct {
 	banners *repository.SellerBannerRepo
 	stores  *repository.StoreRepo
 	subs    *repository.SubscriptionRepo
-	storage *storage.SupabaseClient
+	storage storage.Client
 	logger  *slog.Logger
 }
 
-func NewSellerBannerHandler(banners *repository.SellerBannerRepo, stores *repository.StoreRepo, subs *repository.SubscriptionRepo, storageCli *storage.SupabaseClient, logger *slog.Logger) *SellerBannerHandler {
+func NewSellerBannerHandler(banners *repository.SellerBannerRepo, stores *repository.StoreRepo, subs *repository.SubscriptionRepo, storageCli storage.Client, logger *slog.Logger) *SellerBannerHandler {
 	return &SellerBannerHandler{banners: banners, stores: stores, subs: subs, storage: storageCli, logger: logger}
 }
 

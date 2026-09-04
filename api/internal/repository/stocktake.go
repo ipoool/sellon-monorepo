@@ -159,11 +159,16 @@ func (r *StockTakeRepo) Post(ctx context.Context, storeID, id uuid.UUID, counts 
 	}
 
 	// Apply adjustments for every item whose count differs from live stock.
+	// Lock the material rows (FOR UPDATE OF m) so a concurrent sale's
+	// consume can't slip between this read and the absolute stock write below
+	// — otherwise that sale's decrement would be silently lost.
 	rows, err := tx.Query(ctx, `
 		SELECT sti.material_id, sti.counted_qty, m.stock, m.cost_cents
 		FROM stock_take_items sti
 		JOIN materials m ON m.id = sti.material_id
 		WHERE sti.stock_take_id = $1 AND m.store_id = $2
+		ORDER BY m.id
+		FOR UPDATE OF m
 	`, id, storeID)
 	if err != nil {
 		return err
@@ -211,4 +216,30 @@ func (r *StockTakeRepo) Post(ctx context.Context, storeID, id uuid.UUID, counts 
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// Delete discards a draft opname (its items cascade). Posted opnames are an
+// immutable audit trail → ErrStockTakePosted; unknown/foreign ids →
+// ErrStockTakeNotFound.
+func (r *StockTakeRepo) Delete(ctx context.Context, storeID, id uuid.UUID) error {
+	ct, err := r.pool.Exec(ctx,
+		`DELETE FROM stock_takes WHERE id = $1 AND store_id = $2 AND status = 'draft'`,
+		id, storeID)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 1 {
+		return nil
+	}
+	// Nothing deleted: distinguish "posted" from "missing" for the caller.
+	var exists bool
+	if err := r.pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM stock_takes WHERE id = $1 AND store_id = $2)`,
+		id, storeID).Scan(&exists); err != nil {
+		return err
+	}
+	if exists {
+		return ErrStockTakePosted
+	}
+	return ErrStockTakeNotFound
 }

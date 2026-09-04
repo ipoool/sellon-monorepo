@@ -23,16 +23,19 @@ type Props = {
   // Offline order: its server record + receipt only exist after sync, so the
   // print / WA / fetch-by-id actions are unavailable until then.
   offline?: boolean;
+  // Buyer number captured at checkout. The cart (and its customer) is cleared
+  // as soon as the order is accepted, so the context can no longer supply it.
+  initialPhone?: string;
   onClose: () => void;
 };
 
-export function SuccessModal({ orderId, orderNumber, totalCents, changeCents, cashierName, offline, onClose }: Props) {
+export function SuccessModal({ orderId, orderNumber, totalCents, changeCents, cashierName, offline, initialPhone, onClose }: Props) {
   const { printerConfig, loyaltyCustomer, customerWA } = usePOS();
   // Pre-fill the WA field with the member's / buyer's number from this
-  // transaction so the cashier can send the receipt in one tap. Context still
-  // holds the customer here — it's only cleared when the modal closes.
+  // transaction so the cashier can send the receipt in one tap. Prefer the
+  // snapshot the caller passed — the cart is cleared at order acceptance.
   const [phone, setPhone] = useState(
-    loyaltyCustomer?.whatsapp_number || customerWA || "",
+    initialPhone ?? (loyaltyCustomer?.whatsapp_number || customerWA || ""),
   );
   const [sending, setSending] = useState(false);
   const [printing, setPrinting] = useState(false);

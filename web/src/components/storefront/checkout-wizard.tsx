@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { showError, showSuccess } from "@/lib/toast";
+import { showError } from "@/lib/toast";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -28,10 +28,11 @@ import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { CityPicker } from "@/components/dashboard/city-picker";
 import { formatRupiah } from "@/lib/format";
-import { fillTemplate, waLink } from "@/lib/whatsapp";
+import { waLink } from "@/lib/whatsapp";
 import { cn } from "@/lib/utils";
 import type { CheckoutConfig, CheckoutField } from "@/lib/types";
 import { useCart, cartItemKey } from "./cart-context";
+import { CartNotices } from "./cart-notices";
 import { trackInitiateCheckout } from "@/lib/meta-pixel";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -97,21 +98,6 @@ function buildPaymentOptions(payment: StorefrontPayment): PaymentOption[] {
   }
   return out;
 }
-
-const orderTemplate = `Halo {nama_toko}!
-Saya {nama_pembeli} mau pesan:
-
-{ringkasan_produk}
-
-Total: {total}
-Bayar: {metode_bayar}
-Kurir: {kurir}
-
-Alamat:
-{alamat}, {kota}
-
-Nomor pesanan: #{nomor_pesanan}
-{catatan_pembeli}`;
 
 type Props = {
   storeSlug: string;
@@ -183,6 +169,9 @@ export function CheckoutWizard({
 
   const [shipping, setShipping] = useState<ShippingOption[]>([]);
   const [shippingLoading, setShippingLoading] = useState(false);
+  // Distinct from "no courier for this city": a 5xx / network failure must not
+  // read as "penjual tidak melayani kota ini".
+  const [quoteError, setQuoteError] = useState<string | null>(null);
   const [pickedShipping, setPickedShipping] = useState<string>("");
 
   const [paymentMethod, setPaymentMethod] = useState<string>(
@@ -304,39 +293,65 @@ export function CheckoutWizard({
     if (skipShippingStep) {
       setShipping([]);
       setPickedShipping("");
+      setQuoteError(null);
       return;
     }
     const trimmed = city.trim();
     if (trimmed.length < 3 || items.length === 0) {
       setShipping([]);
       setPickedShipping("");
+      setQuoteError(null);
       return;
     }
     const ctrl = new AbortController();
     setShippingLoading(true);
+    setQuoteError(null);
     const t = setTimeout(() => {
-      void fetch(`${apiBase}/api/v1/storefront/${storeSlug}/shipping/quote`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          city: trimmed,
-          city_id: cityID,
-          items: items.reduce<Array<{ product_id: string; quantity: number }>>(
-            (acc, it) => {
-              if (it.product_type === "physical") {
-                acc.push({ product_id: it.product_id, quantity: it.qty });
-              }
-              return acc;
+      void (async () => {
+        try {
+          const r = await fetch(
+            `${apiBase}/api/v1/storefront/${storeSlug}/shipping/quote`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                city: trimmed,
+                city_id: cityID,
+                items: items.reduce<
+                  Array<{ product_id: string; quantity: number }>
+                >((acc, it) => {
+                  if (it.product_type === "physical") {
+                    acc.push({ product_id: it.product_id, quantity: it.qty });
+                  }
+                  return acc;
+                }, []),
+              }),
+              signal: ctrl.signal,
             },
-            [],
-          ),
-        }),
-        signal: ctrl.signal,
-      })
-        .then((r) => r.json())
-        .then((d) => setShipping((d.options as ShippingOption[]) || []))
-        .catch(() => {})
-        .finally(() => setShippingLoading(false));
+          );
+          // A superseded request must not touch state — its `.finally` used to
+          // clear the loading flag while the newer request was still in flight.
+          if (ctrl.signal.aborted) return;
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) {
+            setShipping([]);
+            setQuoteError(
+              (d as { error?: string }).error ||
+                "Gagal menghitung ongkir, coba lagi.",
+            );
+            return;
+          }
+          setShipping((d.options as ShippingOption[]) || []);
+          setQuoteError(null);
+        } catch {
+          if (!ctrl.signal.aborted) {
+            setShipping([]);
+            setQuoteError("Gagal menghitung ongkir, coba lagi.");
+          }
+        } finally {
+          if (!ctrl.signal.aborted) setShippingLoading(false);
+        }
+      })();
     }, 350);
     return () => {
       ctrl.abort();
@@ -367,35 +382,70 @@ export function CheckoutWizard({
   const grandTotal =
     Math.max(0, subtotal - discountCents) + shippingCents + (taxInclusive ? 0 : taxCents);
 
-  // Re-validate applied promo whenever subtotal/shipping changes.
+  // Re-validate the applied promo whenever the amounts it was validated against
+  // change. Depends on the promo CODE, never the object: depending on
+  // `appliedPromo` while the handler called setAppliedPromo({...}) with a fresh
+  // object re-armed the effect on its own result — an endless validate loop
+  // (~5-20 req/s for every buyer sitting on the payment/review step).
+  const appliedPromoCode = appliedPromo?.code ?? "";
   useEffect(() => {
-    if (!appliedPromo) return;
+    if (!appliedPromoCode) return;
     const ctrl = new AbortController();
-    void fetch(`${apiBase}/api/v1/storefront/${storeSlug}/promos/validate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        code: appliedPromo.code,
-        subtotal_cents: subtotal,
-        shipping_cents: baseShippingCents,
-      }),
-      signal: ctrl.signal,
-    })
-      .then(async (r) => {
-        if (!r.ok) throw new Error();
-        return r.json();
-      })
-      .then((d) => {
-        setAppliedPromo({
-          code: appliedPromo.code,
-          type: d.type,
-          discount_cents: d.discount_cents ?? 0,
-          free_shipping: !!d.free_shipping,
+    void (async () => {
+      try {
+        const r = await fetch(
+          `${apiBase}/api/v1/storefront/${storeSlug}/promos/validate`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              code: appliedPromoCode,
+              subtotal_cents: subtotal,
+              shipping_cents: baseShippingCents,
+            }),
+            signal: ctrl.signal,
+          },
+        );
+        if (ctrl.signal.aborted) return;
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          // The promo stopped applying (min spend, quota, expiry) — drop it and
+          // say why instead of silently keeping a discount the server rejects.
+          setAppliedPromo(null);
+          setPromoError(
+            (d as { error?: string }).error ||
+              "Promo tidak berlaku lagi untuk keranjang ini",
+          );
+          return;
+        }
+        setPromoError(null);
+        setAppliedPromo((prev) => {
+          if (!prev || prev.code !== appliedPromoCode) return prev;
+          const nextDiscount = d.discount_cents ?? 0;
+          const nextFree = !!d.free_shipping;
+          // Identical result → keep the SAME object so nothing downstream
+          // re-renders and this effect can't re-arm itself.
+          if (
+            prev.type === d.type &&
+            prev.discount_cents === nextDiscount &&
+            prev.free_shipping === nextFree
+          ) {
+            return prev;
+          }
+          return {
+            code: prev.code,
+            type: d.type,
+            discount_cents: nextDiscount,
+            free_shipping: nextFree,
+          };
         });
-      })
-      .catch(() => {});
+      } catch {
+        // Aborted or offline — keep the current promo, the server re-checks
+        // it authoritatively at order creation anyway.
+      }
+    })();
     return () => ctrl.abort();
-  }, [subtotal, baseShippingCents, appliedPromo, storeSlug]);
+  }, [appliedPromoCode, subtotal, baseShippingCents, storeSlug]);
 
   async function applyPromo() {
     const code = promoInput.trim();
@@ -506,6 +556,7 @@ export function CheckoutWizard({
         : "—";
     const paymentLabel =
       paymentMethods.find((p) => p.value === paymentMethod)?.label || "—";
+    const wantsMidtrans = paymentMethod === "midtrans_snap";
 
     try {
       const res = await fetch(`${apiBase}/api/v1/storefront/${storeSlug}/orders`, {
@@ -535,35 +586,38 @@ export function CheckoutWizard({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      const orderNumber = String(data.order_number ?? "");
 
-      // Compose a friendly WA message summarising the order. Open WA
-      // for the seller but send the buyer to the per-order page in this
-      // tab so they can see status + payment instructions.
-      const ringkasan = items
-        .map((it) => {
-          const name = it.variant_name
-            ? `${it.product_name} (${it.variant_name})`
-            : it.product_name;
-          return `${it.qty}× ${name} @ ${formatRupiah(it.unit_price_cents)} = ${formatRupiah(it.unit_price_cents * it.qty)}`;
-        })
-        .join("\n");
-      const message = fillTemplate(orderTemplate, {
-        nama_toko: storeName,
-        nama_pembeli: customerName.trim(),
-        alamat: customerAddress.trim() || "—",
-        kota: city.trim() || "—",
-        kurir: courierLabel,
-        metode_bayar: paymentLabel,
-        nomor_pesanan: data.order_number || "",
-        total: formatRupiah(data.total_cents ?? grandTotal),
-        ringkasan_produk: ringkasan,
-        catatan_pembeli: notes ? `Catatan: ${notes}` : "",
-      });
-      const url = waLink(storeWhatsApp || "", message);
-      if (url) window.open(url, "_blank", "noopener,noreferrer");
+      // CreateOrder does NOT mint a Snap transaction, so a Midtrans-only store
+      // used to land the buyer on an order page with an empty payment_url and
+      // the "penjual belum mengatur metode pembayaran" notice. Mint it here.
+      // Best-effort: the order page has a "Buat link pembayaran" retry.
+      if (wantsMidtrans && orderNumber) {
+        try {
+          await fetch(
+            `${apiBase}/api/v1/storefront/${storeSlug}/orders/${orderNumber}/payment-link`,
+            { method: "POST" },
+          );
+        } catch {
+          // ignore — buyer can retry from the order page
+        }
+      }
+
+      // The server recomputes every amount from the DB. When its total differs
+      // from what the buyer just reviewed (a price changed under a stale cart),
+      // flag it so the order page can say so instead of quietly charging more.
+      const serverTotal =
+        typeof data.total_cents === "number" ? data.total_cents : grandTotal;
+      const priceChanged = serverTotal !== grandTotal;
+
+      // NOTE: no window.open here. Called after an await it lands outside the
+      // user-activation window and mobile Safari/Chrome block it — the buyer
+      // never saw WhatsApp. The order page offers it as a real link instead.
       orderPlacedRef.current = true;
       clear();
-      push(`/${storeSlug}/order/${data.order_number}`);
+      push(
+        `/${storeSlug}/order/${orderNumber}${priceChanged ? "?updated=1" : ""}`,
+      );
     } catch (err) {
       showError(err);
     } finally {
@@ -600,6 +654,7 @@ export function CheckoutWizard({
 
   return (
     <div className="flex flex-col gap-5">
+      <CartNotices />
       {acceptingOrdersReason === "order_limit" && (
         <div className="flex flex-col gap-3 rounded-lg border border-warning/40 bg-warning/10 p-4 text-sm text-neutral-800 sm:flex-row sm:items-center sm:justify-between">
           <p>
@@ -753,6 +808,11 @@ export function CheckoutWizard({
               ) : shippingLoading ? (
                 <p className="rounded-lg border border-neutral-200 bg-white px-3 py-2.5 text-xs text-neutral-500">
                   Menghitung ongkir…
+                </p>
+              ) : quoteError ? (
+                <p className="rounded-lg border border-danger/40 bg-danger/5 px-3 py-2.5 text-xs text-neutral-700">
+                  {quoteError} Kamu tetap bisa lanjut tanpa pilih kurir — ongkir
+                  akan dikonfirmasi penjual via WhatsApp.
                 </p>
               ) : shipping.length === 0 ? (
                 <p className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2.5 text-xs text-neutral-700">
@@ -960,12 +1020,14 @@ export function CheckoutWizard({
 
       <div className="flex items-center justify-between gap-3">
         {step === 1 ? (
-          <Link href={`/${storeSlug}/cart`}>
-            <Button type="button" size="md" variant="ghost">
+          // asChild → one interactive element (a <Link>), not a Button nested
+          // inside a Link (two tab stops for one CTA).
+          <Button asChild size="md" variant="ghost">
+            <Link href={`/${storeSlug}/cart`}>
               <ArrowLeft className="size-4" aria-hidden />
               Kembali ke keranjang
-            </Button>
-          </Link>
+            </Link>
+          </Button>
         ) : (
           <Button
             type="button"

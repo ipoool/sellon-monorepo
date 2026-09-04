@@ -112,6 +112,19 @@ func (r *AnalyticsRepo) HasAnySummary(ctx context.Context, storeID uuid.UUID) (b
 	return exists, err
 }
 
+// CountSummariesSince returns how many AI summaries the store generated at or
+// after `since` — the per-store daily rate limit. A COUNT is fine here: this
+// is a low-frequency seller action, the (store_id, created_at) index bounds
+// the scan to one day, and the cap itself keeps the row count tiny.
+func (r *AnalyticsRepo) CountSummariesSince(ctx context.Context, storeID uuid.UUID, since time.Time) (int, error) {
+	var n int
+	err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM analytics_ai_summaries
+		WHERE store_id = $1 AND created_at >= $2
+	`, storeID, since).Scan(&n)
+	return n, err
+}
+
 type DayPoint struct {
 	Date string `json:"date"`
 	InC  int64  `json:"in_cents"`
@@ -159,11 +172,15 @@ func (r *AnalyticsRepo) Overview(ctx context.Context, storeID uuid.UUID, from, t
 		o.AOVCents = o.RevenueCents / int64(o.Orders)
 	}
 
+	// COGS from the material ledger: 'consume' rows are negative quantities;
+	// 'restore' rows are the positive compensating entries written when an
+	// order is cancelled/voided/returned (same unit_cost snapshot), so the
+	// signed sum nets to zero for reversed orders.
 	var consumeCost, dropshipCost int64
 	if err := r.pool.QueryRow(ctx, `
 		SELECT COALESCE(SUM(-quantity * unit_cost_cents),0)
 		FROM material_movements
-		WHERE store_id=$1 AND movement_type='consume' AND `+tsWindow+`
+		WHERE store_id=$1 AND movement_type IN ('consume','restore') AND `+tsWindow+`
 	`, storeID, from, to).Scan(&consumeCost); err != nil {
 		return nil, err
 	}

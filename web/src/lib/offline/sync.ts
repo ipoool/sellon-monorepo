@@ -26,10 +26,17 @@ export type SyncResult = {
   remaining: number; // still pending after this run (transient stop / went offline)
 };
 
-// A 4xx (except 408/429) is a permanent rejection — retrying won't help, so we
-// flag it and move on. Everything else (5xx/408/429/network) is transient.
+// 4xx codes a retry CAN clear, so they must never permanently strand a real
+// cash sale: 401 (session expired — re-login fixes it), 402 (plan/quota
+// hiccup), 408/429 (timeout / rate limit), 409 (shift closed, or a loyalty
+// points conflict the seller can resolve). Everything else in 4xx is a genuine
+// rejection that retrying won't fix.
+const TRANSIENT_STATUS = new Set([401, 402, 408, 409, 429]);
+
+// Permanent rejections are flagged and skipped; everything else (5xx, the
+// transient 4xx above, network errors) is retried on the next pass.
 function isPermanent(status: number): boolean {
-  return status >= 400 && status < 500 && status !== 408 && status !== 429;
+  return status >= 400 && status < 500 && !TRANSIENT_STATUS.has(status);
 }
 
 // syncQueue replays queued offline POS orders to the server in bounded batches.

@@ -1,7 +1,11 @@
-// Browser-side helpers for image uploads. The actual upload happens on
-// the Go API (which holds the Supabase service key); this module only
-// POSTs the file as multipart/form-data and surfaces any configuration /
-// size / mime errors.
+// Browser-side helpers for file uploads. The actual upload happens on the Go
+// API, which holds the object-storage credentials — they never reach the
+// browser. This module only POSTs the file as multipart/form-data and
+// surfaces configuration / size / mime errors.
+//
+// Storage backend is S3-compatible (see api/internal/storage). The endpoint
+// contract is unchanged from the Supabase era: POST /uploads/image or
+// /uploads/file, response {url, path}.
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
@@ -31,7 +35,32 @@ export async function uploadImage(
   fd.append("file", file);
   fd.append("kind", kind);
 
-  const res = await fetch(`${apiBase}/api/v1/uploads/image`, {
+  return postUpload(`${apiBase}/api/v1/uploads/image`, fd);
+}
+
+// Digital deliverables (produk digital) are NOT images: they go to a separate
+// endpoint that skips the image compression pipeline (which would re-encode a
+// PDF/zip into a broken JPEG) and allows a bigger payload.
+export const DIGITAL_FILE_MAX_BYTES = 25 * 1024 * 1024;
+
+// Accept list for the <input type="file"> — mirrors the backend's sniffed
+// content-type allowlist. The server still validates by magic bytes.
+export const DIGITAL_FILE_ACCEPT =
+  ".pdf,.zip,.epub,.mp3,.mp4,.png,.jpg,.jpeg,.webp,.csv,.txt";
+
+export async function uploadDigitalFile(file: File): Promise<UploadResult> {
+  if (file.size > DIGITAL_FILE_MAX_BYTES) {
+    throw new Error("Ukuran maks 25 MB");
+  }
+  const fd = new FormData();
+  fd.append("file", file);
+  return postUpload(`${apiBase}/api/v1/uploads/file`, fd);
+}
+
+// postUpload POSTs a multipart body and normalizes the error shape shared by
+// both upload endpoints.
+async function postUpload(url: string, fd: FormData): Promise<UploadResult> {
+  const res = await fetch(url, {
     method: "POST",
     credentials: "include",
     body: fd,

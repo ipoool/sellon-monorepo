@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -10,6 +12,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/sellon/sellon/api/internal/audit"
 	"github.com/sellon/sellon/api/internal/auth"
@@ -20,6 +24,28 @@ import (
 // domainRe validates a fully-qualified hostname: lowercase letters, digits,
 // hyphens, dots. At least two labels required (e.g. sub.brand.com).
 var domainRe = regexp.MustCompile(`^([a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$`)
+
+// domainVerifyHost is the label a seller must add the ownership TXT record
+// under: _sellon-verify.<domain>.
+const domainVerifyPrefix = "_sellon-verify."
+
+// domainVerifyToken derives the per-store proof-of-ownership value for a
+// domain. Deterministic (no column, no expiry, survives restarts) and
+// store-scoped, so pointing a CNAME at cname.sellon.id is no longer enough
+// on its own to claim a hostname:
+//
+//   - dangling CNAME: an abandoned DNS record can't be hijacked by another
+//     seller, because they can't produce the victim's TXT value;
+//   - squatting: reserving someone else's domain is now harmless, since
+//     only the party who can edit its DNS can ever verify it.
+//
+// The store_id half is a server-side secret from an attacker's point of
+// view — it is never exposed on public endpoints, only on the owner's own
+// authenticated /store payload.
+func domainVerifyToken(storeID uuid.UUID, domain string) string {
+	sum := sha256.Sum256([]byte(storeID.String() + ":" + strings.ToLower(domain)))
+	return "sellon-verify=" + hex.EncodeToString(sum[:])[:32]
+}
 
 type DomainHandler struct {
 	stores      *repository.StoreRepo
@@ -84,6 +110,15 @@ func (h *DomainHandler) Set(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Only an ACTIVE domain elsewhere blocks the claim. A domain another
+	// store merely reserved (pending/failed) is fair game — see migration
+	// 0099; ownership is settled by the TXT record at verify time, not by
+	// who typed the name first.
+	if taken, terr := h.stores.DomainActiveElsewhere(r.Context(), store.ID, domain); terr == nil && taken {
+		response.Error(w, http.StatusConflict, "Domain sudah aktif di toko lain")
+		return
+	}
+
 	updated, err := h.stores.SetCustomDomain(r.Context(), store.ID, domain)
 	if errors.Is(err, repository.ErrDomainTaken) {
 		response.Error(w, http.StatusConflict, "Domain sudah digunakan oleh toko lain")
@@ -102,8 +137,10 @@ func (h *DomainHandler) Set(w http.ResponseWriter, r *http.Request) {
 		Metadata: map[string]any{"domain": domain},
 	})
 	response.JSON(w, http.StatusOK, map[string]any{
-		"store":        toStoreDTO(updated),
-		"cname_target": h.cnameTarget,
+		"store":            toStoreDTO(updated),
+		"cname_target":     h.cnameTarget,
+		"verify_txt_name":  domainVerifyPrefix + domain,
+		"verify_txt_value": domainVerifyToken(store.ID, domain),
 	})
 }
 
@@ -135,20 +172,49 @@ func (h *DomainHandler) Verify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	domain := *store.CustomDomain
+
+	// Someone else already serves this hostname — refuse before touching
+	// DNS so two stores can never both hold it active.
+	if taken, terr := h.stores.DomainActiveElsewhere(r.Context(), store.ID, domain); terr == nil && taken {
+		response.Error(w, http.StatusConflict, "Domain sudah aktif di toko lain")
+		return
+	}
+
 	newStatus := "failed"
 
 	// DNS lookup with a hard 5-second timeout so a slow resolver never hangs
 	// the HTTP handler.
 	dnsCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
+
+	cnameOK := false
 	if cname, lookupErr := net.DefaultResolver.LookupCNAME(dnsCtx, domain); lookupErr == nil {
 		resolved := strings.TrimSuffix(strings.ToLower(cname), ".")
 		expected := strings.TrimSuffix(strings.ToLower(h.cnameTarget), ".")
-		if resolved == expected {
-			newStatus = "active"
-		}
+		cnameOK = resolved == expected
 	} else {
 		h.logger.Warn("dns cname lookup failed", "domain", domain, "err", lookupErr)
+	}
+
+	// The CNAME alone only proves "this name points at our edge" — it says
+	// nothing about WHICH store owns it, so a dangling record left behind
+	// by another seller could be hijacked. The per-store TXT record is the
+	// actual proof of control.
+	txtOK := false
+	wantTXT := domainVerifyToken(store.ID, domain)
+	if records, lookupErr := net.DefaultResolver.LookupTXT(dnsCtx, domainVerifyPrefix+domain); lookupErr == nil {
+		for _, rec := range records {
+			if strings.EqualFold(strings.TrimSpace(rec), wantTXT) {
+				txtOK = true
+				break
+			}
+		}
+	} else {
+		h.logger.Warn("dns txt lookup failed", "domain", domain, "err", lookupErr)
+	}
+
+	if cnameOK && txtOK {
+		newStatus = "active"
 	}
 
 	updated, err := h.stores.SetDomainStatus(r.Context(), store.ID, newStatus)
@@ -162,11 +228,18 @@ func (h *DomainHandler) Verify(w http.ResponseWriter, r *http.Request) {
 		Action: "store.custom_domain_verified", EntityType: "store",
 		EntityID: store.ID.String(),
 		Summary:  "Verifikasi domain " + domain + " → " + newStatus,
-		Metadata: map[string]any{"domain": domain, "status": newStatus},
+		Metadata: map[string]any{
+			"domain": domain, "status": newStatus,
+			"cname_ok": cnameOK, "txt_ok": txtOK,
+		},
 	})
 	response.JSON(w, http.StatusOK, map[string]any{
-		"store":         toStoreDTO(updated),
-		"domain_status": newStatus,
+		"store":            toStoreDTO(updated),
+		"domain_status":    newStatus,
+		"cname_ok":         cnameOK,
+		"txt_ok":           txtOK,
+		"verify_txt_name":  domainVerifyPrefix + domain,
+		"verify_txt_value": wantTXT,
 	})
 }
 

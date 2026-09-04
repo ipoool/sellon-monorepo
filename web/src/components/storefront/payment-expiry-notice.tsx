@@ -32,11 +32,15 @@ export function PaymentExpiryNotice({ expiresAt }: { expiresAt: string }) {
     }
   }, [now, deadline, router]);
 
+  // Pinned to WIB: without an explicit timeZone the server (UTC container) and
+  // the browser format different times — a hydration mismatch — and the "WIB"
+  // label next to it would be wrong for everyone outside Jakarta.
   const deadlineLabel = new Date(deadline).toLocaleString("id-ID", {
     hour: "2-digit",
     minute: "2-digit",
     day: "numeric",
     month: "short",
+    timeZone: "Asia/Jakarta",
   });
 
   if (now !== null && deadline - now <= 0) {

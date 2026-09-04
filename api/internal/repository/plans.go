@@ -174,3 +174,26 @@ func (r *PlanRepo) MonthlyPrice(ctx context.Context, tier string) int64 {
 	}
 	return p.MonthlyPriceCents
 }
+
+// PriceForMonths returns the TOTAL price in cents for `months` of `tier`.
+//
+// `plans.yearly_price_cents` is a PER-MONTH figure billed yearly (see
+// migration 0018 and the landing page's "−20%" badge, which computes
+// (monthly - yearly) / monthly). A 12-month purchase therefore has to be
+// billed at yearly_price_cents × 12 — previously the API charged the full
+// monthly rate for every duration, so the advertised yearly discount was
+// never actually applied. Shorter terms keep the monthly rate.
+func (r *PlanRepo) PriceForMonths(ctx context.Context, tier string, months int) int64 {
+	if months <= 0 {
+		months = 1
+	}
+	p, err := r.Get(ctx, tier)
+	if err != nil || p == nil {
+		return 0
+	}
+	perMonth := p.MonthlyPriceCents
+	if months >= 12 && p.YearlyPriceCents > 0 {
+		perMonth = p.YearlyPriceCents
+	}
+	return perMonth * int64(months)
+}

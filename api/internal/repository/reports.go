@@ -61,12 +61,17 @@ type SalesBucket struct {
 
 // SalesByDay returns one row per day in the window (gaps filled with zeros)
 // using generate_series so the chart renders contiguous bars.
+//
+// Buckets are WIB calendar days: the handler parses from/to in WIB, so both
+// the series and the join key convert created_at to Asia/Jakarta wall-clock
+// before truncating (the DB session TZ is UTC — truncating there would shift
+// evening orders into the next day and misalign the series with the window).
 func (r *ReportsRepo) SalesByDay(ctx context.Context, storeID uuid.UUID, since, until time.Time) ([]SalesBucket, error) {
 	rows, err := r.pool.Query(ctx, `
 		WITH days AS (
 		    SELECT generate_series(
-		        date_trunc('day', $2::timestamptz),
-		        date_trunc('day', $3::timestamptz - interval '1 second'),
+		        date_trunc('day', $2::timestamptz AT TIME ZONE 'Asia/Jakarta'),
+		        date_trunc('day', ($3::timestamptz - interval '1 second') AT TIME ZONE 'Asia/Jakarta'),
 		        interval '1 day'
 		    ) AS d
 		)
@@ -76,7 +81,7 @@ func (r *ReportsRepo) SalesByDay(ctx context.Context, storeID uuid.UUID, since, 
 		FROM days d
 		LEFT JOIN orders o
 		    ON o.store_id = $1
-		   AND date_trunc('day', o.created_at) = d.d
+		   AND date_trunc('day', o.created_at AT TIME ZONE 'Asia/Jakarta') = d.d
 		   AND o.created_at >= $2 AND o.created_at < $3
 		GROUP BY d.d
 		ORDER BY d.d ASC
@@ -103,14 +108,15 @@ type SalesWeekBucket struct {
 	RevenueCents int64
 }
 
-// SalesByWeek aggregates revenue and orders per calendar week (Mon–Sun, UTC).
-// Returns ~12 weeks for a 90-day window.
+// SalesByWeek aggregates revenue and orders per calendar week (Mon–Sun, WIB).
+// Returns ~12 weeks for a 90-day window. Week boundaries are computed on the
+// Asia/Jakarta wall-clock (see SalesByDay).
 func (r *ReportsRepo) SalesByWeek(ctx context.Context, storeID uuid.UUID, since, until time.Time) ([]SalesWeekBucket, error) {
 	rows, err := r.pool.Query(ctx, `
 		WITH weeks AS (
 		    SELECT generate_series(
-		        date_trunc('week', $2::timestamptz),
-		        date_trunc('week', $3::timestamptz - interval '1 second'),
+		        date_trunc('week', $2::timestamptz AT TIME ZONE 'Asia/Jakarta'),
+		        date_trunc('week', ($3::timestamptz - interval '1 second') AT TIME ZONE 'Asia/Jakarta'),
 		        interval '1 week'
 		    ) AS w
 		)
@@ -121,7 +127,7 @@ func (r *ReportsRepo) SalesByWeek(ctx context.Context, storeID uuid.UUID, since,
 		FROM weeks w
 		LEFT JOIN orders o
 		    ON o.store_id = $1
-		   AND date_trunc('week', o.created_at) = w.w
+		   AND date_trunc('week', o.created_at AT TIME ZONE 'Asia/Jakarta') = w.w
 		   AND o.created_at >= $2 AND o.created_at < $3
 		GROUP BY w.w
 		ORDER BY w.w ASC
@@ -147,14 +153,15 @@ type SalesMonthBucket struct {
 	RevenueCents int64
 }
 
-// SalesByMonth aggregates revenue and orders per calendar month (UTC).
-// Returns ~12 months.
+// SalesByMonth aggregates revenue and orders per calendar month (WIB).
+// Returns ~12 months. Month boundaries are computed on the Asia/Jakarta
+// wall-clock (see SalesByDay).
 func (r *ReportsRepo) SalesByMonth(ctx context.Context, storeID uuid.UUID, since, until time.Time) ([]SalesMonthBucket, error) {
 	rows, err := r.pool.Query(ctx, `
 		WITH months AS (
 		    SELECT generate_series(
-		        date_trunc('month', $2::timestamptz),
-		        date_trunc('month', $3::timestamptz - interval '1 second'),
+		        date_trunc('month', $2::timestamptz AT TIME ZONE 'Asia/Jakarta'),
+		        date_trunc('month', ($3::timestamptz - interval '1 second') AT TIME ZONE 'Asia/Jakarta'),
 		        interval '1 month'
 		    ) AS m
 		)
@@ -164,7 +171,7 @@ func (r *ReportsRepo) SalesByMonth(ctx context.Context, storeID uuid.UUID, since
 		FROM months m
 		LEFT JOIN orders o
 		    ON o.store_id = $1
-		   AND date_trunc('month', o.created_at) = m.m
+		   AND date_trunc('month', o.created_at AT TIME ZONE 'Asia/Jakarta') = m.m
 		   AND o.created_at >= $2 AND o.created_at < $3
 		GROUP BY m.m
 		ORDER BY m.m ASC

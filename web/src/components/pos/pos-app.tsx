@@ -44,7 +44,7 @@ const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
 function POSAppInner({ me, products, categories, initialSession }: Props) {
   const router = useRouter();
-  const { session, setSession, cart, totalCents, clearCart, setLoyaltyConfig, setPrinterConfig, setMidtransLive, setTaxConfig, setOfflineEnabled } = usePOS();
+  const { session, setSession, cart, totalCents, clearCart, customerWA, loyaltyCustomer, setLoyaltyConfig, setPrinterConfig, setMidtransLive, setTaxConfig, setOfflineEnabled } = usePOS();
 
   // Catalog source: server props when online; cached IndexedDB copy when the
   // page is served offline (props empty). Online loads also refresh the cache.
@@ -125,6 +125,9 @@ function POSAppInner({ me, products, categories, initialSession }: Props) {
     totalCents: number;
     changeCents: number;
     offline: boolean;
+    // Snapshotted before the cart is cleared so the receipt-to-WA field still
+    // pre-fills with this transaction's buyer.
+    phone: string;
   } | null>(null);
 
   // On mount: hydrate session from server. Tidak auto-popup modal —
@@ -229,7 +232,12 @@ function POSAppInner({ me, products, categories, initialSession }: Props) {
               // Offline orders carry a local "LOKAL-" number; their server
               // record + receipt only exist after sync.
               offline: result.order_number.startsWith("LOKAL-"),
+              phone: loyaltyCustomer?.whatsapp_number || customerWA || "",
             });
+            // Clear + persist NOW, not when the success modal closes: a reload
+            // in between re-hydrated the already-sold cart from IndexedDB and
+            // let the cashier ring it up again under a fresh idempotency key.
+            clearCart();
           }}
         />
       )}
@@ -270,10 +278,8 @@ function POSAppInner({ me, products, categories, initialSession }: Props) {
           changeCents={successData.changeCents}
           offline={successData.offline}
           cashierName={me.name || me.email}
-          onClose={() => {
-            setSuccessData(null);
-            clearCart();
-          }}
+          initialPhone={successData.phone}
+          onClose={() => setSuccessData(null)}
         />
       )}
     </div>

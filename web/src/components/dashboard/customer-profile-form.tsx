@@ -26,7 +26,11 @@ export function CustomerProfileForm({
   const [pending, setPending] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
 
-  async function save(nextBlacklisted = isBlacklisted) {
+  // Returns whether the write succeeded so the optimistic blacklist toggle can
+  // roll itself back — otherwise a failed request left the card reading
+  // "Pelanggan di-blacklist" while the server still had it false, and the next
+  // click sent the inverse and "succeeded" at un-blacklisting nothing.
+  async function save(nextBlacklisted = isBlacklisted): Promise<boolean> {
     setPending(true);
     try {
       const res = await fetch(`${apiBase}/api/v1/customers/${customerId}`, {
@@ -41,18 +45,23 @@ export function CustomerProfileForm({
       }
       showSuccess("Tersimpan");
       refresh();
+      return true;
     } catch (err) {
       showError(err);
+      return false;
     } finally {
       setPending(false);
     }
   }
 
   async function handleBlacklistConfirm() {
-    const next = !isBlacklisted;
+    const previous = isBlacklisted;
+    const next = !previous;
     setIsBlacklisted(next);
     setShowConfirm(false);
-    await save(next);
+    if (!(await save(next))) {
+      setIsBlacklisted(previous);
+    }
   }
 
   return (

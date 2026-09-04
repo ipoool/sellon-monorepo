@@ -200,6 +200,10 @@ func (r *PurchaseOrderRepo) Get(ctx context.Context, storeID, id uuid.UUID) (*Pu
 }
 
 // Create inserts a draft PO with its items. total_cents = Σ qty × unit_cost.
+// Every material_id must belong to the store — the item INSERT is guarded by
+// a SELECT on materials.store_id and the whole PO is rejected with
+// ErrMaterialNotFound when any line references a foreign/unknown material
+// (cross-tenant guard; the FE only offers the store's own materials).
 func (r *PurchaseOrderRepo) Create(ctx context.Context, storeID uuid.UUID, supplierID *uuid.UUID, note string, items []POItemInput) (uuid.UUID, error) {
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -224,11 +228,17 @@ func (r *PurchaseOrderRepo) Create(ctx context.Context, storeID uuid.UUID, suppl
 		if it.Quantity <= 0 {
 			continue
 		}
-		if _, err := tx.Exec(ctx, `
+		ct, err := tx.Exec(ctx, `
 			INSERT INTO purchase_order_items (po_id, material_id, quantity, unit_cost_cents)
-			VALUES ($1, $2, $3, $4)
-		`, poID, it.MaterialID, it.Quantity, it.UnitCostCents); err != nil {
+			SELECT $1, m.id, $3, $4
+			FROM materials m
+			WHERE m.id = $2 AND m.store_id = $5
+		`, poID, it.MaterialID, it.Quantity, it.UnitCostCents, storeID)
+		if err != nil {
 			return uuid.Nil, err
+		}
+		if ct.RowsAffected() == 0 {
+			return uuid.Nil, ErrMaterialNotFound
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -308,22 +318,30 @@ func (r *PurchaseOrderRepo) Receive(ctx context.Context, storeID, id uuid.UUID) 
 	}
 
 	for _, l := range lines {
-		// Restock + refresh cost (store-scoped). Skip silently if the material
-		// was removed.
-		ct, err := tx.Exec(ctx, `
-			UPDATE materials SET stock = stock + $3, cost_cents = $4, updated_at = now()
+		// Restock + refresh cost (store-scoped). A PO line with unit cost 0
+		// (the FE defaults the field to 0) must NOT wipe the material's modal —
+		// only a positive cost replaces it. The movement snapshots whichever
+		// cost is in effect after the update so the cash-flow report reads the
+		// real money-out. Skip silently if the material was removed.
+		var resolvedCost int64
+		err := tx.QueryRow(ctx, `
+			UPDATE materials
+			SET stock = stock + $3,
+			    cost_cents = CASE WHEN $4 > 0 THEN $4 ELSE cost_cents END,
+			    updated_at = now()
 			WHERE id = $1 AND store_id = $2
-		`, l.matID, storeID, l.qty, l.cost)
+			RETURNING cost_cents
+		`, l.matID, storeID, l.qty, l.cost).Scan(&resolvedCost)
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
+		}
 		if err != nil {
 			return err
-		}
-		if ct.RowsAffected() == 0 {
-			continue
 		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO material_movements (store_id, material_id, movement_type, quantity, unit_cost_cents, note)
 			VALUES ($1, $2, 'restock', $3, $4, $5)
-		`, storeID, l.matID, l.qty, l.cost, "Terima PO"); err != nil {
+		`, storeID, l.matID, l.qty, resolvedCost, "Terima PO"); err != nil {
 			return err
 		}
 	}

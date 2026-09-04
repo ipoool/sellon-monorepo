@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { AlertTriangle, ShieldAlert, Info, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -61,6 +61,13 @@ type Props = {
    * matches. Pattern: "type DELETE to confirm".
    */
   requireTypedPhrase?: string;
+  /**
+   * Inline error shown just above the footer. Callers that keep the dialog
+   * open after a failed action must use this instead of a toast — the dialog
+   * is opened with showModal(), so it lives in the top layer and any toast
+   * renders *behind* it (invisible and undismissable).
+   */
+  error?: ReactNode;
 };
 
 // Reusable confirmation dialog using the native <dialog> element with
@@ -78,8 +85,15 @@ export function ConfirmDialog({
   busy = false,
   confirmIcon,
   requireTypedPhrase,
+  error,
 }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
+  // Several screens mount multiple ConfirmDialogs at once. Hard-coded ids
+  // made aria-labelledby / htmlFor resolve to the FIRST match in the DOM —
+  // usually a closed dialog — leaving the open one unnamed.
+  const uid = useId();
+  const titleId = `${uid}-title`;
+  const phraseId = `${uid}-phrase`;
   const cfg = kindStyles[kind];
   const [typed, setTyped] = useState("");
   const phraseSatisfied =
@@ -125,7 +139,7 @@ export function ConfirmDialog({
   return (
     <dialog
       ref={ref}
-      aria-labelledby="confirm-dialog-title"
+      aria-labelledby={titleId}
       className="fixed left-1/2 top-1/2 m-0 w-[min(560px,95vw)] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-neutral-200 bg-white p-0 shadow-popout backdrop:bg-neutral-900/40 backdrop:backdrop-blur-sm"
     >
       <div className="flex items-start gap-4 p-6">
@@ -140,7 +154,7 @@ export function ConfirmDialog({
         </div>
         <div className="min-w-0 flex-1">
           <h2
-            id="confirm-dialog-title"
+            id={titleId}
             className="font-display text-base font-semibold text-neutral-900"
           >
             {title}
@@ -160,7 +174,7 @@ export function ConfirmDialog({
       </div>
       {requireTypedPhrase && (
         <div className="border-t border-neutral-200 bg-neutral-50/60 px-6 py-4">
-          <Label htmlFor="confirm-dialog-phrase" className="text-xs">
+          <Label htmlFor={phraseId} className="text-xs">
             Ketik{" "}
             <code className="rounded bg-white px-1.5 py-0.5 font-mono text-[11px] font-semibold tracking-wider text-danger ring-1 ring-neutral-200">
               {requireTypedPhrase}
@@ -168,7 +182,7 @@ export function ConfirmDialog({
             untuk konfirmasi
           </Label>
           <Input
-            id="confirm-dialog-phrase"
+            id={phraseId}
             value={typed}
             onChange={(e) => setTyped(e.target.value)}
             autoComplete="off"
@@ -179,6 +193,14 @@ export function ConfirmDialog({
             disabled={busy}
             className="mt-1.5 font-mono uppercase tracking-wider"
           />
+        </div>
+      )}
+      {error && (
+        <div
+          role="alert"
+          className="border-t border-danger/20 bg-danger/5 px-6 py-3 text-sm text-danger"
+        >
+          {error}
         </div>
       )}
       <div className="flex items-center justify-end gap-2 border-t border-neutral-200 bg-neutral-50 px-6 py-3">

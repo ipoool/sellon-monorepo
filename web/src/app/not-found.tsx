@@ -22,18 +22,18 @@ export default function NotFound() {
         </p>
 
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-          <Link href="/">
-            <Button size="md">
+          <Button asChild size="md">
+            <Link href="/">
               <Home className="size-4" aria-hidden />
               Kembali ke beranda
-            </Button>
-          </Link>
-          <Link href="/help">
-            <Button size="md" variant="outline">
+            </Link>
+          </Button>
+          <Button asChild size="md" variant="outline">
+            <Link href="/help">
               <Search className="size-4" aria-hidden />
               Cari di Bantuan
-            </Button>
-          </Link>
+            </Link>
+          </Button>
         </div>
 
         <p className="mt-10 text-xs text-neutral-500">

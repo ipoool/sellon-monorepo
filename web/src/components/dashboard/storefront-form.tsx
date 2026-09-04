@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { showError, showSuccess } from "@/lib/toast";
-import { deleteUploaded } from "@/lib/supabase";
+import { deleteUploaded } from "@/lib/uploads";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -79,7 +79,7 @@ export function StorefrontForm({ initial }: { initial: Store }) {
   const [pending, setPending] = useState(false);
   const [kioskConfigOpen, setKioskConfigOpen] = useState(false);
   // Refs tracking URL gambar yang sudah benar-benar ter-save di server.
-  // Pakai untuk hapus file lama di Supabase Storage saat seller ganti
+  // Pakai untuk hapus file lama di object storage saat seller ganti
   // logo / banner. Tidak pakai initial.{logo,banner}_url langsung karena
   // setelah save pertama, "URL lama" jadi yang baru di-save, bukan yang
   // di-mount-saat-load.
@@ -112,9 +112,9 @@ export function StorefrontForm({ initial }: { initial: Store }) {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
 
-    // Setelah PUT sukses, bersihkan file lama di Supabase Storage agar
+    // Setelah PUT sukses, bersihkan file lama di object storage agar
     // tidak orphan. Fire-and-forget — backend punya cross-tenant guard
-    // dan akan abaikan URL non-Supabase. Ref di-update agar save
+    // dan akan abaikan URL dari host lain. Ref di-update agar save
     // berikutnya pakai baseline yang benar.
     if (savedLogoRef.current && savedLogoRef.current !== logoUrl) {
       void deleteUploaded(savedLogoRef.current);

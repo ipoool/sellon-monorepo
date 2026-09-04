@@ -127,52 +127,52 @@ func optionSnapsToDTO(snaps []repository.OptionSnapshot) []map[string]any {
 }
 
 type orderDetailDTO struct {
-	ID                 string         `json:"id"`
-	OrderNumber        string         `json:"order_number"`
-	Status             string         `json:"status"`
-	PaymentStatus      string         `json:"payment_status"`
-	PaymentMethod      string         `json:"payment_method"`
-	Source             string         `json:"source"`
-	SubtotalCents      int64          `json:"subtotal_cents"`
-	ShippingCents      int64          `json:"shipping_cents"`
-	DiscountCents      int64          `json:"discount_cents"`
-	TaxCents           int64          `json:"tax_cents"`
-	TaxBps             int            `json:"tax_bps"`
-	TaxInclusive       bool           `json:"tax_inclusive"`
-	PromoCode          string         `json:"promo_code"`
-	TotalCents         int64          `json:"total_cents"`
-	LoyaltyPointsRedeemed int         `json:"loyalty_points_redeemed"`
-	LoyaltyDiscountCents  int64       `json:"loyalty_discount_cents"`
+	ID                    string `json:"id"`
+	OrderNumber           string `json:"order_number"`
+	Status                string `json:"status"`
+	PaymentStatus         string `json:"payment_status"`
+	PaymentMethod         string `json:"payment_method"`
+	Source                string `json:"source"`
+	SubtotalCents         int64  `json:"subtotal_cents"`
+	ShippingCents         int64  `json:"shipping_cents"`
+	DiscountCents         int64  `json:"discount_cents"`
+	TaxCents              int64  `json:"tax_cents"`
+	TaxBps                int    `json:"tax_bps"`
+	TaxInclusive          bool   `json:"tax_inclusive"`
+	PromoCode             string `json:"promo_code"`
+	TotalCents            int64  `json:"total_cents"`
+	LoyaltyPointsRedeemed int    `json:"loyalty_points_redeemed"`
+	LoyaltyDiscountCents  int64  `json:"loyalty_discount_cents"`
 	// POS-only receipt fields (empty/zero for non-POS orders).
 	CashierName        string            `json:"cashier_name,omitempty"`
 	ChangeAmountCents  int64             `json:"change_amount_cents"`
 	Payments           []orderPaymentDTO `json:"payments,omitempty"`
-	Courier            string         `json:"courier"`
-	CourierService     string         `json:"courier_service"`
-	TrackingNumber     string         `json:"tracking_number"`
-	CustomerName       string         `json:"customer_name"`
-	CustomerWhatsApp   string         `json:"customer_whatsapp"`
-	CustomerEmail      string         `json:"customer_email,omitempty"`
-	CustomerAddress    string         `json:"customer_address"`
-	CustomerCity       string         `json:"customer_city"`
-	Notes              string         `json:"notes"`
-	SellerNotes        string         `json:"seller_notes"`
-	PaymentURL         string         `json:"payment_url"`
-	PaidAt             *string        `json:"paid_at"`
-	ShippedAt          *string        `json:"shipped_at"`
-	CompletedAt        *string        `json:"completed_at"`
-	CancelledAt        *string        `json:"cancelled_at"`
-	CancellationReason string         `json:"cancellation_reason"`
-	RefundAmountCents  int64          `json:"refund_amount_cents"`
-	RefundReason       string         `json:"refund_reason"`
-	RefundedAt         *string        `json:"refunded_at"`
-	PaymentProofURL    string         `json:"payment_proof_url"`
-	PaymentProofNote   string         `json:"payment_proof_note"`
-	PaymentProofAt     *string        `json:"payment_proof_at"`
-	CreatedAt          string          `json:"created_at"`
-	UpdatedAt          string          `json:"updated_at"`
-	Items              []orderItemDTO  `json:"items"`
-	CustomFields       json.RawMessage `json:"custom_fields,omitempty"`
+	Courier            string            `json:"courier"`
+	CourierService     string            `json:"courier_service"`
+	TrackingNumber     string            `json:"tracking_number"`
+	CustomerName       string            `json:"customer_name"`
+	CustomerWhatsApp   string            `json:"customer_whatsapp"`
+	CustomerEmail      string            `json:"customer_email,omitempty"`
+	CustomerAddress    string            `json:"customer_address"`
+	CustomerCity       string            `json:"customer_city"`
+	Notes              string            `json:"notes"`
+	SellerNotes        string            `json:"seller_notes"`
+	PaymentURL         string            `json:"payment_url"`
+	PaidAt             *string           `json:"paid_at"`
+	ShippedAt          *string           `json:"shipped_at"`
+	CompletedAt        *string           `json:"completed_at"`
+	CancelledAt        *string           `json:"cancelled_at"`
+	CancellationReason string            `json:"cancellation_reason"`
+	RefundAmountCents  int64             `json:"refund_amount_cents"`
+	RefundReason       string            `json:"refund_reason"`
+	RefundedAt         *string           `json:"refunded_at"`
+	PaymentProofURL    string            `json:"payment_proof_url"`
+	PaymentProofNote   string            `json:"payment_proof_note"`
+	PaymentProofAt     *string           `json:"payment_proof_at"`
+	CreatedAt          string            `json:"created_at"`
+	UpdatedAt          string            `json:"updated_at"`
+	Items              []orderItemDTO    `json:"items"`
+	CustomFields       json.RawMessage   `json:"custom_fields,omitempty"`
 }
 
 func formatTime(t interface{ Format(string) string }) string {
@@ -209,7 +209,7 @@ func (h *OrderHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	rows, total, err := h.orders.List(r.Context(), repository.ListOrdersFilter{
+	rows, total, counts, err := h.orders.ListWithCounts(r.Context(), repository.ListOrdersFilter{
 		StoreID:       store.ID,
 		Search:        strings.TrimSpace(q.Get("q")),
 		Statuses:      statuses,
@@ -230,17 +230,14 @@ func (h *OrderHandler) List(w http.ResponseWriter, r *http.Request) {
 			ID: o.ID.String(), OrderNumber: o.OrderNumber,
 			Status: o.Status, PaymentStatus: o.PaymentStatus, PaymentMethod: o.PaymentMethod,
 			SubtotalCents: o.SubtotalCents, ShippingCents: o.ShippingCents, TotalCents: o.TotalCents,
-			Courier: o.Courier,
+			Courier:      o.Courier,
 			CustomerName: o.CustomerName, CustomerWhatsApp: o.CustomerWhatsApp, CustomerCity: o.CustomerCity,
 			NeedsReview: o.NeedsReview, ReviewReason: o.ReviewReason,
 			CreatedAt: o.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		})
 	}
-	// Store-wide per-status counts for the tab badges (independent of the
-	// active tab / search / payment filter). Best-effort: tabs still work
-	// without counts.
-	counts, _ := h.orders.CountsByStatus(r.Context(), store.ID)
-
+	// `counts` (store-wide per-status badge counts) came out of the same scan
+	// as `total` — no second store-wide COUNT(*) per page load.
 	response.JSON(w, http.StatusOK, map[string]any{"orders": out, "total": total, "status_counts": counts})
 }
 
@@ -253,20 +250,27 @@ func (h *OrderHandler) Export(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	rows, _, err := h.orders.List(r.Context(), repository.ListOrdersFilter{
+	// `status` is comma-separated (the Pesanan tabs send e.g.
+	// "pending,confirmed,processing"). Export used to pass it as a single
+	// value, which matched no row — the default tab exported a header-only CSV.
+	var statuses []string
+	for _, st := range strings.Split(q.Get("status"), ",") {
+		if st = strings.TrimSpace(st); st != "" {
+			statuses = append(statuses, st)
+		}
+	}
+	filter := repository.ListOrdersFilter{
 		StoreID:       store.ID,
 		Search:        strings.TrimSpace(q.Get("q")),
-		Status:        q.Get("status"),
+		Statuses:      statuses,
 		PaymentStatus: q.Get("payment_status"),
-		Limit:         1000,
-	})
-	if err != nil {
-		response.Error(w, http.StatusInternalServerError, "internal error")
-		return
+		NeedsReview:   q.Get("needs_review") == "1" || q.Get("needs_review") == "true",
 	}
 
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="pesanan-`+time.Now().Format("2006-01-02")+`.csv"`)
+	// UTF-8 BOM: without it Excel on Windows mangles Indonesian names/cities.
+	_, _ = w.Write([]byte("\xEF\xBB\xBF"))
 	cw := csv.NewWriter(w)
 	defer cw.Flush()
 	_ = cw.Write([]string{
@@ -274,16 +278,45 @@ func (h *OrderHandler) Export(w http.ResponseWriter, r *http.Request) {
 		"Pembeli", "WhatsApp", "Kota", "Kurir",
 		"Subtotal (Rp)", "Ongkir (Rp)", "Total (Rp)",
 	})
-	for _, o := range rows {
-		_ = cw.Write([]string{
-			o.OrderNumber,
-			o.CreatedAt.Format("2006-01-02 15:04"),
-			o.Status, o.PaymentStatus, o.PaymentMethod,
-			o.CustomerName, o.CustomerWhatsApp, o.CustomerCity, o.Courier,
-			strconv.FormatInt(o.SubtotalCents/100, 10),
-			strconv.FormatInt(o.ShippingCents/100, 10),
-			strconv.FormatInt(o.TotalCents/100, 10),
-		})
+
+	// Page past the repo's 1000-row cap instead of silently truncating. Bounded
+	// so one seller can't stream their entire history into a request.
+	const pageSize = 1000
+	const maxRows = 20000
+	written := 0
+	truncated := false
+	for offset := 0; offset < maxRows; offset += pageSize {
+		filter.Limit = pageSize
+		filter.Offset = offset
+		rows, _, err := h.orders.List(r.Context(), filter)
+		if err != nil {
+			h.logger.Error("export orders", "err", err, "offset", offset)
+			// Headers are already on the wire — say so in the file itself.
+			_ = cw.Write([]string{"Ekspor terhenti karena kesalahan sistem. Coba lagi."})
+			return
+		}
+		for _, o := range rows {
+			_ = cw.Write([]string{
+				o.OrderNumber,
+				o.CreatedAt.Format("2006-01-02 15:04"),
+				o.Status, o.PaymentStatus, o.PaymentMethod,
+				o.CustomerName, o.CustomerWhatsApp, o.CustomerCity, o.Courier,
+				strconv.FormatInt(o.SubtotalCents/100, 10),
+				strconv.FormatInt(o.ShippingCents/100, 10),
+				strconv.FormatInt(o.TotalCents/100, 10),
+			})
+		}
+		written += len(rows)
+		if len(rows) < pageSize {
+			break
+		}
+		if offset+pageSize >= maxRows {
+			truncated = true
+		}
+	}
+	if truncated {
+		_ = cw.Write([]string{fmt.Sprintf(
+			"Catatan: ekspor dibatasi %d baris terbaru. Persempit filter untuk data selengkapnya.", written)})
 	}
 }
 
@@ -374,13 +407,13 @@ func orderDetailToDTO(o *repository.Order, items []orderItemDTO) orderDetailDTO 
 		Source:        o.Source,
 		SubtotalCents: o.SubtotalCents, ShippingCents: o.ShippingCents,
 		DiscountCents: o.DiscountCents, PromoCode: o.PromoCode,
-		TaxCents:      o.TaxCents, TaxBps: o.TaxBps, TaxInclusive: o.TaxInclusive,
+		TaxCents: o.TaxCents, TaxBps: o.TaxBps, TaxInclusive: o.TaxInclusive,
 		TotalCents:            o.TotalCents,
 		LoyaltyPointsRedeemed: o.LoyaltyPointsRedeemed,
 		LoyaltyDiscountCents:  o.LoyaltyDiscountCents,
 		CashierName:           o.CashierName,
 		ChangeAmountCents:     o.ChangeAmountCents,
-		Courier: o.Courier, CourierService: o.CourierService, TrackingNumber: o.TrackingNumber,
+		Courier:               o.Courier, CourierService: o.CourierService, TrackingNumber: o.TrackingNumber,
 		CustomerName: o.CustomerName, CustomerWhatsApp: o.CustomerWhatsApp,
 		CustomerEmail:   o.CustomerEmail,
 		CustomerAddress: o.CustomerAddress, CustomerCity: o.CustomerCity,
@@ -456,57 +489,78 @@ func (h *OrderHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 			response.Error(w, http.StatusBadRequest, "nominal refund harus > 0")
 			return
 		}
-		// If the order was paid via Midtrans, hit the direct-refund API
-		// FIRST. Only persist the refund record after Midtrans confirms,
-		// otherwise the seller's books would say "refunded" while the
-		// money never moved. For non-Midtrans methods (manual transfer /
-		// QRIS statis / WA confirm) we skip straight to the DB write —
-		// the seller is responsible for moving the money themselves.
-		current, err := h.orders.FindByID(r.Context(), store.ID, id)
-		if err != nil {
+		// Claim the refund in the DB BEFORE any money moves. Every guard
+		// (paid, not already refunded, no refund in flight, amount <= total)
+		// used to live in OrderRepo.Refund, which ran AFTER the Midtrans call —
+		// so a double-submit could move money twice with no DB record at all.
+		claim, cErr := h.orders.ClaimRefund(r.Context(), store.ID, id, req.RefundAmountCents)
+		if errors.Is(cErr, repository.ErrRefundNotAllowed) {
+			response.Error(w, http.StatusConflict,
+				"pesanan tidak bisa direfund — pastikan pembayaran sudah lunas, belum pernah direfund, dan nominal tidak melebihi total")
+			return
+		}
+		if cErr != nil {
+			h.logger.Error("refund: claim", "err", cErr)
 			response.Error(w, http.StatusInternalServerError, "internal error")
 			return
 		}
-		if payments.IsMidtransPaymentMethod(current.PaymentMethod) {
-			gateway, err := h.gateways.Get(r.Context(), store.ID, "midtrans")
-			if errors.Is(err, repository.ErrGatewayNotFound) {
+
+		// For Midtrans-processed methods, call the direct-refund API while
+		// holding the claim; the claim is released on every failure path so
+		// the seller can retry. Non-Midtrans methods (manual transfer / QRIS
+		// statis / WA confirm) go straight to the DB write — the seller moves
+		// the money themselves.
+		if payments.IsMidtransPaymentMethod(claim.PaymentMethod) {
+			gateway, gErr := h.gateways.Get(r.Context(), store.ID, "midtrans")
+			if errors.Is(gErr, repository.ErrGatewayNotFound) {
+				h.releaseRefundClaim(r.Context(), store.ID, id)
 				response.Error(w, http.StatusBadRequest,
 					"konfigurasi Midtrans tidak ditemukan - tidak bisa proses refund otomatis")
 				return
 			}
-			if err != nil {
-				h.logger.Error("refund: load gateway", "err", err)
+			if gErr != nil {
+				h.releaseRefundClaim(r.Context(), store.ID, id)
+				h.logger.Error("refund: load gateway", "err", gErr)
 				response.Error(w, http.StatusInternalServerError, "internal error")
 				return
 			}
 			encryptedKey := gateway.ServerKeyProdEncrypted
 			if len(encryptedKey) == 0 {
+				h.releaseRefundClaim(r.Context(), store.ID, id)
 				response.Error(w, http.StatusBadRequest,
 					"Server Key Midtrans belum diisi - tidak bisa proses refund otomatis")
 				return
 			}
-			keyBytes, err := h.encryptor.Decrypt(encryptedKey)
-			if err != nil {
-				h.logger.Error("refund: decrypt server key", "err", err)
+			keyBytes, dErr := h.encryptor.Decrypt(encryptedKey)
+			if dErr != nil {
+				h.releaseRefundClaim(r.Context(), store.ID, id)
+				h.logger.Error("refund: decrypt server key", "err", dErr)
 				response.Error(w, http.StatusInternalServerError, "internal error")
 				return
 			}
-			refundKey := fmt.Sprintf("rfd-%s-%d", current.OrderNumber, time.Now().Unix())
-			if _, err := h.midtrans.Refund(payments.RefundInput{
-				OrderNumber: current.OrderNumber,
+			// Deterministic key: a retry of the SAME refund is the same refund
+			// to Midtrans and is deduplicated on their side. The old
+			// timestamp-based key made every retry a fresh disbursement.
+			refundKey := fmt.Sprintf("rfd-%s-%d", claim.OrderNumber, req.RefundAmountCents)
+			if _, mErr := h.midtrans.Refund(payments.RefundInput{
+				OrderNumber: claim.OrderNumber,
 				AmountCents: req.RefundAmountCents,
 				Reason:      req.RefundReason,
 				RefundKey:   refundKey,
 				ServerKey:   string(keyBytes),
-			}); err != nil {
+			}); mErr != nil {
+				h.releaseRefundClaim(r.Context(), store.ID, id)
 				h.logger.Warn("midtrans refund failed",
-					"err", err, "order", current.OrderNumber)
+					"err", mErr, "order", claim.OrderNumber)
 				response.Error(w, http.StatusBadGateway,
-					"Midtrans menolak refund: "+err.Error())
+					"Midtrans menolak refund: "+mErr.Error())
 				return
 			}
 		}
 		actionErr = h.orders.Refund(r.Context(), store.ID, id, req.RefundAmountCents, req.RefundReason)
+		if actionErr != nil {
+			h.releaseRefundClaim(r.Context(), store.ID, id)
+		}
 	default:
 		response.Error(w, http.StatusBadRequest, "action tidak dikenal")
 		return
@@ -516,8 +570,13 @@ func (h *OrderHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusBadRequest, "transisi status tidak valid untuk pesanan ini")
 		return
 	}
+	if errors.Is(actionErr, repository.ErrMarkPaidNotAllowed) {
+		response.Error(w, http.StatusConflict,
+			"pesanan ini tidak bisa ditandai lunas — pesanan sudah dibatalkan atau sudah direfund. Buat pesanan baru kalau pembeli benar-benar membayar.")
+		return
+	}
 	if errors.Is(actionErr, repository.ErrRefundNotAllowed) {
-		response.Error(w, http.StatusBadRequest, "pesanan tidak bisa direfund (cek status pembayaran & nominal)")
+		response.Error(w, http.StatusConflict, "pesanan tidak bisa direfund (cek status pembayaran & nominal)")
 		return
 	}
 	if actionErr != nil {
@@ -578,6 +637,15 @@ func (h *OrderHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 		orderDTO.CustomFields = cf
 	}
 	response.JSON(w, http.StatusOK, map[string]any{"order": orderDTO})
+}
+
+// releaseRefundClaim undoes ClaimRefund so the seller can retry after the
+// gateway (or the DB write) rejected the refund. Best-effort: a stuck claim
+// only blocks further refunds on that one order, which is the safe direction.
+func (h *OrderHandler) releaseRefundClaim(ctx context.Context, storeID, orderID uuid.UUID) {
+	if err := h.orders.ReleaseRefundClaim(ctx, storeID, orderID); err != nil {
+		h.logger.Error("refund: release claim", "err", err, "order_id", orderID)
+	}
 }
 
 // statusVerbBahasa maps the wire action verb to a human Bahasa phrase
@@ -869,6 +937,17 @@ func (h *OrderHandler) GeneratePaymentLink(w http.ResponseWriter, r *http.Reques
 	}
 	if order.PaymentStatus == "paid" {
 		response.Error(w, http.StatusBadRequest, "pesanan sudah lunas")
+		return
+	}
+
+	// Snap rejects a re-used order_id with HTTP 400, which surfaced as a
+	// misleading "Midtrans menolak request" 502 to the seller. The doc comment
+	// always promised the cached URL — now it actually returns it.
+	if strings.TrimSpace(order.PaymentURL) != "" {
+		response.JSON(w, http.StatusOK, map[string]any{
+			"payment_url": order.PaymentURL,
+			"cached":      true,
+		})
 		return
 	}
 

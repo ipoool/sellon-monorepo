@@ -22,11 +22,11 @@ import (
 
 type BannerHandler struct {
 	banners *repository.BannerRepo
-	storage *storage.SupabaseClient
+	storage storage.Client
 	logger  *slog.Logger
 }
 
-func NewBannerHandler(banners *repository.BannerRepo, storageCli *storage.SupabaseClient, logger *slog.Logger) *BannerHandler {
+func NewBannerHandler(banners *repository.BannerRepo, storageCli storage.Client, logger *slog.Logger) *BannerHandler {
 	return &BannerHandler{banners: banners, storage: storageCli, logger: logger}
 }
 

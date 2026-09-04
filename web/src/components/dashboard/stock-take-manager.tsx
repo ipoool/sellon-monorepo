@@ -22,9 +22,45 @@ export function StockTakeManager({ initial }: { initial: StockTake[] }) {
   const [sheetId, setSheetId] = useState<string | null>(null);
   const [items, setItems] = useState<SheetItem[]>([]);
 
+  // Loads a draft sheet into the counting UI.
+  const openSheet = async (id: string) => {
+    const detail = await fetch(`${apiBase}/api/v1/stock-takes/${id}`, {
+      credentials: "include",
+    });
+    if (!detail.ok) throw new Error("Gagal memuat lembar opname");
+    const data = await detail.json();
+    setSheetId(id);
+    setItems(
+      (data.items as StockTakeItem[]).map((it) => ({
+        ...it,
+        counted: String(it.counted_qty ?? it.system_qty),
+      })),
+    );
+  };
+
+  const resume = async (id: string) => {
+    setBusy(true);
+    try {
+      await openSheet(id);
+    } catch {
+      showError("Gagal membuka lembar opname");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const start = async () => {
     setBusy(true);
     try {
+      // "Mulai Opname" used to POST a new draft every time, and closing the
+      // sheet only cleared local state — so each mis-click left another
+      // permanent "Draft" row in Riwayat with no way to reopen or remove it.
+      // Reuse the newest existing draft instead.
+      const existingDraft = initial.find((st) => st.status !== "posted");
+      if (existingDraft) {
+        await openSheet(existingDraft.id);
+        return;
+      }
       const res = await fetch(`${apiBase}/api/v1/stock-takes`, {
         method: "POST",
         credentials: "include",
@@ -40,12 +76,7 @@ export function StockTakeManager({ initial }: { initial: StockTake[] }) {
         return;
       }
       const { id } = await res.json();
-      const detail = await fetch(`${apiBase}/api/v1/stock-takes/${id}`, { credentials: "include" });
-      const data = await detail.json();
-      setSheetId(id);
-      setItems(
-        (data.items as StockTakeItem[]).map((it) => ({ ...it, counted: String(it.system_qty) })),
-      );
+      await openSheet(id);
     } catch {
       showError("Gagal memulai opname");
     } finally {
@@ -103,7 +134,8 @@ export function StockTakeManager({ initial }: { initial: StockTake[] }) {
               setItems([]);
             }}
             className="rounded-md p-1.5 text-neutral-500 hover:bg-neutral-100"
-            aria-label="Batal"
+            aria-label="Tutup — draft tersimpan, bisa dilanjutkan dari Riwayat"
+            title="Tutup — draft tersimpan, bisa dilanjutkan dari Riwayat"
           >
             <X className="size-4" aria-hidden />
           </button>
@@ -195,6 +227,7 @@ export function StockTakeManager({ initial }: { initial: StockTake[] }) {
                 <th className="px-4 py-3 text-left font-medium">Tanggal</th>
                 <th className="px-4 py-3 text-right font-medium">Bahan</th>
                 <th className="px-4 py-3 text-left font-medium">Status</th>
+                <th className="px-4 py-3 text-right font-medium">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-100">
@@ -206,6 +239,18 @@ export function StockTakeManager({ initial }: { initial: StockTake[] }) {
                     <Badge variant={st.status === "posted" ? "success" : "default"}>
                       {st.status === "posted" ? "Diposting" : "Draft"}
                     </Badge>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    {st.status !== "posted" && (
+                      <button
+                        type="button"
+                        onClick={() => resume(st.id)}
+                        disabled={busy}
+                        className="text-sm font-medium text-brand-600 hover:text-brand-700 disabled:opacity-50"
+                      >
+                        Lanjutkan
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}

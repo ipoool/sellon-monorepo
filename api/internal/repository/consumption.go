@@ -148,3 +148,65 @@ func applyConsumptionTx(ctx context.Context, tx pgx.Tx, storeID, orderID, orderI
 	}
 	return nil
 }
+
+// reverseConsumptionTx undoes every 'consume' movement recorded for an order:
+// material stock is restored and a compensating 'restore' ledger row is
+// written per consume row (same unit-cost snapshot, positive quantity, linked
+// to the same order/item so the ledger nets to zero). Idempotent — consume
+// rows that already have a matching restore row are skipped. Runs inside the
+// caller's cancel/void/return transaction. Soft like applyConsumptionTx: a
+// missing recipe is not an error.
+func reverseConsumptionTx(ctx context.Context, tx pgx.Tx, storeID, orderID uuid.UUID) error {
+	rows, err := tx.Query(ctx, `
+		SELECT c.material_id, -c.quantity, c.unit_cost_cents, c.order_item_id
+		FROM material_movements c
+		WHERE c.store_id = $1 AND c.order_id = $2 AND c.movement_type = 'consume'
+		  AND NOT EXISTS (
+		      SELECT 1 FROM material_movements r
+		      WHERE r.store_id = c.store_id AND r.order_id = c.order_id
+		        AND r.material_id = c.material_id
+		        AND r.order_item_id IS NOT DISTINCT FROM c.order_item_id
+		        AND r.movement_type = 'restore'
+		  )
+	`, storeID, orderID)
+	if err != nil {
+		return err
+	}
+	type restoreRow struct {
+		materialID  uuid.UUID
+		qty         int64
+		cost        int64
+		orderItemID *uuid.UUID
+	}
+	var todo []restoreRow
+	for rows.Next() {
+		var r restoreRow
+		if err := rows.Scan(&r.materialID, &r.qty, &r.cost, &r.orderItemID); err != nil {
+			rows.Close()
+			return err
+		}
+		todo = append(todo, r)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, r := range todo {
+		if r.qty <= 0 {
+			continue
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE materials SET stock = stock + $2, updated_at = now() WHERE id = $1 AND store_id = $3
+		`, r.materialID, r.qty, storeID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO material_movements
+			    (store_id, material_id, movement_type, quantity, unit_cost_cents, order_id, order_item_id)
+			VALUES ($1, $2, 'restore', $3, $4, $5, $6)
+		`, storeID, r.materialID, r.qty, r.cost, orderID, r.orderItemID); err != nil {
+			return err
+		}
+	}
+	return nil
+}

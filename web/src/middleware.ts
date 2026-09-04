@@ -8,27 +8,24 @@ const ROOT_HOST = new URL(siteUrl).host; // "sellon.id" or "localhost:3100"
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
-// Paths that must never be rewritten, even when the request arrives on a
-// custom domain.  Protects the dashboard from sellers who accidentally point
-// their apex domain at the platform.
-const PASSTHROUGH_PREFIXES = [
-  "/api/",
-  "/_next/",
-  "/favicon",
-  "/robots.txt",
-  "/sitemap",
-  "/.well-known/",
-  "/login",
-  "/setup",
-  "/settings",
-  "/dashboard",
-  "/orders",
-  "/customers",
-  "/products",
-  "/promos",
-  "/reports",
-  "/platform",
-];
+// Allow-list of the storefront paths a custom domain serves from ITS OWN root
+// — the exact set of routes under web/src/app/[slug]. Everything else (the
+// dashboard, /platform, /pos, /kds, /download, /t, /q, /blog, /help, static
+// assets, AND the `/{slug}/…` hrefs the storefront components themselves emit)
+// passes through untouched.
+//
+// This is deliberately an allow-list rather than the old deny-list of
+// dashboard prefixes: the deny-list had to enumerate every app route and went
+// stale as routes were added, 404-ing them on seller domains. It also rewrote
+// `/{slug}/cart` → `/{slug}/{slug}/cart`, so every internal storefront link
+// 404'd on a custom domain.
+const STOREFRONT_EXACT_PATHS = new Set(["/", "/cart", "/checkout"]);
+const STOREFRONT_PREFIXES = ["/product/", "/order/", "/course/"];
+
+function isStorefrontPath(pathname: string): boolean {
+  if (STOREFRONT_EXACT_PATHS.has(pathname)) return true;
+  return STOREFRONT_PREFIXES.some((p) => pathname.startsWith(p));
+}
 
 async function resolveDomainToSlug(host: string): Promise<string | null> {
   try {
@@ -60,8 +57,10 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Pass-through: dashboard/app paths that must never be rewritten.
-  if (PASSTHROUGH_PREFIXES.some((p) => pathname.startsWith(p))) {
+  // Pass-through: anything that isn't a bare storefront path. Notably this
+  // covers `/{slug}/…` links, which already resolve to the [slug] route on
+  // any host and must NOT get a second slug prefix.
+  if (!isStorefrontPath(pathname)) {
     return NextResponse.next();
   }
 
@@ -69,6 +68,11 @@ export async function middleware(request: NextRequest) {
   const slug = await resolveDomainToSlug(hostNormalized);
   if (!slug) {
     // Unknown domain — let Next.js 404 naturally.
+    return NextResponse.next();
+  }
+
+  // Defensive: never double-prefix (e.g. a store whose slug is "cart").
+  if (pathname === `/${slug}` || pathname.startsWith(`/${slug}/`)) {
     return NextResponse.next();
   }
 

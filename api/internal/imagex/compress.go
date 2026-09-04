@@ -2,14 +2,14 @@
 // Target: file akhir <= 2 MB tanpa kualitas visible drop yang kasar.
 //
 // Strategi:
-//   1. Decode (jpeg/png/webp/gif).
-//   2. Kalau lebar > MaxWidth, resize CatmullRom (high-quality kernel)
-//      ke MaxWidth sambil pertahankan aspect ratio.
-//   3. Kalau gambar punya alpha (PNG/WebP/GIF), flatten ke background
-//      putih supaya konversi ke JPEG tidak ada artefak hitam.
-//   4. Re-encode sebagai JPEG, mulai quality 90; turunkan progressively
-//      (85, 80, 75, ...) sampai output <= 2 MB. Quality 60 = lantai
-//      bawah; di bawah itu jelek terlihat — terima saja size apa adanya.
+//  1. Decode (jpeg/png/webp/gif).
+//  2. Kalau lebar > MaxWidth, resize CatmullRom (high-quality kernel)
+//     ke MaxWidth sambil pertahankan aspect ratio.
+//  3. Kalau gambar punya alpha (PNG/WebP/GIF), flatten ke background
+//     putih supaya konversi ke JPEG tidak ada artefak hitam.
+//  4. Re-encode sebagai JPEG, mulai quality 90; turunkan progressively
+//     (85, 80, 75, ...) sampai output <= 2 MB. Quality 60 = lantai
+//     bawah; di bawah itu jelek terlihat — terima saja size apa adanya.
 //
 // Hanya file > 2 MB ATAU non-JPEG yang masuk pipeline. JPEG < 2 MB
 // di-skip karena re-encode lossy → bikin worse, bukan better.
@@ -22,9 +22,9 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
-	_ "image/gif"  // register GIF decoder (single-frame OK)
+	_ "image/gif" // register GIF decoder (single-frame OK)
 	"image/jpeg"
-	_ "image/png"  // register PNG decoder
+	_ "image/png" // register PNG decoder
 
 	xdraw "golang.org/x/image/draw"
 	_ "golang.org/x/image/webp" // register WebP decoder (decode-only)
@@ -56,6 +56,11 @@ const (
 func CompressProductImage(body []byte, contentType string) ([]byte, string, error) {
 	if len(body) <= TargetBytes && contentType == "image/jpeg" {
 		return body, contentType, nil
+	}
+
+	// Guard the pixel buffer allocation before decoding (see ValidateDimensions).
+	if err := ValidateDimensions(body); err != nil {
+		return nil, "", err
 	}
 
 	img, _, err := image.Decode(bytes.NewReader(body))
@@ -119,4 +124,44 @@ func needsFlatten(contentType string, img image.Image) bool {
 		}
 	}
 	return false
+}
+
+// === Decompression-bomb guard ===
+//
+// A tiny PNG can declare enormous dimensions (a ~2 MB 40000x40000 file is a
+// legal PNG). image.Decode would happily allocate w*h*4 bytes (~6.4 GB there)
+// and OOM-kill the container for every tenant on the box. DecodeConfig only
+// parses the header, so we can reject the file before any pixel buffer exists.
+const (
+	// MaxPixels caps total pixel count (~30 MP — well above any real product
+	// photo; a 48 MP phone shot is ~8000x6000 = 48 MP, but those arrive
+	// already-JPEG and get resized down, so 30 MP is a generous ceiling for
+	// what we're willing to decode).
+	MaxPixels = 30_000_000
+	// MaxSide rejects absurd single-axis images (panoramas / crafted bombs)
+	// even when the total pixel count stays under MaxPixels.
+	MaxSide = 12000
+)
+
+// ErrImageTooLarge signals a header-declared resolution we refuse to decode.
+var ErrImageTooLarge = errors.New("resolusi gambar terlalu besar")
+
+// ValidateDimensions parses only the image header and rejects anything whose
+// declared resolution would blow up memory on decode. Callers must run this
+// BEFORE image.Decode (directly or via CompressProductImage).
+func ValidateDimensions(body []byte) error {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("decode config: %w", err)
+	}
+	if cfg.Width <= 0 || cfg.Height <= 0 {
+		return errors.New("dimensi gambar tidak valid")
+	}
+	if cfg.Width > MaxSide || cfg.Height > MaxSide {
+		return ErrImageTooLarge
+	}
+	if int64(cfg.Width)*int64(cfg.Height) > MaxPixels {
+		return ErrImageTooLarge
+	}
+	return nil
 }

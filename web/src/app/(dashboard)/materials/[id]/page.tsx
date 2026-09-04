@@ -11,20 +11,20 @@ import { Button } from "@/components/ui/button";
 import { MaterialMovementChart } from "@/components/dashboard/material-movement-chart";
 import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
-import { formatRupiah } from "@/lib/format";
+import { formatRupiah, daysAgoWIB, todayWIB } from "@/lib/format";
 import type { Material, MaterialMovement, MaterialMovementPoint } from "@/lib/types";
 
 export const metadata = { title: "Riwayat Bahan — SellOn" };
 
 const PAGE_SIZE = 30;
 
+// WIB, not UTC — these run server-side in a UTC container, so before 07:00
+// WIB a UTC "today" is the seller's yesterday.
 function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+  return todayWIB();
 }
 function thirtyDaysAgoStr() {
-  const d = new Date();
-  d.setDate(d.getDate() - 29);
-  return d.toISOString().slice(0, 10);
+  return daysAgoWIB(29);
 }
 
 function formatDateTime(iso: string) {

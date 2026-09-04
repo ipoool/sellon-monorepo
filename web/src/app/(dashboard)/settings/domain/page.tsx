@@ -23,7 +23,22 @@ export default async function DomainSettingsPage() {
   const cnameTarget =
     process.env.NEXT_PUBLIC_CNAME_TARGET ?? "cname.sellon.id";
 
+  // Per-store ownership proof (TXT at _sellon-verify.<domain>). The API
+  // derives it from the store id, so it only exists once a domain is set.
+  // Read via a local shape instead of widening the shared `Store` type,
+  // which is owned elsewhere.
+  const domainProof = store as Store & {
+    domain_verify_txt_name?: string;
+    domain_verify_txt_value?: string;
+  };
+
   return (
-    <CustomDomainForm initial={store} isBisnis={isBisnis} cnameTarget={cnameTarget} />
+    <CustomDomainForm
+      initial={store}
+      isBisnis={isBisnis}
+      cnameTarget={cnameTarget}
+      verifyTxtName={domainProof.domain_verify_txt_name ?? ""}
+      verifyTxtValue={domainProof.domain_verify_txt_value ?? ""}
+    />
   );
 }

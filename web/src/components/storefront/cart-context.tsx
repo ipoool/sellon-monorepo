@@ -38,6 +38,18 @@ type CartState = {
   items: CartItem[];
 };
 
+// One line whose snapshot no longer matches the seller's catalog. Surfaced to
+// the buyer (cart + checkout) so a silent re-price can't happen between "add to
+// cart" and the server-computed order total.
+export type CartNotice = {
+  key: string;
+  product_name: string;
+  kind: "price" | "stock" | "gone";
+  old_price_cents: number;
+  new_price_cents: number;
+  available_stock: number;
+};
+
 type CartContextValue = {
   items: CartItem[];
   count: number;
@@ -46,6 +58,8 @@ type CartContextValue = {
   hasPhysical: boolean;
   isAllDigital: boolean;
   isHydrated: boolean;
+  notices: CartNotice[];
+  dismissNotices: () => void;
   addItem: (item: CartItem) => void;
   setQty: (key: string, qty: number) => void;
   removeItem: (key: string) => void;
@@ -65,6 +79,16 @@ function itemKey(
     .join(",");
   return `${it.product_id}:${it.variant_id ?? ""}:${opts}`;
 }
+
+// Subset of the public storefront payload the reconcile needs.
+type FreshProduct = {
+  id?: string;
+  product_type?: CartItem["product_type"];
+  price_cents?: number;
+  stock?: number;
+  track_stock?: boolean;
+  variants?: Array<{ id: string; name: string; price_cents: number; stock: number }>;
+};
 
 type Props = {
   storeSlug: string;
@@ -106,45 +130,142 @@ export function CartProvider({ storeSlug, children }: Props) {
     }
   }, [state, storeSlug]);
 
-  // Reconcile the cart's denormalized product_type against the authoritative
-  // server value once after hydration. The cart is a localStorage snapshot, so
-  // a product converted physical→digital after being added (or any stale entry)
-  // could otherwise drive the wrong checkout flow — e.g. an all-digital cart
-  // still asking for a shipping address. One-shot, fail-safe (no-op on error;
-  // unchanged if every type already matches, so no spurious persist).
+  // Reconcile the cart against the authoritative catalog once after hydration.
+  // The cart is a localStorage snapshot: product_type, unit price, stock and
+  // variant availability all go stale. The server silently recomputes the
+  // order from the DB at checkout, so an un-reconciled line means the buyer
+  // reviews Rp 50.000 and gets charged Rp 75.000. One-shot, fail-safe (no-op
+  // on error; unchanged when everything matches, so no spurious persist).
+  const [notices, setNotices] = useState<CartNotice[]>([]);
   const reconciledRef = useRef(false);
+  // Latest lines, readable from the async reconcile below without adding a
+  // dependency that would abort the in-flight fetch on every cart change.
+  const itemsRef = useRef(state.items);
+  useEffect(() => {
+    itemsRef.current = state.items;
+  }, [state.items]);
   useEffect(() => {
     if (!isHydrated || reconciledRef.current || state.items.length === 0) return;
     reconciledRef.current = true;
     const ctrl = new AbortController();
     void fetch(`${apiBase}/api/v1/storefront/${storeSlug}`, { signal: ctrl.signal })
       .then((r) => (r.ok ? r.json() : null))
-      .then((data: { products?: Array<{ id?: string; product_type?: CartItem["product_type"] }> } | null) => {
+      .then((data: { products?: FreshProduct[] } | null) => {
         if (!data || !Array.isArray(data.products)) return;
-        const typeById = new Map<string, CartItem["product_type"]>();
+        const byId = new Map<string, FreshProduct>();
         for (const p of data.products) {
-          if (p && typeof p.id === "string" && p.product_type) {
-            typeById.set(p.id, p.product_type);
-          }
+          if (p && typeof p.id === "string") byId.set(p.id, p);
         }
-        setState((prev) => {
-          let changed = false;
-          const items = prev.items.map((it) => {
-            const fresh = typeById.get(it.product_id);
-            if (fresh && fresh !== it.product_type) {
+
+        // Diff OUTSIDE the state updater (updaters must stay pure — React
+        // re-invokes them), then apply the patches by line key.
+        const found: CartNotice[] = [];
+        const patches = new Map<string, Partial<CartItem>>();
+        for (const it of itemsRef.current) {
+          const key = itemKey(it);
+          const fresh = byId.get(it.product_id);
+          if (!fresh) {
+            // Delisted/unpublished — flag it but keep the line so the buyer
+            // decides (the server rejects it at checkout anyway).
+            found.push({
+              key,
+              product_name: it.product_name,
+              kind: "gone",
+              old_price_cents: it.unit_price_cents,
+              new_price_cents: it.unit_price_cents,
+              available_stock: 0,
+            });
+            continue;
+          }
+          const patch: Partial<CartItem> = {};
+          const type = fresh.product_type ?? it.product_type;
+          if (type !== it.product_type) patch.product_type = type;
+
+          // Price: the variant's price when the line has one, else the
+          // product's, plus the modifier deltas already captured on the line.
+          const variant = it.variant_id
+            ? (fresh.variants ?? []).find((v) => v.id === it.variant_id)
+            : undefined;
+          const variantMissing = !!it.variant_id && !!fresh.variants && !variant;
+          const base = variant ? variant.price_cents : fresh.price_cents;
+          const optionDelta = (it.selected_options ?? []).reduce(
+            (sum, o) => sum + (o.price_delta_cents ?? 0),
+            0,
+          );
+          // Only re-price when the payload carries the numbers this line needs
+          // (a variant line with no variants array is left alone rather than
+          // silently re-priced to the parent product's price).
+          const canReprice =
+            typeof base === "number" && !(it.variant_id && !variant);
+          const freshUnit = canReprice ? base + optionDelta : it.unit_price_cents;
+
+          // Stock: 0 means "unlimited" by cart convention — only tracked
+          // products (physical, or a capped digital) carry a real cap.
+          const tracked = fresh.track_stock ?? type === "physical";
+          const freshStock = tracked
+            ? Math.max(0, variant ? variant.stock : fresh.stock ?? 0)
+            : 0;
+
+          if (freshUnit !== it.unit_price_cents) {
+            patch.unit_price_cents = freshUnit;
+            found.push({
+              key,
+              product_name: it.product_name,
+              kind: "price",
+              old_price_cents: it.unit_price_cents,
+              new_price_cents: freshUnit,
+              available_stock: freshStock,
+            });
+          }
+          if (freshStock !== it.available_stock) {
+            patch.available_stock = freshStock;
+          }
+          if (variantMissing || (tracked && freshStock === 0)) {
+            found.push({
+              key,
+              product_name: it.product_name,
+              kind: variantMissing ? "gone" : "stock",
+              old_price_cents: it.unit_price_cents,
+              new_price_cents: freshUnit,
+              available_stock: freshStock,
+            });
+          } else if (tracked && it.qty > freshStock) {
+            // Snapshot qty above the remaining stock — clamp now instead of
+            // failing on the last step of checkout.
+            patch.qty = freshStock;
+            found.push({
+              key,
+              product_name: it.product_name,
+              kind: "stock",
+              old_price_cents: it.unit_price_cents,
+              new_price_cents: freshUnit,
+              available_stock: freshStock,
+            });
+          }
+          if (Object.keys(patch).length > 0) patches.set(key, patch);
+        }
+
+        if (patches.size > 0) {
+          setState((prev) => {
+            let changed = false;
+            const items = prev.items.map((it) => {
+              const patch = patches.get(itemKey(it));
+              if (!patch) return it;
               changed = true;
-              return { ...it, product_type: fresh };
-            }
-            return it;
+              return { ...it, ...patch };
+            });
+            return changed ? { items } : prev;
           });
-          return changed ? { items } : prev;
-        });
+        }
+        if (found.length > 0) setNotices(found);
       })
       .catch(() => {
         // Network/abort — keep the snapshot as-is (no worse than before).
       });
     return () => ctrl.abort();
   }, [isHydrated, storeSlug, state.items.length]);
+
+  const dismissNotices = useCallback(() => setNotices([]), []);
 
   const addItem = useCallback((item: CartItem) => {
     setState((prev) => {
@@ -163,7 +284,15 @@ export function CartProvider({ storeSlug, children }: Props) {
           itemKey(x) === k ? { ...x, qty: newQty } : x,
         );
       } else {
-        nextItems = [...prev.items, item];
+        // New line — clamp to the cap too (available_stock 0 = unlimited).
+        // Without this, a variant switch after the qty stepper was raised
+        // could put an impossible quantity in the cart that only fails on
+        // the last step of checkout.
+        const cap = item.available_stock;
+        nextItems = [
+          ...prev.items,
+          cap > 0 ? { ...item, qty: Math.max(1, Math.min(item.qty, cap)) } : item,
+        ];
       }
       return { items: nextItems };
     });
@@ -192,6 +321,7 @@ export function CartProvider({ storeSlug, children }: Props) {
 
   const clear = useCallback(() => {
     setState({ items: [] });
+    setNotices([]);
   }, []);
 
   const value = useMemo<CartContextValue>(() => {
@@ -210,12 +340,14 @@ export function CartProvider({ storeSlug, children }: Props) {
       hasPhysical,
       isAllDigital: hasDigital && !hasPhysical,
       isHydrated,
+      notices,
+      dismissNotices,
       addItem,
       setQty,
       removeItem,
       clear,
     };
-  }, [state, isHydrated, addItem, setQty, removeItem, clear]);
+  }, [state, isHydrated, notices, dismissNotices, addItem, setQty, removeItem, clear]);
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
 }

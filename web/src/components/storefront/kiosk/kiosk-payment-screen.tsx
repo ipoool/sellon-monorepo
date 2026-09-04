@@ -16,7 +16,7 @@ const CONFIRM_RESET_MS = 25_000;
 const PAY_ABANDON_MS = 120_000;
 const POLL_MS = 3_000;
 
-type Stage = "creating" | "pay" | "confirmed" | "error";
+type Stage = "creating" | "pay" | "confirmed" | "abandoned" | "error";
 type Method = "midtrans" | "qris" | "cashier";
 
 type CreatedOrder = { order_number: string; queue_number: number | null; total_cents: number };
@@ -65,6 +65,18 @@ export function KioskPaymentScreen({
   const [resolvedMethod, setResolvedMethod] = useState<Method>(method);
   const [countdown, setCountdown] = useState(Math.round(CONFIRM_RESET_MS / 1000));
   const createdRef = useRef(false);
+  // One key per checkout attempt, reused by the retry button so a re-POST after
+  // a network error can't create a second order for the same cart. The public
+  // storefront CreateOrder does not honour it yet (only the POS path does) —
+  // harmless extra field until it does; the retry guard below is the real
+  // protection in the meantime.
+  const idempotencyKeyRef = useRef<string | null>(null);
+  const idempotencyKey = () => {
+    if (idempotencyKeyRef.current == null) {
+      idempotencyKeyRef.current = crypto.randomUUID();
+    }
+    return idempotencyKeyRef.current;
+  };
 
   // Create the order once, then branch into the right payment presentation.
   // createdRef is the single source of dedupe (covers React Strict-Mode's
@@ -83,6 +95,7 @@ export function KioskPaymentScreen({
           body: JSON.stringify({
             source: "kiosk",
             payment_method: methodCode(method),
+            idempotency_key: idempotencyKey(),
             items: items.map((it) => ({
               product_id: it.product_id,
               variant_id: it.variant_id,
@@ -154,8 +167,12 @@ export function KioskPaymentScreen({
           `${apiBase}/api/v1/storefront/${slug}/orders/${order.order_number}`,
         );
         if (!res.ok || !alive) return;
+        // GET /storefront/{slug}/orders/{number} answers
+        // { store, order, bank_accounts } — payment_status lives on `order`.
+        // Reading data.payment_status was always undefined, so a paid order
+        // was never detected and the abandon timer eventually fired.
         const data = await res.json();
-        if (data.payment_status === "paid") {
+        if (data.order?.payment_status === "paid") {
           clearInterval(poll);
           setStage("confirmed");
         }
@@ -169,18 +186,24 @@ export function KioskPaymentScreen({
     };
   }, [stage, method, order, slug]);
 
-  // Abandon timer on the pay screen (buyer walked away).
+  // Abandon timer on the pay screen (buyer walked away). The order already
+  // EXISTS at this point, so dropping back into the cart invited a second
+  // order (and a second payment) for the same items — show the created order
+  // and let the reset clear the cart instead.
   useEffect(() => {
     if (stage !== "pay") return;
-    const t = setTimeout(onCancel, PAY_ABANDON_MS);
+    const t = setTimeout(() => {
+      if (order) setStage("abandoned");
+      else onCancel();
+    }, PAY_ABANDON_MS);
     return () => clearTimeout(t);
-  }, [stage, onCancel]);
+  }, [stage, order, onCancel]);
 
   // Auto-reset after a confirmation so the kiosk is ready for the next customer,
   // with a visible countdown. The component remounts per order, so `countdown`
   // starts fresh each time and the interval only runs while confirmed.
   useEffect(() => {
-    if (stage !== "confirmed") return;
+    if (stage !== "confirmed" && stage !== "abandoned") return;
     const tick = setInterval(() => setCountdown((c) => Math.max(0, c - 1)), 1000);
     const done = setTimeout(onSuccess, CONFIRM_RESET_MS);
     return () => {
@@ -219,8 +242,16 @@ export function KioskPaymentScreen({
   };
 
   const retry = () => {
-    createdRef.current = false;
     setErrMsg("");
+    // The order may already have been created (the failure can happen after
+    // the POST — e.g. the follow-up payment-link/order fetch). Re-POSTing then
+    // would duplicate it, so recover the existing order instead.
+    if (order) {
+      setResolvedMethod("cashier");
+      setStage("confirmed");
+      return;
+    }
+    createdRef.current = false;
     setStage("creating");
     setAttempt((a) => a + 1);
   };
@@ -340,6 +371,41 @@ export function KioskPaymentScreen({
             >
               Batal
             </button>
+          </div>
+        )}
+
+        {stage === "abandoned" && order && (
+          <div className="flex flex-col items-center gap-5">
+            <AlertCircle className="size-14 text-amber-500" aria-hidden />
+            <p className="text-lg font-semibold text-neutral-900">
+              Pesanan sudah dibuat
+            </p>
+            {order.queue_number != null ? (
+              <div className="rounded-3xl bg-amber-50 px-12 py-8 ring-2 ring-amber-200">
+                <p className="text-sm font-medium text-amber-700">Nomor Antrian</p>
+                <p className="font-display text-7xl font-bold tabular-nums text-amber-600">
+                  {order.queue_number}
+                </p>
+              </div>
+            ) : (
+              <p className="font-display text-3xl font-bold text-neutral-900">
+                {order.order_number}
+              </p>
+            )}
+            <p className="max-w-xs text-sm text-neutral-500">
+              Pembayaran belum kami terima. Tunjukkan nomor ini ke kasir untuk
+              menyelesaikan pembayaran — jangan pesan ulang biar tidak dobel.
+            </p>
+            <button
+              type="button"
+              onClick={onSuccess}
+              className="rounded-2xl bg-brand-600 px-8 py-4 text-base font-semibold text-white hover:bg-brand-700"
+            >
+              Selesai
+            </button>
+            <p className="text-sm text-neutral-400" aria-live="polite">
+              Kembali ke menu dalam {countdown} detik
+            </p>
           </div>
         )}
 

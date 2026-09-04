@@ -528,6 +528,45 @@ func (r *StoreRepo) SetDomainStatus(ctx context.Context, storeID uuid.UUID, stat
 	return &s, nil
 }
 
+// suspendCustomDomainSQL demotes an ACTIVE custom domain back to 'pending'.
+// Shared by StoreRepo.SuspendCustomDomain and the subscription lazy-expiry
+// path (same package, same pool) so both revoke the domain identically.
+const suspendCustomDomainSQL = `
+	UPDATE stores
+	SET domain_status      = 'pending',
+	    domain_verified_at = NULL,
+	    updated_at         = now()
+	WHERE id = $1 AND domain_status = 'active'`
+
+// SuspendCustomDomain revokes a store's ACTIVE custom domain, dropping it
+// back to 'pending'. Custom domains are a Bisnis-only feature, so this is
+// called whenever a store loses that plan (lazy expiry, admin grant to
+// free) — otherwise the domain keeps serving the storefront (with auto-TLS)
+// forever. The domain itself is kept so a re-upgrade only needs a re-verify.
+//
+// Returns true when a domain was actually revoked.
+func (r *StoreRepo) SuspendCustomDomain(ctx context.Context, storeID uuid.UUID) (bool, error) {
+	tag, err := r.pool.Exec(ctx, suspendCustomDomainSQL, storeID)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// DomainActiveElsewhere reports whether a DIFFERENT store already holds
+// this domain in the 'active' state. Since migration 0099 the uniqueness
+// constraint only covers active domains — a domain merely reserved by
+// another store (pending/failed) must not block its rightful owner.
+func (r *StoreRepo) DomainActiveElsewhere(ctx context.Context, storeID uuid.UUID, domain string) (bool, error) {
+	var exists bool
+	err := r.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM stores
+			WHERE custom_domain = $2 AND domain_status = 'active' AND id <> $1
+		)`, storeID, domain).Scan(&exists)
+	return exists, err
+}
+
 // ClearCustomDomain removes the custom domain and resets status to none.
 func (r *StoreRepo) ClearCustomDomain(ctx context.Context, storeID uuid.UUID) (*Store, error) {
 	q := `

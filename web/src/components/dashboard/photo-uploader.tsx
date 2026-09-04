@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { showError, showSuccess } from "@/lib/toast";
 import { Upload, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { uploadProductPhoto } from "@/lib/supabase";
+import { uploadProductPhoto } from "@/lib/uploads";
 
 type Props = {
   onUploaded: (url: string) => void;

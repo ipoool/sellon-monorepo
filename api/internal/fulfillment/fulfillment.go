@@ -7,6 +7,7 @@ package fulfillment
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"time"
@@ -118,6 +119,14 @@ func (f *Fulfiller) OnPaymentPaid(ctx context.Context, storeID, orderID uuid.UUI
 			StoreID:     storeID,
 			ExpiresAt:   accessExpiry(it.AccessValidityValue, it.AccessValidityUnit),
 		})
+		if errors.Is(err, repository.ErrDownloadTokenExists) {
+			// Already minted by an earlier paid transition (replayed webhook,
+			// or mark-paid after the webhook). Nothing new to deliver — leave
+			// it out of `tokens` so we don't re-send the delivery email.
+			f.logger.Info("fulfillment: token already issued, skipping",
+				"order_id", orderID, "order_item_id", it.ID)
+			continue
+		}
 		if err != nil {
 			f.logger.Error("fulfillment: create token",
 				"err", err, "order_id", orderID, "order_item_id", it.ID)

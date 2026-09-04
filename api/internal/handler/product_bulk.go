@@ -25,7 +25,11 @@ import (
 )
 
 const (
-	bulkMaxRows         = 100
+	bulkMaxRows = 100
+	// bulkMaxScanRows bounds how many physical rows we will even read from the
+	// sheet, so trailing blank-row padding can't turn a 100-product cap into a
+	// million-row scan.
+	bulkMaxScanRows     = 5000
 	bulkMaxUploadBytes  = 8 << 20 // 8 MB
 	bulkSheetName       = "Produk"
 	bulkInstructionName = "Petunjuk"
@@ -87,10 +91,10 @@ func (h *ProductHandler) BulkTemplate(w http.ResponseWriter, r *http.Request) {
 			"Keripik singkong renyah dengan bumbu cabai pilihan. Tahan 30 hari.",
 			35000, 50, "active", 500, 25, 18, 5,
 			"https://example.com/keripik-1.jpg", "", "", "", "",
-			"",                       // tanpa varian
-			"8991002123455",          // GTIN
-			"Makanan",                // Kategori
-			"Singkong:200;Cabai:20",  // Resep (bahan baku)
+			"",                      // tanpa varian
+			"8991002123455",         // GTIN
+			"Makanan",               // Kategori
+			"Singkong:200;Cabai:20", // Resep (bahan baku)
 		},
 		{
 			"Sambal Bawang Goreng",
@@ -263,7 +267,13 @@ func (h *ProductHandler) BulkUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	xlsx, err := excelize.OpenReader(bytes.NewReader(raw))
+	// Bound the unzip: an 8 MB xlsx is a zip and can inflate to hundreds of MB
+	// of sheet XML. Without these limits excelize happily materialises all of
+	// it (pinning a core + gigabytes of RAM) before we ever see a row.
+	xlsx, err := excelize.OpenReader(bytes.NewReader(raw), excelize.Options{
+		UnzipSizeLimit:    64 << 20,
+		UnzipXMLSizeLimit: 16 << 20,
+	})
 	if err != nil {
 		h.logger.Warn("xlsx open", "err", err)
 		response.Error(w, http.StatusBadRequest, "file Excel tidak valid")
@@ -277,27 +287,56 @@ func (h *ProductHandler) BulkUpload(w http.ResponseWriter, r *http.Request) {
 		sheetName = xlsx.GetSheetList()[0]
 	}
 
-	rows, err := xlsx.GetRows(sheetName)
+	// Stream rows instead of GetRows(): the old code materialised the WHOLE
+	// sheet and only then checked the 100-row cap, so a padded sheet was fully
+	// allocated before being rejected. Now we bail as soon as the cap is
+	// exceeded (and hard-stop scanning at bulkMaxScanRows so blank-row padding
+	// can't keep us reading forever).
+	rowIter, err := xlsx.Rows(sheetName)
 	if err != nil {
 		response.Error(w, http.StatusBadRequest, "gagal baca sheet")
 		return
 	}
-	if len(rows) < 2 {
-		response.Error(w, http.StatusBadRequest, "tidak ada data — sheet hanya berisi header atau kosong")
+	defer rowIter.Close()
+
+	var dataRows [][]string
+	rowNum := 0
+	nonBlank := 0
+	for rowIter.Next() {
+		rowNum++
+		if rowNum > bulkMaxScanRows {
+			response.Error(w, http.StatusBadRequest,
+				fmt.Sprintf("sheet terlalu panjang — maks %d baris per upload", bulkMaxRows))
+			return
+		}
+		cols, err := rowIter.Columns()
+		if err != nil {
+			response.Error(w, http.StatusBadRequest, "gagal baca sheet")
+			return
+		}
+		if rowNum == 1 {
+			continue // header
+		}
+		dataRows = append(dataRows, cols)
+		if !rowIsBlank(cols) {
+			nonBlank++
+			if nonBlank > bulkMaxRows {
+				response.Error(w, http.StatusBadRequest,
+					fmt.Sprintf("jumlah produk melebihi batas %d per upload", bulkMaxRows))
+				return
+			}
+		}
+	}
+	if err := rowIter.Error(); err != nil {
+		response.Error(w, http.StatusBadRequest, "gagal baca sheet")
 		return
 	}
-	dataRows := rows[1:] // skip header
 
 	// Trim trailing blank rows (Excel sometimes adds them)
 	for len(dataRows) > 0 && rowIsBlank(dataRows[len(dataRows)-1]) {
 		dataRows = dataRows[:len(dataRows)-1]
 	}
 
-	if len(dataRows) > bulkMaxRows {
-		response.Error(w, http.StatusBadRequest,
-			fmt.Sprintf("jumlah produk %d melebihi batas %d per upload", len(dataRows), bulkMaxRows))
-		return
-	}
 	if len(dataRows) == 0 {
 		response.Error(w, http.StatusBadRequest, "tidak ada baris data")
 		return
@@ -450,6 +489,13 @@ func newBulkJobRunner(h *ProductHandler) *bulkJobRunner {
 	return &bulkJobRunner{h: h, logger: h.logger}
 }
 
+// terminalCtx returns a short-lived background context for a job's TERMINAL
+// write (complete/fail + its event). Terminal writes must survive the job
+// context's deadline/cancellation, otherwise the row never leaves 'running'.
+func terminalCtx() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), 30*time.Second)
+}
+
 func (r *bulkJobRunner) start(task bulkJobTask) {
 	go r.run(task)
 }
@@ -462,7 +508,12 @@ func (r *bulkJobRunner) run(task bulkJobTask) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			r.logger.Error("bulk job panic", "job_id", task.JobID, "panic", rec)
-			_ = r.h.bulkJobs.Fail(ctx, task.JobID, fmt.Sprintf("internal panic: %v", rec))
+			// Fresh context: `ctx` may already be cancelled/expired here, which
+			// would make the terminal write fail too and pin the row at
+			// 'running' forever.
+			tctx, tcancel := terminalCtx()
+			defer tcancel()
+			_ = r.h.bulkJobs.Fail(tctx, task.JobID, fmt.Sprintf("internal panic: %v", rec))
 		}
 	}()
 
@@ -575,18 +626,22 @@ func (r *bulkJobRunner) run(task bulkJobTask) {
 		r.maybeFlush(ctx, task.StoreID, task.JobID, i+1, succeeded, failed, errs, &lastFlush)
 	}
 
-	// Final flush + complete.
+	// Final flush + complete. The terminal write MUST NOT reuse `ctx` — a job
+	// that ran into the 10-minute deadline would fail its own completion write
+	// and stay 'running' forever (permanent "Mengimpor…" toast).
 	_ = flush // referenced via maybeFlush; explicit final completion below.
-	if err := r.h.bulkJobs.Complete(ctx, task.JobID, succeeded, failed, errs); err != nil {
+	tctx, tcancel := terminalCtx()
+	defer tcancel()
+	if err := r.h.bulkJobs.Complete(tctx, task.JobID, succeeded, failed, errs); err != nil {
 		r.logger.Error("bulk job complete", "err", err, "job_id", task.JobID)
 	}
 	// Push event terminal: state akhir job. FE watcher dapat sinyal
 	// langsung untuk swap toast running → success/done state.
-	r.publishJob(ctx, task.StoreID, task.JobID)
+	r.publishJob(tctx, task.StoreID, task.JobID)
 
 	// Audit log: same shape as before, just sourced from job state.
 	if succeeded > 0 || failed > 0 {
-		r.h.audit.Log(ctx, task.StoreID, audit.Event{
+		r.h.audit.Log(tctx, task.StoreID, audit.Event{
 			Action:     "product.bulk_uploaded",
 			EntityType: "product",
 			EntityID:   task.JobID.String(),

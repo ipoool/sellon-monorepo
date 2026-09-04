@@ -53,3 +53,32 @@ function trimDecimal(n: number): string {
   if (Number.isInteger(fixed)) return String(fixed);
   return fixed.toString().replace(".", ",");
 }
+
+/**
+ * Today's date as YYYY-MM-DD in Asia/Jakarta.
+ *
+ * `new Date().toISOString().slice(0, 10)` is UTC, and these defaults are
+ * computed in server components running in a UTC container — so between 00:00
+ * and 07:00 WIB every "today" default silently pointed at yesterday, hiding
+ * the morning's sales and leaving the matching preset button unhighlighted.
+ */
+export function todayWIB(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+/** YYYY-MM-DD in Asia/Jakarta, `days` before today (0 = today). */
+export function daysAgoWIB(days: number): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - days);
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}

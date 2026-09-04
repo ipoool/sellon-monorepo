@@ -40,6 +40,13 @@ func (b *Broker) Subscribe(storeID uuid.UUID) chan Event {
 	return ch
 }
 
+// Unsubscribe detaches the channel. It deliberately does NOT close(ch):
+// Publish snapshots the listener set under RLock and then sends outside the
+// lock, so a close here could race a concurrent Publish into "send on closed
+// channel" — panicking whichever request happened to be publishing (e.g. a
+// buyer's checkout, whose order was already committed). The channel is
+// garbage-collected once the SSE handler drops its reference; subscribers exit
+// on request-context cancellation, not on channel close.
 func (b *Broker) Unsubscribe(storeID uuid.UUID, ch chan Event) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -49,7 +56,6 @@ func (b *Broker) Unsubscribe(storeID uuid.UUID, ch chan Event) {
 			delete(b.subs, storeID)
 		}
 	}
-	close(ch)
 }
 
 // Publish fans out an event to every active subscriber for the store.

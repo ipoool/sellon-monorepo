@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Download, ExternalLink, ShieldCheck, Info, Loader2 } from "lucide-react";
+import { Download, ExternalLink, ShieldCheck, Info, Loader2, CalendarX } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -26,6 +26,25 @@ type DownloadDTO = {
 };
 
 type Phase = "loading" | "gate" | "ready";
+// Terminal access problems the OTP form can never fix. 410 used to be folded
+// into the generic "link tidak valid" copy, which hid the real reason (masa
+// aktif habis) from the buyer.
+type Blocked = "not_found" | "expired" | "revoked";
+
+const BLOCKED_COPY: Record<Blocked, { title: string; body: string }> = {
+  not_found: {
+    title: "Link tidak valid",
+    body: "Link download ini tidak ditemukan. Pakai URL terbaru dari email atau dari halaman pesanan setelah pembayaran. Kalau tetap bermasalah, hubungi penjual.",
+  },
+  expired: {
+    title: "Masa aktif akses sudah berakhir",
+    body: "Periode akses file ini sudah lewat, jadi link-nya tidak bisa dibuka lagi. Hubungi penjual kalau kamu perlu perpanjangan.",
+  },
+  revoked: {
+    title: "Akses dinonaktifkan oleh penjual",
+    body: "Penjual menonaktifkan link download ini. Hubungi penjual lewat kontak di halaman toko untuk info lebih lanjut.",
+  },
+};
 
 function formatDate(iso: string): string {
   if (!iso) return "-";
@@ -46,17 +65,31 @@ export function DigitalDownloadViewer({ token }: { token: string }) {
 
   const [phase, setPhase] = useState<Phase>("loading");
   const [data, setData] = useState<DownloadDTO | null>(null);
-  const [notFound, setNotFound] = useState(false);
+  const [blocked, setBlocked] = useState<Blocked | null>(null);
 
   // Try the gated delivery; returns true once the buyer holds a valid session.
   const loadDownload = useCallback(async (): Promise<boolean> => {
     try {
       const res = await fetch(base, { credentials: "include", cache: "no-store" });
-      if (res.status === 404 || res.status === 410) {
-        setNotFound(true);
+      if (res.status === 404) {
+        setBlocked("not_found");
         return false;
       }
-      if (!res.ok) return false; // 401/403 → needs OTP
+      if (res.status === 410) {
+        setBlocked("expired");
+        return false;
+      }
+      if (res.status === 403) {
+        // 403 is either "link dinonaktifkan penjual" (terminal) or "sesi tidak
+        // cocok dengan link ini" — a buyer_session minted for another token,
+        // which just needs a fresh OTP.
+        const body = await res.json().catch(() => ({}));
+        if (typeof body?.error === "string" && body.error.includes("dinonaktifkan")) {
+          setBlocked("revoked");
+        }
+        return false;
+      }
+      if (!res.ok) return false; // 401 → needs OTP
       const body = await res.json();
       if (!body?.download) return false;
       setData(body.download as DownloadDTO);
@@ -73,20 +106,21 @@ export function DigitalDownloadViewer({ token }: { token: string }) {
     })();
   }, [loadDownload]);
 
-  if (notFound) {
+  if (blocked) {
+    const copy = BLOCKED_COPY[blocked];
     return (
       <Centered>
         <Card>
           <div className="flex flex-col items-center gap-3 py-6 text-center">
             <div className="flex size-12 items-center justify-center rounded-full bg-danger/10 text-danger">
-              <Info className="size-6" aria-hidden />
+              {blocked === "expired" ? (
+                <CalendarX className="size-6" aria-hidden />
+              ) : (
+                <Info className="size-6" aria-hidden />
+              )}
             </div>
-            <h1 className="font-display text-xl font-semibold text-neutral-900">Link tidak valid</h1>
-            <p className="max-w-sm text-sm text-neutral-600">
-              Link download ini tidak ditemukan atau sudah dicabut. Pakai URL
-              terbaru dari email atau dari halaman pesanan setelah pembayaran.
-              Kalau tetap bermasalah, hubungi penjual.
-            </p>
+            <h1 className="font-display text-xl font-semibold text-neutral-900">{copy.title}</h1>
+            <p className="max-w-sm text-sm text-neutral-600">{copy.body}</p>
             <Link
               href="/"
               className="mt-2 text-sm font-medium text-brand-600 hover:text-brand-700"

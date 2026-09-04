@@ -61,6 +61,40 @@ func (h *SubscriptionHandler) priceForPlan(ctx context.Context, plan string) int
 	return h.plans.MonthlyPrice(ctx, plan)
 }
 
+// priceForMonths is the ONLY thing that should quote an upgrade total.
+// It honours plans.yearly_price_cents (a per-month figure billed yearly)
+// for 12-month purchases, so the invoice matches the discounted price the
+// landing page advertises with its "−20%" badge.
+func (h *SubscriptionHandler) priceForMonths(ctx context.Context, plan string, months int) int64 {
+	return h.plans.PriceForMonths(ctx, plan, months)
+}
+
+// planRank orders the tiers so we can tell an upgrade from a downgrade.
+var planRank = map[string]int{"free": 0, "pro": 1, "bisnis": 2}
+
+// downgradeBlockMsg returns a non-empty error message when `tier` is LOWER
+// than the plan the store is currently paying for and that paid period is
+// still running.
+//
+// Settlement applies the invoice's tier to the whole (extended) period
+// without proration, so letting a Bisnis seller with 6 months left buy
+// 1 month of Pro would silently strip 6 months of paid-for features.
+// Same tier = perpanjang; higher tier = switch immediately (proration is
+// deliberately out of scope).
+func downgradeBlockMsg(sub *repository.Subscription, tier string) string {
+	if sub == nil || sub.Status == "expired" || sub.CurrentPeriodEnd == nil {
+		return ""
+	}
+	if !sub.CurrentPeriodEnd.After(time.Now()) {
+		return ""
+	}
+	if planRank[tier] < planRank[sub.Plan] {
+		return "Paket " + sub.Plan + " kamu masih aktif — downgrade hanya bisa " +
+			"dilakukan setelah masa aktif berakhir."
+	}
+	return ""
+}
+
 type quotaUsage struct {
 	Used  int `json:"used"`
 	Limit int `json:"limit"` // -1 = unlimited
@@ -250,6 +284,10 @@ func (h *SubscriptionHandler) RequestUpgrade(w http.ResponseWriter, r *http.Requ
 		response.Error(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+	if msg := downgradeBlockMsg(sub, tier); msg != "" {
+		response.Error(w, http.StatusBadRequest, msg)
+		return
+	}
 
 	// Dedupe: if ops hasn't verified the previous pending request yet,
 	// don't write another row. Returning the existing one keeps the
@@ -268,7 +306,7 @@ func (h *SubscriptionHandler) RequestUpgrade(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	amount := h.priceForPlan(r.Context(), tier) * int64(months)
+	amount := h.priceForMonths(r.Context(), tier, months)
 	planLabel := "Pro"
 	if tier == "bisnis" {
 		planLabel = "Bisnis"
@@ -408,12 +446,16 @@ func (h *SubscriptionHandler) Checkout(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusBadRequest, errMsg)
 		return
 	}
-	amountCents := h.priceForPlan(r.Context(), tier) * int64(months)
+	amountCents := h.priceForMonths(r.Context(), tier, months)
 
 	sub, err := h.subs.GetOrCreate(r.Context(), store.ID)
 	if err != nil {
 		h.logger.Error("checkout: get sub", "err", err)
 		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if msg := downgradeBlockMsg(sub, tier); msg != "" {
+		response.Error(w, http.StatusBadRequest, msg)
 		return
 	}
 

@@ -21,6 +21,10 @@ var (
 	ErrResellerCatalogNotFound    = errors.New("item katalog tidak ditemukan")
 	ErrAlreadyMember              = errors.New("toko kamu sudah tergabung dalam program ini")
 	ErrPriceBelowModal            = errors.New("harga jual tidak boleh lebih rendah dari harga modal")
+
+	// ErrProgramProductNotOwned: a supplier tried to put a product that is not
+	// from their own store into a program. Surfaced as 400 by the handler.
+	ErrProgramProductNotOwned = errors.New("produk tidak ditemukan")
 )
 
 // ─── Domain types ─────────────────────────────────────────────────────────────
@@ -151,6 +155,47 @@ type ResellerRepo struct {
 
 func NewResellerRepo(pool *pgxpool.Pool) *ResellerRepo {
 	return &ResellerRepo{pool: pool}
+}
+
+// rowQuerier is satisfied by both *pgxpool.Pool and pgx.Tx so the ownership
+// probes below can run inside or outside a transaction.
+type rowQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// programOwnedBy returns ErrResellerProgramNotFound unless the program exists
+// and belongs to supplierStoreID. Every supplier-side program endpoint goes
+// through this (or an equivalent WHERE predicate) — the URL id alone is never
+// trusted, otherwise any seller could read/mutate another supplier's program.
+func programOwnedBy(ctx context.Context, q rowQuerier, programID, supplierStoreID uuid.UUID) error {
+	var ok bool
+	if err := q.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM reseller_programs WHERE id = $1 AND supplier_store_id = $2)`,
+		programID, supplierStoreID,
+	).Scan(&ok); err != nil {
+		return err
+	}
+	if !ok {
+		return ErrResellerProgramNotFound
+	}
+	return nil
+}
+
+// membershipOwnedBy returns ErrResellerMembershipNotFound unless the membership
+// is active and belongs to resellerStoreID (inactive == left the program, so it
+// is treated as not found rather than exposing the supplier's products).
+func membershipOwnedBy(ctx context.Context, q rowQuerier, membershipID, resellerStoreID uuid.UUID) error {
+	var ok bool
+	if err := q.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM reseller_memberships WHERE id = $1 AND reseller_store_id = $2 AND is_active = true)`,
+		membershipID, resellerStoreID,
+	).Scan(&ok); err != nil {
+		return err
+	}
+	if !ok {
+		return ErrResellerMembershipNotFound
+	}
+	return nil
 }
 
 // ─── Supplier: programs ───────────────────────────────────────────────────────
@@ -294,12 +339,42 @@ func (r *ResellerRepo) RegenerateInviteCode(ctx context.Context, programID, supp
 // ─── Supplier: program products ───────────────────────────────────────────────
 
 // SetProgramProducts replaces the product list for a program using upsert.
-func (r *ResellerRepo) SetProgramProducts(ctx context.Context, programID uuid.UUID, inputs []ProgramProductInput) error {
+// Scoped to supplierStoreID: the program must belong to the caller and every
+// product must be one of the caller's own products (cross-tenant guard).
+func (r *ResellerRepo) SetProgramProducts(ctx context.Context, programID, supplierStoreID uuid.UUID, inputs []ProgramProductInput) error {
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
+
+	if err := programOwnedBy(ctx, tx, programID, supplierStoreID); err != nil {
+		return err
+	}
+
+	// Every product_id must belong to the supplier's store. Bounded probe over
+	// the submitted ids only (PK lookup), never a scan of the store's catalog.
+	if len(inputs) > 0 {
+		seen := make(map[uuid.UUID]struct{}, len(inputs))
+		ids := make([]uuid.UUID, 0, len(inputs))
+		for _, in := range inputs {
+			if _, dup := seen[in.ProductID]; dup {
+				continue
+			}
+			seen[in.ProductID] = struct{}{}
+			ids = append(ids, in.ProductID)
+		}
+		var owned int
+		if err := tx.QueryRow(ctx,
+			`SELECT COUNT(*) FROM products WHERE store_id = $1 AND id = ANY($2)`,
+			supplierStoreID, ids,
+		).Scan(&owned); err != nil {
+			return err
+		}
+		if owned != len(ids) {
+			return ErrProgramProductNotOwned
+		}
+	}
 
 	// Mark all existing entries inactive; we re-activate only the ones in the new list.
 	if _, err := tx.Exec(ctx,
@@ -337,7 +412,13 @@ func (r *ResellerRepo) SetProgramProducts(ctx context.Context, programID uuid.UU
 	return tx.Commit(ctx)
 }
 
-func (r *ResellerRepo) ListProgramProducts(ctx context.Context, programID uuid.UUID) ([]ProgramProduct, error) {
+// ListProgramProducts lists a program's products for its supplier. Returns
+// ErrResellerProgramNotFound when the program is not owned by supplierStoreID
+// (so a foreign id yields 404, not an empty 200).
+func (r *ResellerRepo) ListProgramProducts(ctx context.Context, programID, supplierStoreID uuid.UUID) ([]ProgramProduct, error) {
+	if err := programOwnedBy(ctx, r.pool, programID, supplierStoreID); err != nil {
+		return nil, err
+	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT pp.id, pp.program_id, pp.product_id, pp.reseller_price_cents,
 		       pp.is_active, pp.created_at, pp.updated_at,
@@ -345,10 +426,11 @@ func (r *ResellerRepo) ListProgramProducts(ctx context.Context, programID uuid.U
 		       COALESCE(p.photo_urls, ARRAY[]::text[]),
 		       COALESCE(p.stock, 0), COALESCE(p.status, '')
 		FROM reseller_program_products pp
+		JOIN reseller_programs rp ON rp.id = pp.program_id
 		LEFT JOIN products p ON p.id = pp.product_id
-		WHERE pp.program_id = $1
+		WHERE pp.program_id = $1 AND rp.supplier_store_id = $2
 		ORDER BY pp.created_at ASC
-	`, programID)
+	`, programID, supplierStoreID)
 	if err != nil {
 		return nil, err
 	}
@@ -368,15 +450,21 @@ func (r *ResellerRepo) ListProgramProducts(ctx context.Context, programID uuid.U
 	return out, rows.Err()
 }
 
-func (r *ResellerRepo) ListProgramMembers(ctx context.Context, programID uuid.UUID) ([]ResellerMembership, error) {
+// ListProgramMembers lists a program's members for its supplier. Returns
+// ErrResellerProgramNotFound when the program is not owned by supplierStoreID.
+func (r *ResellerRepo) ListProgramMembers(ctx context.Context, programID, supplierStoreID uuid.UUID) ([]ResellerMembership, error) {
+	if err := programOwnedBy(ctx, r.pool, programID, supplierStoreID); err != nil {
+		return nil, err
+	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT rm.id, rm.program_id, rm.reseller_store_id, rm.is_active, rm.joined_at,
 		       COALESCE(s.name, '')
 		FROM reseller_memberships rm
+		JOIN reseller_programs rp ON rp.id = rm.program_id
 		LEFT JOIN stores s ON s.id = rm.reseller_store_id
-		WHERE rm.program_id = $1
+		WHERE rm.program_id = $1 AND rp.supplier_store_id = $2
 		ORDER BY rm.joined_at DESC
-	`, programID)
+	`, programID, supplierStoreID)
 	if err != nil {
 		return nil, err
 	}
@@ -540,7 +628,14 @@ func (r *ResellerRepo) ListMemberships(ctx context.Context, resellerStoreID uuid
 
 // ─── Reseller: available products from supplier ───────────────────────────────
 
-func (r *ResellerRepo) ListAvailableProducts(ctx context.Context, membershipID uuid.UUID) ([]ProgramProduct, error) {
+// ListAvailableProducts lists the supplier's active program products visible
+// through one of the reseller's memberships. Returns
+// ErrResellerMembershipNotFound when the membership is not owned by
+// resellerStoreID (or no longer active).
+func (r *ResellerRepo) ListAvailableProducts(ctx context.Context, membershipID, resellerStoreID uuid.UUID) ([]ProgramProduct, error) {
+	if err := membershipOwnedBy(ctx, r.pool, membershipID, resellerStoreID); err != nil {
+		return nil, err
+	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT pp.id, pp.program_id, pp.product_id, pp.reseller_price_cents,
 		       pp.is_active, pp.created_at, pp.updated_at,
@@ -551,11 +646,12 @@ func (r *ResellerRepo) ListAvailableProducts(ctx context.Context, membershipID u
 		JOIN reseller_memberships rm ON rm.program_id = pp.program_id
 		LEFT JOIN products p ON p.id = pp.product_id
 		WHERE rm.id = $1
+		  AND rm.reseller_store_id = $2
 		  AND rm.is_active = true
 		  AND pp.is_active = true
 		  AND p.status = 'active'
 		ORDER BY pp.created_at ASC
-	`, membershipID)
+	`, membershipID, resellerStoreID)
 	if err != nil {
 		return nil, err
 	}
@@ -577,13 +673,24 @@ func (r *ResellerRepo) ListAvailableProducts(ctx context.Context, membershipID u
 
 // ─── Reseller: catalog (imported products) ────────────────────────────────────
 
-func (r *ResellerRepo) ImportProduct(ctx context.Context, membershipID, programProductID uuid.UUID, sellPriceCents int64) (*ResellerCatalogEntry, error) {
-	// Fetch modal price to validate.
+// ImportProduct adds a supplier's program product to the reseller's catalog.
+// A single query proves the whole chain: the membership belongs to
+// resellerStoreID and is active, AND the program product is active inside that
+// membership's program. Without the pairing check a reseller could attach any
+// program's product (or any store's membership) to their catalog.
+func (r *ResellerRepo) ImportProduct(ctx context.Context, resellerStoreID, membershipID, programProductID uuid.UUID, sellPriceCents int64) (*ResellerCatalogEntry, error) {
+	// Fetch modal price to validate — this is also the ownership/pairing gate.
 	var modal int64
-	err := r.pool.QueryRow(ctx,
-		`SELECT reseller_price_cents FROM reseller_program_products WHERE id = $1 AND is_active = true`,
-		programProductID,
-	).Scan(&modal)
+	err := r.pool.QueryRow(ctx, `
+		SELECT pp.reseller_price_cents
+		FROM reseller_memberships rm
+		JOIN reseller_program_products pp ON pp.program_id = rm.program_id
+		WHERE rm.id = $1
+		  AND rm.reseller_store_id = $2
+		  AND rm.is_active = true
+		  AND pp.id = $3
+		  AND pp.is_active = true
+	`, membershipID, resellerStoreID, programProductID).Scan(&modal)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrResellerProgramNotFound
 	}
@@ -625,7 +732,7 @@ func (r *ResellerRepo) ListCatalog(ctx context.Context, resellerStoreID uuid.UUI
 		       COALESCE(sup.name, '')
 		FROM reseller_catalog rc
 		JOIN reseller_memberships rm ON rm.id = rc.membership_id
-		JOIN reseller_program_products pp ON pp.id = rc.program_product_id
+		JOIN reseller_program_products pp ON pp.id = rc.program_product_id AND pp.program_id = rm.program_id
 		JOIN products p ON p.id = pp.product_id
 		JOIN reseller_programs rp ON rp.id = pp.program_id
 		LEFT JOIN stores sup ON sup.id = rp.supplier_store_id
@@ -661,7 +768,7 @@ func (r *ResellerRepo) UpdateCatalogPrice(ctx context.Context, catalogID, resell
 		SELECT pp.reseller_price_cents
 		FROM reseller_catalog rc
 		JOIN reseller_memberships rm ON rm.id = rc.membership_id
-		JOIN reseller_program_products pp ON pp.id = rc.program_product_id
+		JOIN reseller_program_products pp ON pp.id = rc.program_product_id AND pp.program_id = rm.program_id
 		WHERE rc.id = $1 AND rm.reseller_store_id = $2
 	`, catalogID, resellerStoreID).Scan(&modal)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -714,7 +821,7 @@ func (r *ResellerRepo) ListActiveDropshipProducts(ctx context.Context, resellerS
 		       COALESCE(p.product_type, 'physical')
 		FROM reseller_catalog rc
 		JOIN reseller_memberships rm ON rm.id = rc.membership_id
-		JOIN reseller_program_products pp ON pp.id = rc.program_product_id
+		JOIN reseller_program_products pp ON pp.id = rc.program_product_id AND pp.program_id = rm.program_id
 		JOIN products p ON p.id = pp.product_id
 		JOIN reseller_programs rp ON rp.id = pp.program_id
 		WHERE rm.reseller_store_id = $1
@@ -762,7 +869,7 @@ func (r *ResellerRepo) GetDropshipItem(ctx context.Context, catalogID uuid.UUID)
 		       COALESCE(p.product_type, 'physical')
 		FROM reseller_catalog rc
 		JOIN reseller_memberships rm ON rm.id = rc.membership_id
-		JOIN reseller_program_products pp ON pp.id = rc.program_product_id
+		JOIN reseller_program_products pp ON pp.id = rc.program_product_id AND pp.program_id = rm.program_id
 		JOIN products p ON p.id = pp.product_id
 		JOIN reseller_programs rp ON rp.id = pp.program_id
 		WHERE rc.id = $1

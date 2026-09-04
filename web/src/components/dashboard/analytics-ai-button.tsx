@@ -103,6 +103,11 @@ export function AnalyticsAiButton({ from, to, isPaid }: Props) {
   }, [state.kind]);
 
   useEffect(() => {
+    // Depends on `mounted`: the dialog is portaled to <body>, so on the first
+    // commit dialogRef is still null. With `[]` deps this effect ran once,
+    // bailed, and never re-ran — the listener was never attached, so ESC
+    // closed the dialog natively while the stream kept running and the
+    // `state.kind` effect then re-opened the dialog when the result landed.
     const d = dialogRef.current;
     if (!d) return;
     // ESC closes (and aborts any in-flight request). Backdrop clicks are
@@ -116,7 +121,10 @@ export function AnalyticsAiButton({ from, to, isPaid }: Props) {
     return () => {
       d.removeEventListener("cancel", onCancel);
     };
-  }, []);
+  }, [mounted]);
+
+  // Navigating away mid-generation must not leave the SSE connection open.
+  useEffect(() => () => esRef.current?.close(), []);
 
   function analyze() {
     // Close any prior stream before starting a new one.

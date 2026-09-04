@@ -8,7 +8,11 @@ import Script from "next/script";
 // events are fired by trackMeta() from the relevant pages — deduped server-side
 // with the Conversions API via a shared eventID.
 export function MetaPixel({ pixelId }: { pixelId: string }) {
-  if (!pixelId) return null;
+  // The id lands inside an inline script body, so anything but digits would be
+  // executable JS running on the platform (or seller custom-domain) origin,
+  // where the seller session cookie lives. The API validates on write; this is
+  // the second gate for rows saved before that existed.
+  if (!pixelId || !/^[0-9]{6,20}$/.test(pixelId)) return null;
   return (
     <Script id="meta-pixel" strategy="afterInteractive">
       {`
@@ -20,7 +24,7 @@ export function MetaPixel({ pixelId }: { pixelId: string }) {
         t.src=v;s=b.getElementsByTagName(e)[0];
         s.parentNode.insertBefore(t,s)}(window,document,'script',
         'https://connect.facebook.net/en_US/fbevents.js');
-        fbq('init', '${pixelId}');
+        fbq('init', ${JSON.stringify(pixelId)});
         fbq('track', 'PageView');
       `}
     </Script>

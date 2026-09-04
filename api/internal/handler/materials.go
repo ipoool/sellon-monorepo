@@ -230,7 +230,7 @@ func (h *MaterialHandler) Restock(w http.ResponseWriter, r *http.Request) {
 	}
 	h.audit.Log(r.Context(), store.ID, audit.Event{
 		Action: "material.restocked", EntityType: "material", EntityID: m.ID.String(),
-		Summary: "Restock bahan " + m.Name,
+		Summary:  "Restock bahan " + m.Name,
 		Metadata: map[string]any{"quantity": req.Quantity},
 	})
 	response.JSON(w, http.StatusOK, map[string]any{"material": toMaterialDTO(*m)})
@@ -301,23 +301,28 @@ func (h *MaterialHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 // reportRange parses ?from=&to= (YYYY-MM-DD) into a closed-open [from, to)
 // window. Defaults to the last 30 days. `to` is made exclusive (end-of-day).
+//
+// Dates are WIB calendar days (the seller's timezone and what the repos
+// bucket on) — bounds are WIB midnights, not UTC midnights, so a movement at
+// 05:00 WIB on the `from` day is inside the window and one at 23:30 WIB on
+// the `to` day isn't pushed into tomorrow.
 func reportRange(r *http.Request) (time.Time, time.Time) {
 	q := r.URL.Query()
-	now := time.Now()
+	now := time.Now().In(wib)
 	from := now.AddDate(0, 0, -29)
 	to := now
 	if s := q.Get("from"); s != "" {
-		if t, err := time.Parse("2006-01-02", s); err == nil {
+		if t, err := time.ParseInLocation("2006-01-02", s, wib); err == nil {
 			from = t
 		}
 	}
 	if s := q.Get("to"); s != "" {
-		if t, err := time.Parse("2006-01-02", s); err == nil {
+		if t, err := time.ParseInLocation("2006-01-02", s, wib); err == nil {
 			to = t
 		}
 	}
-	fromD := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, time.UTC)
-	toEx := time.Date(to.Year(), to.Month(), to.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, 1)
+	fromD := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, wib)
+	toEx := time.Date(to.Year(), to.Month(), to.Day(), 0, 0, 0, 0, wib).AddDate(0, 0, 1)
 	return fromD, toEx
 }
 
@@ -410,7 +415,10 @@ func (h *MaterialHandler) ExportReportCSV(w http.ResponseWriter, r *http.Request
 		return
 	}
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-	w.Header().Set("Content-Disposition", `attachment; filename="konsumsi-bahan-`+time.Now().Format("2006-01-02")+`.csv"`)
+	w.Header().Set("Content-Disposition", `attachment; filename="konsumsi-bahan-`+time.Now().In(wib).Format("2006-01-02")+`.csv"`)
+	// UTF-8 BOM so Excel (Windows) decodes accented names correctly instead
+	// of falling back to the system code page.
+	_, _ = w.Write([]byte("\xEF\xBB\xBF"))
 	cw := csv.NewWriter(w)
 	defer cw.Flush()
 	_ = cw.Write([]string{"Bahan", "Jenis", "Jumlah Terpakai", "Satuan", "Total Biaya (Rp)"})

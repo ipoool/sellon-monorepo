@@ -14,6 +14,7 @@ import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { MarkdownField } from "@/components/ui/markdown-field";
 import { PhotoUploader } from "@/components/dashboard/photo-uploader";
+import { FileUploader } from "@/components/dashboard/file-uploader";
 import {
   ProductTypeSelector,
   type ProductTypeValue,
@@ -333,7 +334,10 @@ export function NonPhysicalProductForm({
               type="number"
               required
               min={0}
-              step={500}
+              // step={1}: a 500-step made the browser REJECT prices like
+              // 12.750 / 9.900 with an English validation bubble, and blocked
+              // re-saving any product created via bulk/POS at such a price.
+              step={1}
               defaultValue={initial ? Math.round(initial.price_cents / 100) : ""}
               placeholder="49000"
             />
@@ -417,10 +421,11 @@ export function NonPhysicalProductForm({
                   </button>
                 </div>
               ) : (
-                <PhotoUploader onUploaded={(url) => setDigitalFileURL(url)} />
+                <FileUploader onUploaded={(url) => setDigitalFileURL(url)} />
               )}
               <p className="text-xs text-neutral-500">
-                Upload langsung ke storage SellOn (PDF, zip, gambar). Maks. ~25MB.
+                Upload langsung ke storage SellOn. File dikirim apa adanya —
+                tidak dikompres atau diubah formatnya.
               </p>
             </div>
             <div className="flex flex-col gap-1.5">

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, CheckCircle2, Clock } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Clock, Info, MessageCircle } from "lucide-react";
 
 import { Container } from "@/components/layout/container";
 import { Badge } from "@/components/ui/badge";
@@ -9,6 +9,7 @@ import { BuyerPaymentPanel } from "@/components/storefront/buyer-payment-panel";
 import { PaymentExpiryNotice } from "@/components/storefront/payment-expiry-notice";
 import { MetaPurchaseTracker } from "@/components/storefront/meta-purchase-tracker";
 import { formatRupiah, formatDateTimeID } from "@/lib/format";
+import { waLink } from "@/lib/whatsapp";
 
 const apiBase =
   process.env.API_INTERNAL_URL ||
@@ -22,6 +23,13 @@ type BuyerOrderItem = {
   unit_price_cents: number;
   quantity: number;
   subtotal_cents: number;
+  // Chosen modifier options ("Topping: Boba +Rp 5.000"). The public order DTO
+  // does not send these yet — guarded so it renders the moment it does.
+  options?: {
+    group_name?: string;
+    option_name: string;
+    price_delta_cents?: number;
+  }[];
 };
 
 type BuyerOrder = {
@@ -110,20 +118,38 @@ const paymentBadge: Record<string, { variant: "success" | "warning" | "default";
 
 export default async function BuyerOrderPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string; orderNumber: string }>;
+  searchParams: Promise<{ updated?: string }>;
 }) {
   const { slug, orderNumber } = await params;
+  const { updated } = await searchParams;
   const data = await fetchOrder(slug, orderNumber);
   if (!data) notFound();
 
   const { store, order, bank_accounts } = data;
+  // Set by the checkout wizard when the server-computed total differed from the
+  // one the buyer reviewed (a price moved under a stale cart).
+  const totalChanged = updated === "1";
   const isPaid = order.payment_status === "paid";
   const isPending = order.payment_status === "pending";
   // Show payment panel for any unpaid, non-cancelled order — even when the
   // seller has no bank account or Midtrans yet. The buyer still needs a way
   // to notify the seller (via WA) or see "sudah dikonfirmasi" once paid.
   const showPayment = !isPaid && order.status !== "cancelled";
+  const hasShippingAddress = Boolean(
+    order.customer_address?.trim() || order.customer_city?.trim(),
+  );
+  // Replaces the wizard's blocked window.open: a real link the buyer taps.
+  const waMessage = [
+    `Halo ${store.name}, saya baru buat pesanan #${order.order_number}.`,
+    `Total ${formatRupiah(order.total_cents)}.`,
+    "Mohon dibantu ya, terima kasih 🙏",
+  ].join(" ");
+  const sellerWA = store.whatsapp_number
+    ? waLink(store.whatsapp_number, waMessage)
+    : "";
 
   return (
     <div className="min-h-svh bg-neutral-50">
@@ -196,6 +222,22 @@ export default async function BuyerOrderPage({
               <PaymentExpiryNotice expiresAt={order.payment_expires_at} />
             )}
 
+            {totalChanged && (
+              <div className="mb-6 flex items-start gap-3 rounded-xl border border-warning/40 bg-warning/10 p-4 text-sm">
+                <Info className="mt-0.5 size-5 shrink-0 text-warning" aria-hidden />
+                <div>
+                  <p className="font-medium text-neutral-900">
+                    Total pesanan diperbarui
+                  </p>
+                  <p className="mt-0.5 text-neutral-600">
+                    Ada harga/ongkir yang berubah sejak kamu menambahkan item ke
+                    keranjang. Total resmi pesanan ini adalah yang tertera di
+                    bawah — cek dulu sebelum bayar.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Order summary */}
             <div className="rounded-xl border border-neutral-200 bg-white p-6 shadow-card">
               <div className="flex items-start justify-between gap-3">
@@ -225,9 +267,12 @@ export default async function BuyerOrderPage({
               <div className="mt-5 border-t border-neutral-200 pt-5">
                 <h2 className="text-sm font-semibold text-neutral-900">Ringkasan</h2>
                 <ul className="mt-3 flex flex-col divide-y divide-neutral-200">
-                  {order.items.map((it) => (
+                  {order.items.map((it, i) => (
+                    // Keyed by index: two lines of the SAME product with
+                    // different modifiers are legitimate and collided on a
+                    // name+variant key (duplicate React key, dropped row).
                     <li
-                      key={`${it.product_name}-${it.variant_name ?? ""}`}
+                      key={`${it.product_id ?? it.product_name}-${i}`}
                       className="flex items-start justify-between gap-4 py-3 text-sm"
                     >
                       <div>
@@ -235,6 +280,19 @@ export default async function BuyerOrderPage({
                           {it.product_name}
                           {it.variant_name && ` — ${it.variant_name}`}
                         </p>
+                        {it.options && it.options.length > 0 && (
+                          <ul className="mt-0.5 flex flex-col gap-0.5 text-xs text-neutral-500">
+                            {it.options.map((o, oi) => (
+                              <li key={`${o.option_name}-${oi}`}>
+                                {o.group_name ? `${o.group_name}: ` : ""}
+                                {o.option_name}
+                                {o.price_delta_cents
+                                  ? ` (+${formatRupiah(o.price_delta_cents)})`
+                                  : ""}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
                         <p className="mt-0.5 text-xs text-neutral-600">
                           {it.quantity} × {formatRupiah(it.unit_price_cents)}
                         </p>
@@ -283,16 +341,19 @@ export default async function BuyerOrderPage({
                 </dl>
               </div>
 
+              {/* All-digital orders have no address/city (checkout skips the
+                  shipping step), so "Dikirim Ke" was a shipping header over a
+                  name and a phone number. Show plain contact details instead. */}
               <div className="mt-5 border-t border-neutral-200 pt-5">
                 <h2 className="text-sm font-semibold text-neutral-900">
-                  Dikirim Ke
+                  {hasShippingAddress ? "Dikirim Ke" : "Kontak Pembeli"}
                 </h2>
                 <div className="mt-2 text-sm text-neutral-700">
                   <p className="font-medium text-neutral-900">{order.customer_name}</p>
                   <p className="font-mono text-xs text-neutral-500">
                     {order.customer_whatsapp}
                   </p>
-                  {order.customer_address && (
+                  {hasShippingAddress && (
                     <p className="mt-1 whitespace-pre-line">
                       {order.customer_address}
                       {order.customer_city ? `, ${order.customer_city}` : ""}
@@ -300,6 +361,23 @@ export default async function BuyerOrderPage({
                   )}
                 </div>
               </div>
+
+              {sellerWA && (
+                <div className="mt-5 border-t border-neutral-200 pt-5">
+                  <a
+                    href={sellerWA}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-success px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                  >
+                    <MessageCircle className="size-4" aria-hidden />
+                    Kabari penjual via WhatsApp
+                  </a>
+                  <p className="mt-1.5 text-xs text-neutral-500">
+                    Opsional — buat konfirmasi pesanan atau tanya-tanya ke penjual.
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Payment panel */}

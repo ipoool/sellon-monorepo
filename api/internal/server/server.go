@@ -18,8 +18,8 @@ import (
 	"github.com/sellon/sellon/api/internal/email"
 	"github.com/sellon/sellon/api/internal/events"
 	"github.com/sellon/sellon/api/internal/fulfillment"
-	"github.com/sellon/sellon/api/internal/meta"
 	"github.com/sellon/sellon/api/internal/handler"
+	"github.com/sellon/sellon/api/internal/meta"
 	"github.com/sellon/sellon/api/internal/middleware"
 	"github.com/sellon/sellon/api/internal/notify"
 	"github.com/sellon/sellon/api/internal/payments"
@@ -82,7 +82,23 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	}
 
 	midtransClient := payments.NewMidtransClient()
-	storageClient := storage.NewSupabaseClient(cfg.SupabaseURL, cfg.SupabaseServiceKey, cfg.SupabaseBucket)
+	// Uploads go to the S3-compatible bucket. The Supabase client stays
+	// wired only so assets uploaded before the migration can still be
+	// resolved from their stored public URL and deleted; NewMultiClient
+	// collapses to the S3 client alone once SUPABASE_* is unset.
+	s3Storage := storage.NewS3Client(cfg.S3Endpoint, cfg.S3Region, cfg.S3Bucket,
+		cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3PublicBaseURL)
+	legacyStorage := storage.NewSupabaseClient(cfg.SupabaseURL, cfg.SupabaseServiceKey, cfg.SupabaseBucket)
+	storageClient := storage.NewMultiClient(s3Storage, legacyStorage)
+	logger.Info("object storage",
+		"backend", "s3 (private bucket, served via /api/v1/files)",
+		"endpoint", cfg.S3Endpoint,
+		"bucket", cfg.S3Bucket,
+		"region", cfg.S3Region,
+		"public_base", cfg.S3PublicBaseURL,
+		"configured", s3Storage.IsConfigured(),
+		"legacy_supabase", legacyStorage.IsConfigured(),
+	)
 	broker := events.NewBroker()
 	rajaOngkir := rajaongkir.New(cfg.RajaOngkirAPIKey, cfg.RajaOngkirTier)
 	auditLogger := audit.New(auditRepo, users, logger)
@@ -123,6 +139,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	)
 	orderStreamHandler := handler.NewOrderStreamHandler(stores, broker, logger)
 	citiesHandler := handler.NewCitiesHandler(rajaOngkir, logger)
+	filesHandler := handler.NewFilesHandler(storageClient, logger)
 	waTemplateHandler := handler.NewWATemplateHandler(waTemplates, stores, auditLogger, logger)
 	webhookHandler := handler.NewWebhookHandler(gateways, orders, stores, users, encryptor, mailer, fulfiller, metaNotifier, publicWebURL, logger)
 	bankAccountHandler := handler.NewBankAccountHandler(bankAccounts, stores, auditLogger, logger)
@@ -153,8 +170,16 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 		planRepo, storageClient, jwtSvc, mailer, publicWebURL, cfg.IsProd(), logger,
 	)
 
-	requireAuth := middleware.RequireAuth(jwtSvc)
+	requireAuth := middleware.RequireAuth(jwtSvc, users)
 	requireBuyer := middleware.RequireBuyer(jwtSvc)
+
+	// Per-IP fixed-window limiters for the unauthenticated surfaces. Without
+	// these, /auth/login is an unthrottled bcrypt oracle, the OTP endpoints
+	// are brute-forceable, and anonymous checkout can exhaust a store's
+	// monthly order quota (or its Twilio credit) in seconds.
+	limitAuth := middleware.RateLimit(15, time.Minute)
+	limitOTP := middleware.RateLimit(20, time.Minute)
+	limitCheckout := middleware.RateLimit(30, time.Minute)
 
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
@@ -173,13 +198,18 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/info", handler.Info(cfg))
+		// Read-proxy for uploaded assets. Public by necessity: the bucket is
+		// private and a storefront visitor has no session, so this is what
+		// makes product photos loadable at all. Keys carry 8 random bytes and
+		// the bucket exposes no listing, so URLs can't be guessed.
+		r.Get("/files/*", filesHandler.Serve)
 		// Pricing — public so the landing page can fetch without auth.
 		r.Get("/plans", plansHandler.ListPublic)
 		// Digital-download access is now email-OTP gated (like courses) so the
 		// link can't simply be shared + every access is tracked. Public: request
 		// + verify OTP; the delivery info itself sits behind RequireBuyer.
-		r.Post("/download/{token}/request-otp", buyerCourseHandler.RequestOTP)
-		r.Post("/download/{token}/verify-otp", buyerCourseHandler.VerifyOTP)
+		r.With(limitOTP).Post("/download/{token}/request-otp", buyerCourseHandler.RequestOTP)
+		r.With(limitOTP).Post("/download/{token}/verify-otp", buyerCourseHandler.VerifyOTP)
 		r.Group(func(r chi.Router) {
 			r.Use(requireBuyer)
 			r.Get("/download/{token}", downloadHandler.Get)
@@ -207,18 +237,18 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 			// Meta catalog feed (Facebook Commerce Manager crawls this).
 			r.Get("/meta-feed.xml", storefrontHandler.MetaFeed)
 			r.Get("/products/{productSlug}", storefrontHandler.GetProduct)
-			r.Post("/orders", storefrontHandler.CreateOrder)
-			r.Get("/orders/{number}", storefrontHandler.GetOrder)
-			r.Post("/orders/{number}/payment-link", storefrontHandler.GeneratePaymentLink)
-			r.Post("/orders/{number}/mark-paid", storefrontHandler.MarkPaymentPending)
-			r.Post("/orders/{number}/payment-proof", storefrontHandler.UploadPaymentProof)
+			r.With(limitCheckout).Post("/orders", storefrontHandler.CreateOrder)
+			r.With(limitCheckout).Get("/orders/{number}", storefrontHandler.GetOrder)
+			r.With(limitCheckout).Post("/orders/{number}/payment-link", storefrontHandler.GeneratePaymentLink)
+			r.With(limitCheckout).Post("/orders/{number}/mark-paid", storefrontHandler.MarkPaymentPending)
+			r.With(limitCheckout).Post("/orders/{number}/payment-proof", storefrontHandler.UploadPaymentProof)
 			r.Post("/shipping/quote", storefrontHandler.ShippingQuote)
 			r.Post("/promos/validate", storefrontHandler.ValidatePromo)
 			r.Get("/queue", kdsHandler.PublicQueue)
 			// Course viewer: public OTP request/verify, then RequireBuyer-gated
 			// content (which also records the access into download_logs).
-			r.Post("/course/{token}/request-otp", buyerCourseHandler.RequestOTP)
-			r.Post("/course/{token}/verify-otp", buyerCourseHandler.VerifyOTP)
+			r.With(limitOTP).Post("/course/{token}/request-otp", buyerCourseHandler.RequestOTP)
+			r.With(limitOTP).Post("/course/{token}/verify-otp", buyerCourseHandler.VerifyOTP)
 			r.Group(func(r chi.Router) {
 				r.Use(requireBuyer)
 				r.Get("/course/{token}/content", buyerCourseHandler.Content)
@@ -226,11 +256,16 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 		})
 
 		r.Route("/auth", func(r chi.Router) {
-			r.Post("/google", authHandler.Google)
-			r.Post("/register", authHandler.Register)
-			r.Post("/login", authHandler.Login)
-			r.Post("/verify-email", authHandler.VerifyEmail)
-			r.Post("/resend-verification", authHandler.ResendVerification)
+			r.Group(func(r chi.Router) {
+				r.Use(limitAuth)
+				r.Post("/google", authHandler.Google)
+				r.Post("/register", authHandler.Register)
+				r.Post("/login", authHandler.Login)
+				r.Post("/verify-email", authHandler.VerifyEmail)
+				r.Post("/resend-verification", authHandler.ResendVerification)
+				r.Post("/forgot-password", authHandler.ForgotPassword)
+				r.Post("/reset-password", authHandler.ResetPassword)
+			})
 			r.Post("/logout", authHandler.Logout)
 			r.Group(func(r chi.Router) {
 				r.Use(requireAuth)
@@ -371,6 +406,9 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 				})
 
 				r.Post("/uploads/image", uploadHandler.Image)
+				// Digital deliverables (pdf/zip/epub/audio/video): no image
+				// compression, larger cap, sniffed-type allowlist.
+				r.Post("/uploads/file", uploadHandler.File)
 				r.Post("/uploads/delete", uploadHandler.Delete)
 
 				r.Route("/orders", func(r chi.Router) {

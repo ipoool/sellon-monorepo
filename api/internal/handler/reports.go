@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 	"strconv"
+	"strings"
 	"time"
 
 	excelize "github.com/xuri/excelize/v2"
@@ -278,10 +278,44 @@ func (h *ReportsHandler) Export(w http.ResponseWriter, r *http.Request) {
 	headline, _ := h.reports.Headline(r.Context(), store.ID, since, until)
 	topProducts, _ := h.reports.TopProducts(r.Context(), store.ID, since, until, 20)
 	topCustomers, _ := h.reports.TopCustomers(r.Context(), store.ID, since, until, 20)
-	orderList, _, _ := h.orders.List(r.Context(), repository.ListOrdersFilter{
-		StoreID: store.ID,
-		Limit:   1000,
-	})
+
+	// Detail rows: the orders list has no date filter, so page through it
+	// (newest first) and keep only [since, until). Because the list is sorted
+	// by created_at DESC we can stop as soon as a row predates `since`. Hard
+	// cap on written rows so a huge store can't pin the API building a
+	// workbook; the sheet gets a trailer note when truncated.
+	const exportPageSize = 1000
+	const exportMaxRows = 10000
+	var orderList []repository.Order
+	exportCapped := false
+pageLoop:
+	for offset := 0; ; offset += exportPageSize {
+		page, total, err := h.orders.List(r.Context(), repository.ListOrdersFilter{
+			StoreID: store.ID,
+			Limit:   exportPageSize,
+			Offset:  offset,
+		})
+		if err != nil {
+			h.logger.Error("export xlsx list orders", "err", err)
+			break
+		}
+		for _, o := range page {
+			if o.CreatedAt.Before(since) {
+				break pageLoop // sorted DESC → everything after is older too
+			}
+			if !o.CreatedAt.Before(until) {
+				continue
+			}
+			if len(orderList) >= exportMaxRows {
+				exportCapped = true
+				break pageLoop
+			}
+			orderList = append(orderList, o)
+		}
+		if len(page) < exportPageSize || offset+len(page) >= total {
+			break
+		}
+	}
 
 	f := excelize.NewFile()
 	defer f.Close()
@@ -289,8 +323,8 @@ func (h *ReportsHandler) Export(w http.ResponseWriter, r *http.Request) {
 	// ─── Helper ────────────────────────────────────────────────────────────
 	bold, _ := f.NewStyle(&excelize.Style{Font: &excelize.Font{Bold: true}})
 	header, _ := f.NewStyle(&excelize.Style{
-		Font:    &excelize.Font{Bold: true, Color: "FFFFFF"},
-		Fill:    excelize.Fill{Type: "pattern", Color: []string{"10B981"}, Pattern: 1},
+		Font:      &excelize.Font{Bold: true, Color: "FFFFFF"},
+		Fill:      excelize.Fill{Type: "pattern", Color: []string{"10B981"}, Pattern: 1},
 		Alignment: &excelize.Alignment{Horizontal: "center"},
 	})
 	currency, _ := f.NewStyle(&excelize.Style{NumFmt: 44}) // accounting
@@ -334,7 +368,7 @@ func (h *ReportsHandler) Export(w http.ResponseWriter, r *http.Request) {
 	_ = f.SetCellStyle(sheet1, "A1", "A1", bold)
 	setRow(sheet1, 2, []any{"Periode", periodLabel})
 	setRow(sheet1, 3, []any{"Toko", store.Name})
-	setRow(sheet1, 4, []any{"Digenerate", formatDate(until)})
+	setRow(sheet1, 4, []any{"Digenerate", formatDate(time.Now().In(wib))})
 	setRow(sheet1, 6, []any{"RINGKASAN KEUANGAN"})
 	_ = f.SetCellStyle(sheet1, "A6", "A6", bold)
 	if headline != nil {
@@ -357,13 +391,11 @@ func (h *ReportsHandler) Export(w http.ResponseWriter, r *http.Request) {
 	_, _ = f.NewSheet(sheet2)
 	cols2 := []string{"No. Pesanan", "Tanggal", "Nama Pembeli", "WhatsApp", "Kota", "Kurir", "Metode Bayar", "Subtotal", "Ongkir", "Diskon", "PPN", "Total", "Status Pesanan", "Status Bayar", "Catatan Pembeli"}
 	setHeader(sheet2, 1, cols2)
-	for i, o := range orderList {
-		if o.CreatedAt.Before(since) {
-			continue
-		}
-		setRow(sheet2, i+2, []any{
+	row2 := 2 // separate counter — orderList is already window-filtered, no gaps
+	for _, o := range orderList {
+		setRow(sheet2, row2, []any{
 			o.OrderNumber,
-			formatDate(o.CreatedAt),
+			formatDate(o.CreatedAt.In(wib)),
 			o.CustomerName,
 			o.CustomerWhatsApp,
 			o.CustomerCity,
@@ -378,6 +410,13 @@ func (h *ReportsHandler) Export(w http.ResponseWriter, r *http.Request) {
 			o.PaymentStatus,
 			o.Notes,
 		})
+		row2++
+	}
+	if exportCapped {
+		setRow(sheet2, row2+1, []any{
+			fmt.Sprintf("Catatan: daftar dipotong pada %d pesanan pertama (terbaru). Persempit rentang tanggal untuk export lengkap.", exportMaxRows),
+		})
+		_ = f.SetCellStyle(sheet2, fmt.Sprintf("A%d", row2+1), fmt.Sprintf("A%d", row2+1), bold)
 	}
 	widths2 := []float64{18, 14, 22, 16, 14, 14, 18, 14, 12, 12, 12, 14, 16, 14, 30}
 	for i, w2 := range widths2 {

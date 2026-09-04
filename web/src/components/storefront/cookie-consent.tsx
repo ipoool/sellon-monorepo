@@ -1,22 +1,65 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { Cookie, X } from "lucide-react";
 
-const CONSENT_KEY = "sellon:cookie-consent";
+export const CONSENT_KEY = "sellon:cookie-consent";
+// Same-tab notification: `storage` only fires in OTHER tabs, so the banner
+// dispatches this to let the pixel gate react immediately.
+const CONSENT_EVENT = "sellon:cookie-consent-change";
 
-export function CookieConsent() {
+export type ConsentValue = "accepted" | "declined" | null;
+
+export function readConsent(): ConsentValue {
+  try {
+    const v = localStorage.getItem(CONSENT_KEY);
+    return v === "accepted" || v === "declined" ? v : null;
+  } catch {
+    // localStorage blocked (private mode, etc.) — treat as "no consent".
+    return null;
+  }
+}
+
+export function writeConsent(value: Exclude<ConsentValue, null>) {
+  try {
+    localStorage.setItem(CONSENT_KEY, value);
+  } catch {
+    // ignore — the in-memory notification below still gates this page view.
+  }
+  window.dispatchEvent(new CustomEvent(CONSENT_EVENT, { detail: value }));
+}
+
+function subscribeConsent(onChange: () => void): () => void {
+  window.addEventListener(CONSENT_EVENT, onChange);
+  // `storage` fires in the OTHER tabs — keeps a second tab in sync.
+  window.addEventListener("storage", onChange);
+  return () => {
+    window.removeEventListener(CONSENT_EVENT, onChange);
+    window.removeEventListener("storage", onChange);
+  };
+}
+
+// Reactive read of the stored consent. The server snapshot is null (there is no
+// localStorage there), so anything gated on "accepted" stays unmounted through
+// hydration and only appears once the real value is read — no hydration gap.
+export function useConsent(): ConsentValue {
+  return useSyncExternalStore(subscribeConsent, readConsent, () => null);
+}
+
+type Props = {
+  // True when the store runs a Meta Pixel — the banner then has to disclose
+  // the analytics/ads cookies instead of claiming nothing is shared.
+  hasAnalytics?: boolean;
+};
+
+export function CookieConsent({ hasAnalytics = false }: Props) {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    try {
-      if (!localStorage.getItem(CONSENT_KEY)) {
-        // Small delay so it doesn't pop instantly on page load.
-        const t = setTimeout(() => setVisible(true), 800);
-        return () => clearTimeout(t);
-      }
-    } catch {
-      // localStorage blocked (private mode, etc.) — stay hidden.
+    if (readConsent() === null) {
+      // Small delay so it doesn't pop instantly on page load.
+      const t = setTimeout(() => setVisible(true), 800);
+      return () => clearTimeout(t);
     }
   }, []);
 
@@ -29,11 +72,7 @@ export function CookieConsent() {
   }
 
   function persist(value: "accepted" | "declined") {
-    try {
-      localStorage.setItem(CONSENT_KEY, value);
-    } catch {
-      // ignore
-    }
+    writeConsent(value);
     setVisible(false);
   }
 
@@ -63,8 +102,19 @@ export function CookieConsent() {
             Kami menggunakan cookies
           </p>
           <p className="mt-1 text-xs leading-relaxed text-neutral-600">
-            Untuk menyimpan keranjang belanja dan preferensi kamu selama sesi
-            ini. Tidak ada data yang dibagikan ke pihak ketiga.
+            {hasAnalytics ? (
+              <>
+                Keranjang belanja dan preferensi kamu disimpan di perangkat ini.
+                Toko ini juga memakai cookie analitik &amp; iklan (Meta Pixel)
+                yang mengirim data kunjungan ke Meta. Klik &ldquo;Tolak&rdquo;
+                kalau kamu tidak mau — belanja tetap bisa jalan.
+              </>
+            ) : (
+              <>
+                Untuk menyimpan keranjang belanja dan preferensi kamu selama
+                sesi ini. Tidak ada data yang dibagikan ke pihak ketiga.
+              </>
+            )}
           </p>
         </div>
       </div>

@@ -122,16 +122,20 @@ function writeGroups(next: GroupState) {
 
 function useGroupToggles(): {
   get: (label: string) => boolean | undefined;
-  toggle: (label: string) => void;
+  set: (label: string, next: boolean) => void;
 } {
   const groups = useSyncExternalStore(subscribeGroups, getGroupsSnapshot, () => EMPTY_GROUPS);
-  const toggle = useCallback(
-    (label: string) => {
-      writeGroups({ ...groups, [label]: !(groups[label] ?? false) });
+  // Takes the next value explicitly instead of flipping the stored one: a
+  // group can be force-expanded by the active route while its stored flag is
+  // still false, and flipping the stored flag then wrote `true` for a group
+  // that was already open — silently expanding it on every other page.
+  const set = useCallback(
+    (label: string, next: boolean) => {
+      writeGroups({ ...groups, [label]: next });
     },
     [groups],
   );
-  return { get: (label) => groups[label], toggle };
+  return { get: (label) => groups[label], set };
 }
 
 const primaryNav: NavItem[] = [
@@ -188,6 +192,19 @@ export function DashboardSidebar({ me, open, onClose }: Props) {
     if (open) onClose();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
+
+  // The drawer is only hidden by `lg:hidden` CSS — the <dialog> itself stays
+  // open AND modal past the lg breakpoint, so rotating a tablet to landscape
+  // left the whole document inert behind an invisible dialog. Close it when
+  // the viewport reaches the desktop layout.
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const onChange = (e: MediaQueryListEvent) => {
+      if (e.matches) onClose();
+    };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, [onClose]);
 
   return (
     <>
@@ -371,7 +388,7 @@ function SidebarContent({
                 bisnisOnly
                 collapsible
                 isOpen={groupToggles.get("Kasir POS")}
-                onToggle={() => groupToggles.toggle("Kasir POS")}
+                onToggle={(next) => groupToggles.set("Kasir POS", next)}
                 label="Kasir POS"
                 labelHref="/pos"
                 items={[
@@ -392,7 +409,7 @@ function SidebarContent({
               <NavGroup
                 collapsible
                 isOpen={groupToggles.get("Program Reseller")}
-                onToggle={() => groupToggles.toggle("Program Reseller")}
+                onToggle={(next) => groupToggles.set("Program Reseller", next)}
                 label="Program Reseller"
                 labelHref="/reseller/program"
                 items={[
@@ -407,7 +424,7 @@ function SidebarContent({
             <NavGroup
               collapsible
               isOpen={groupToggles.get("Lainnya")}
-              onToggle={() => groupToggles.toggle("Lainnya")}
+              onToggle={(next) => groupToggles.set("Lainnya", next)}
               label="Lainnya"
               items={secondaryNav}
               pathname={pathname}
@@ -497,7 +514,7 @@ function NavGroup({
   // toggle (undefined = never touched → collapsed by default).
   collapsible?: boolean;
   isOpen?: boolean;
-  onToggle?: () => void;
+  onToggle?: (next: boolean) => void;
 }) {
   const { locked, openGate } = useBisnisGate();
   const groupLocked = !!bisnisOnly && locked;
@@ -524,12 +541,22 @@ function NavGroup({
           <p className={labelClass}>{label}</p>
         )}
         {collapsible && (
+          // The group holding the active route is force-expanded so the user
+          // never lands on a page whose nav item is hidden — so the chevron
+          // genuinely cannot collapse it. Disable it there rather than let it
+          // look clickable, do nothing, and still write to localStorage.
           <button
             type="button"
-            onClick={onToggle}
+            onClick={() => onToggle?.(!open)}
+            disabled={containsActive}
             aria-expanded={open}
             aria-label={open ? `Tutup ${label}` : `Buka ${label}`}
-            className="flex size-5 shrink-0 items-center justify-center rounded text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700"
+            title={
+              containsActive
+                ? "Grup ini terbuka karena halaman aktif ada di dalamnya"
+                : undefined
+            }
+            className="flex size-5 shrink-0 items-center justify-center rounded text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-neutral-400"
           >
             <ChevronDown
               className={cn("size-4 transition-transform", open && "rotate-180")}

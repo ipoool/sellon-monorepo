@@ -17,14 +17,24 @@ import (
 func RequireSeller(users *repository.UserRepo) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			uid, ok := auth.UserIDFromContext(r.Context())
+			// RequireAuth already loaded (and ban-checked) the row.
+			user, ok := auth.SessionUserFromContext(r.Context())
 			if !ok {
-				response.Error(w, http.StatusUnauthorized, "unauthorized")
-				return
+				uid, hasUID := auth.UserIDFromContext(r.Context())
+				if !hasUID {
+					response.Error(w, http.StatusUnauthorized, "unauthorized")
+					return
+				}
+				var err error
+				user, err = users.FindByID(r.Context(), uid)
+				if err != nil {
+					response.Error(w, http.StatusUnauthorized, "unauthorized")
+					return
+				}
 			}
-			user, err := users.FindByID(r.Context(), uid)
-			if err != nil {
-				response.Error(w, http.StatusUnauthorized, "unauthorized")
+			if user.IsBanned() {
+				response.Error(w, http.StatusForbidden,
+					"akun ini diblokir oleh admin. Hubungi support untuk informasi lebih lanjut.")
 				return
 			}
 			if user.IsAdmin() {

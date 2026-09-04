@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -86,6 +87,15 @@ func (h *PlatformWebhookHandler) Handle(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		sub, settled, err := h.subs.SettleInvoice(r.Context(), inv.ID)
+		if errors.Is(err, repository.ErrInvoiceNotPending) {
+			// Concurrent duplicate delivery won the race, or the invoice
+			// was already failed/rejected. Ack without touching the
+			// subscription — one payment must never buy two periods.
+			h.logger.Info("platform webhook: settle skipped (not pending)",
+				"order_id", n.OrderID, "invoice_id", inv.ID)
+			response.JSON(w, http.StatusOK, map[string]any{"ok": true, "replay": true})
+			return
+		}
 		if err != nil {
 			h.logger.Error("platform webhook: settle", "err", err, "order_id", n.OrderID)
 			response.Error(w, http.StatusInternalServerError, "settle failed")

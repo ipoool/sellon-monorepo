@@ -22,9 +22,12 @@ type User struct {
 	Role            string
 	PasswordHash    string
 	EmailVerifiedAt *time.Time
-	BannedAt        *time.Time
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	// SessionsValidAfter, when set, revokes every session token issued
+	// before it (password reset). Compared against the JWT iat.
+	SessionsValidAfter *time.Time
+	BannedAt           *time.Time
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 func (u *User) IsAdmin() bool { return u != nil && u.Role == "admin" }
@@ -34,6 +37,17 @@ func (u *User) IsBanned() bool {
 func (u *User) IsEmailVerified() bool { return u != nil && u.EmailVerifiedAt != nil }
 func (u *User) HasPassword() bool     { return u != nil && u.PasswordHash != "" }
 
+// SessionIssuedAtValid reports whether a token issued at iat is still
+// honoured — false once a password reset bumped SessionsValidAfter past it.
+// iat has second precision; SessionsValidAfter is stored truncated to the
+// second so a token minted in the same second as the reset stays valid.
+func (u *User) SessionIssuedAtValid(iat time.Time) bool {
+	if u == nil || u.SessionsValidAfter == nil {
+		return true
+	}
+	return !iat.Before(*u.SessionsValidAfter)
+}
+
 type UserRepo struct {
 	pool *pgxpool.Pool
 }
@@ -42,13 +56,13 @@ func NewUserRepo(pool *pgxpool.Pool) *UserRepo {
 	return &UserRepo{pool: pool}
 }
 
-const userCols = `id, COALESCE(google_id, ''), email, name, picture_url, role, password_hash, email_verified_at, banned_at, created_at, updated_at`
+const userCols = `id, COALESCE(google_id, ''), email, name, picture_url, role, password_hash, email_verified_at, sessions_valid_after, banned_at, created_at, updated_at`
 
 func scanUser(row pgx.Row) (*User, error) {
 	var u User
 	err := row.Scan(
 		&u.ID, &u.GoogleID, &u.Email, &u.Name, &u.PictureURL,
-		&u.Role, &u.PasswordHash, &u.EmailVerifiedAt, &u.BannedAt, &u.CreatedAt, &u.UpdatedAt,
+		&u.Role, &u.PasswordHash, &u.EmailVerifiedAt, &u.SessionsValidAfter, &u.BannedAt, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -77,7 +91,7 @@ func (r *UserRepo) FindOrCreateByGoogleID(ctx context.Context, googleID, email, 
 	var isNew bool
 	if err := row.Scan(
 		&u.ID, &u.GoogleID, &u.Email, &u.Name, &u.PictureURL,
-		&u.Role, &u.PasswordHash, &u.EmailVerifiedAt, &u.BannedAt, &u.CreatedAt, &u.UpdatedAt,
+		&u.Role, &u.PasswordHash, &u.EmailVerifiedAt, &u.SessionsValidAfter, &u.BannedAt, &u.CreatedAt, &u.UpdatedAt,
 		&isNew,
 	); err != nil {
 		return nil, false, err
@@ -124,6 +138,47 @@ func (r *UserRepo) MarkEmailVerified(ctx context.Context, id uuid.UUID) error {
 		`UPDATE users SET email_verified_at = now(), updated_at = now() WHERE id = $1 AND email_verified_at IS NULL`,
 		id)
 	return err
+}
+
+// FinalizeVerificationTx applies a successful email verification inside the
+// caller's transaction: marks the email verified and, when a register-claim
+// parked a password/name on the verification row, installs them. Empty
+// values leave the current column untouched.
+func (r *UserRepo) FinalizeVerificationTx(ctx context.Context, tx pgx.Tx, id uuid.UUID, passwordHash, name string) error {
+	tag, err := tx.Exec(ctx, `
+		UPDATE users SET
+			password_hash     = COALESCE(NULLIF($2, ''), password_hash),
+			name              = COALESCE(NULLIF($3, ''), name),
+			email_verified_at = COALESCE(email_verified_at, now()),
+			updated_at        = now()
+		WHERE id = $1`, id, passwordHash, name)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
+// ResetPasswordTx installs a new password after a reset code was verified,
+// marks the email verified (the code proved ownership) and revokes every
+// session issued before now.
+func (r *UserRepo) ResetPasswordTx(ctx context.Context, tx pgx.Tx, id uuid.UUID, passwordHash string) error {
+	tag, err := tx.Exec(ctx, `
+		UPDATE users SET
+			password_hash        = $2,
+			email_verified_at    = COALESCE(email_verified_at, now()),
+			sessions_valid_after = date_trunc('second', now()),
+			updated_at           = now()
+		WHERE id = $1`, id, passwordHash)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrUserNotFound
+	}
+	return nil
 }
 
 func (r *UserRepo) FindByID(ctx context.Context, id uuid.UUID) (*User, error) {

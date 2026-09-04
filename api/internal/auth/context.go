@@ -4,6 +4,8 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+
+	"github.com/sellon/sellon/api/internal/repository"
 )
 
 type ctxKey string
@@ -12,6 +14,7 @@ const (
 	userIDKey         ctxKey = "uid"
 	impersonatorIDKey ctxKey = "imp"
 	buyerKey          ctxKey = "buyer"
+	sessionUserKey    ctxKey = "session_user"
 )
 
 // WithBuyer / BuyerFromContext carry the verified storefront-buyer claims
@@ -64,4 +67,21 @@ func ImpersonatorIDFromContext(ctx context.Context) (uuid.UUID, bool) {
 		return uuid.Nil, false
 	}
 	return id, true
+}
+
+// WithSessionUser caches the authenticated user row that RequireAuth already
+// loaded (for the ban + session-revocation checks) so downstream middleware
+// and handlers don't each re-query it.
+func WithSessionUser(ctx context.Context, u *repository.User) context.Context {
+	return context.WithValue(ctx, sessionUserKey, u)
+}
+
+// SessionUserFromContext returns the user row loaded by RequireAuth.
+func SessionUserFromContext(ctx context.Context) (*repository.User, bool) {
+	v := ctx.Value(sessionUserKey)
+	if v == nil {
+		return nil, false
+	}
+	u, ok := v.(*repository.User)
+	return u, ok && u != nil
 }

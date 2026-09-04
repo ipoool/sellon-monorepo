@@ -119,8 +119,37 @@ export function BerlanggananActions({
     (tier === "bisnis"
       ? subscription.bisnis_price_cents
       : subscription.pro_price_cents);
-  const totalCents = tierPriceCents * months;
+  // `yearly_price_cents` is the PER-MONTH rate when billed yearly (that's
+  // what the landing page's "−20%" badge compares against), so a 12-month
+  // purchase bills at that rate — matching what the API now invoices.
+  const yearlyPerMonthCents = activePlan?.yearly_price_cents ?? 0;
+  const usesYearlyRate = months >= 12 && yearlyPerMonthCents > 0;
+  const effectivePerMonthCents = usesYearlyRate
+    ? yearlyPerMonthCents
+    : tierPriceCents;
+  const totalCents = effectivePerMonthCents * months;
+  const savingCents = usesYearlyRate
+    ? (tierPriceCents - yearlyPerMonthCents) * months
+    : 0;
   const tierLabel = activePlan?.name ?? (tier === "bisnis" ? "Bisnis" : "Pro");
+
+  // A paid period that's still running. Settlement applies the invoice's
+  // tier to the whole extended period without proration, so buying a
+  // LOWER tier now would silently strip features the seller already paid
+  // for — the API rejects it with 400 and we mirror that here.
+  // days_remaining comes from the API (server clock), so this stays a
+  // pure render — no Date.now() during render.
+  const periodActive =
+    subscription.status !== "expired" &&
+    subscription.plan !== "free" &&
+    subscription.days_remaining > 0;
+  const currentIsBisnis = subscription.plan === "bisnis" && periodActive;
+  const downgradeHint =
+    "Paket Bisnis kamu masih aktif — downgrade baru bisa setelah masa aktif berakhir.";
+  const isRenewal = subscription.plan === tier && periodActive;
+  const dialogTitle = isRenewal
+    ? `Perpanjang ${tierLabel}`
+    : `Upgrade ke ${tierLabel}`;
 
   // Open pending manual-transfer request, if any. Used to dedupe the
   // "Saya sudah transfer" button so the seller can't fire a second
@@ -257,7 +286,7 @@ export function BerlanggananActions({
               id="upgrade-title"
               className="font-display text-base font-semibold text-neutral-900"
             >
-              Upgrade ke Pro
+              {dialogTitle}
             </h2>
           </div>
           <button
@@ -291,7 +320,8 @@ export function BerlanggananActions({
             <button
               type="button"
               onClick={() => setTier("pro")}
-              disabled={!!pendingManual}
+              disabled={!!pendingManual || currentIsBisnis}
+              title={currentIsBisnis ? downgradeHint : undefined}
               className={
                 "rounded-lg border-2 p-4 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 " +
                 (tier === "pro"
@@ -347,6 +377,10 @@ export function BerlanggananActions({
             </button>
           </div>
 
+          {currentIsBisnis && (
+            <p className="text-xs text-neutral-500">{downgradeHint}</p>
+          )}
+
           {tierFeatures.length > 0 && (
             <div className="rounded-lg border border-brand-200 bg-brand-50/50 p-3">
               <p className="text-xs font-medium uppercase tracking-wider text-brand-700">
@@ -382,6 +416,12 @@ export function BerlanggananActions({
             <p className="mt-1 text-sm font-medium text-neutral-900">
               Total: {formatRupiah(totalCents)}
             </p>
+            {usesYearlyRate && (
+              <p className="text-xs text-success">
+                Harga tahunan {formatRupiah(yearlyPerMonthCents)}/bulan — hemat{" "}
+                {formatRupiah(savingCents)}.
+              </p>
+            )}
           </div>
 
           <div className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-neutral-800">

@@ -33,6 +33,14 @@ export interface ButtonProps
   variant?: Variant;
   size?: Size;
   ref?: React.Ref<HTMLButtonElement>;
+  /**
+   * Render the single child element instead of a <button>, merging the
+   * button classes into it. Use it for link CTAs —
+   * `<Button asChild><Link href="…">…</Link></Button>` — so the markup stays
+   * a single interactive element. Wrapping a <Button> in a <Link> nests two
+   * interactive elements and produces two tab stops per CTA.
+   */
+  asChild?: boolean;
 }
 
 export function Button({
@@ -40,18 +48,34 @@ export function Button({
   variant = "default",
   size = "md",
   ref,
+  asChild = false,
+  children,
   ...props
 }: ButtonProps) {
+  const classes = cn(
+    baseClasses,
+    variantClasses[variant],
+    sizeClasses[size],
+    className,
+  );
+
+  if (asChild) {
+    // Minimal local Slot (no Radix dependency): clone the one child and merge
+    // className + the remaining props. The child's own props win, so an
+    // explicit href/onClick on the child is never clobbered.
+    const child = React.Children.only(children) as React.ReactElement<{
+      className?: string;
+    }>;
+    return React.cloneElement(child, {
+      ...props,
+      ...child.props,
+      className: cn(classes, child.props.className),
+    } as React.HTMLAttributes<HTMLElement>);
+  }
+
   return (
-    <button
-      ref={ref}
-      className={cn(
-        baseClasses,
-        variantClasses[variant],
-        sizeClasses[size],
-        className,
-      )}
-      {...props}
-    />
+    <button ref={ref} className={classes} {...props}>
+      {children}
+    </button>
   );
 }

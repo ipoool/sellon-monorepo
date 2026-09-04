@@ -22,6 +22,13 @@ var (
 	ErrPOSHeldNotFound    = errors.New("transaksi tertahan tidak ditemukan")
 	ErrPOSPaymentShort    = errors.New("total pembayaran kurang dari total transaksi")
 	ErrPOSOrderNotVoidable = errors.New("transaksi POS tidak bisa di-void")
+	// ErrPOSItemNotFound guards cross-tenant line items. Product/variant UUIDs
+	// are public (they appear in storefront URLs), so every id the client sends
+	// must resolve inside the caller's own store before we touch any stock.
+	ErrPOSItemNotFound = errors.New("produk tidak ditemukan")
+	// ErrPOSForbidden — the actor's role may not run this POS action (e.g.
+	// staff voiding or closing another cashier's shift).
+	ErrPOSForbidden = errors.New("kamu tidak punya akses untuk aksi ini")
 )
 
 // ─── Domain types ────────────────────────────────────────────────────────────
@@ -204,9 +211,20 @@ func (r *POSRepo) GetActiveSessionForUser(ctx context.Context, storeID, userID u
 	return &s, err
 }
 
+// posQuerier is satisfied by both *pgxpool.Pool and pgx.Tx so session lookups
+// and the shift summary can run standalone or inside the close transaction.
+type posQuerier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
 func (r *POSRepo) GetSessionByID(ctx context.Context, id, storeID uuid.UUID) (*POSSession, error) {
+	return getSessionByIDQ(ctx, r.pool, id, storeID)
+}
+
+func getSessionByIDQ(ctx context.Context, q posQuerier, id, storeID uuid.UUID) (*POSSession, error) {
 	var s POSSession
-	err := r.pool.QueryRow(ctx, `
+	err := q.QueryRow(ctx, `
 		SELECT ps.id, ps.store_id, ps.opened_by, ps.closed_by,
 		       ps.opening_cash_cents, ps.closing_cash_cents, ps.expected_cash_cents,
 		       ps.notes, ps.status, ps.opened_at, ps.closed_at,
@@ -267,7 +285,15 @@ func (r *POSRepo) ListSessions(ctx context.Context, storeID uuid.UUID, limit, of
 }
 
 func (r *POSRepo) GetSummary(ctx context.Context, sessionID, storeID uuid.UUID) (*POSSessionSummary, error) {
-	session, err := r.GetSessionByID(ctx, sessionID, storeID)
+	return computeSummary(ctx, r.pool, sessionID, storeID)
+}
+
+// computeSummary aggregates one shift's takings. TotalCash is NET cash: cash
+// tendered minus the change handed back, so a Rp 75.000 sale paid with a
+// Rp 100.000 note leaves Rp 75.000 in the drawer — not Rp 100.000. ExpectedCash
+// builds on that net figure, which is what the cashier physically counts.
+func computeSummary(ctx context.Context, q posQuerier, sessionID, storeID uuid.UUID) (*POSSessionSummary, error) {
+	session, err := getSessionByIDQ(ctx, q, sessionID, storeID)
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +301,7 @@ func (r *POSRepo) GetSummary(ctx context.Context, sessionID, storeID uuid.UUID) 
 	summary := &POSSessionSummary{Session: session}
 
 	// Order count + total sales (non-cancelled POS orders linked to this session).
-	if err := r.pool.QueryRow(ctx, `
+	if err := q.QueryRow(ctx, `
 		SELECT COUNT(*), COALESCE(SUM(total_cents), 0)
 		FROM orders
 		WHERE pos_session_id = $1 AND status <> 'cancelled'
@@ -283,8 +309,9 @@ func (r *POSRepo) GetSummary(ctx context.Context, sessionID, storeID uuid.UUID) 
 		return nil, fmt.Errorf("summary orders: %w", err)
 	}
 
-	// Breakdown per payment method.
-	rows, err := r.pool.Query(ctx, `
+	// Breakdown per payment method. Rows are closed explicitly (not deferred)
+	// because on a pgx.Tx only one query may be in flight at a time.
+	rows, err := q.Query(ctx, `
 		SELECT method, COALESCE(SUM(amount_cents), 0)
 		FROM pos_order_payments pop
 		JOIN orders o ON o.id = pop.order_id
@@ -294,11 +321,11 @@ func (r *POSRepo) GetSummary(ctx context.Context, sessionID, storeID uuid.UUID) 
 	if err != nil {
 		return nil, fmt.Errorf("summary payments: %w", err)
 	}
-	defer rows.Close()
 	for rows.Next() {
 		var method string
 		var amount int64
 		if err := rows.Scan(&method, &amount); err != nil {
+			rows.Close()
 			return nil, err
 		}
 		switch method {
@@ -316,9 +343,32 @@ func (r *POSRepo) GetSummary(ctx context.Context, sessionID, storeID uuid.UUID) 
 			summary.TotalEDCKredit = amount
 		}
 	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Change handed back on orders that took cash — subtracting it turns the
+	// tendered figure above into the cash actually left in the drawer.
+	var changeGiven int64
+	if err := q.QueryRow(ctx, `
+		SELECT COALESCE(SUM(o.change_amount_cents), 0)
+		FROM orders o
+		WHERE o.pos_session_id = $1 AND o.status <> 'cancelled'
+		  AND EXISTS (
+			  SELECT 1 FROM pos_order_payments p
+			  WHERE p.order_id = o.id AND p.method = 'cash'
+		  )
+	`, sessionID).Scan(&changeGiven); err != nil {
+		return nil, fmt.Errorf("summary change: %w", err)
+	}
+	summary.TotalCash -= changeGiven
+	if summary.TotalCash < 0 {
+		summary.TotalCash = 0
+	}
 
 	// Cash in/out.
-	if err := r.pool.QueryRow(ctx, `
+	if err := q.QueryRow(ctx, `
 		SELECT
 		  COALESCE(SUM(amount_cents) FILTER (WHERE type = 'in'), 0),
 		  COALESCE(SUM(amount_cents) FILTER (WHERE type = 'out'), 0)
@@ -336,22 +386,48 @@ func (r *POSRepo) GetSummary(ctx context.Context, sessionID, storeID uuid.UUID) 
 	return summary, nil
 }
 
-func (r *POSRepo) CloseSession(ctx context.Context, sessionID, storeID, closedBy uuid.UUID, closingCents int64) error {
-	summary, err := r.GetSummary(ctx, sessionID, storeID)
+// CloseSession finalises a shift. The summary is computed INSIDE the same
+// transaction, with the session row locked FOR UPDATE, so an order committing
+// mid-close can't be left out of expected_cash_cents. Only the cashier who
+// opened the shift — or an owner/admin — may close it.
+func (r *POSRepo) CloseSession(ctx context.Context, sessionID, storeID, closedBy uuid.UUID, closingCents int64, isManager bool) error {
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
 	}
-	if summary.Session.Status != "open" {
+	defer tx.Rollback(ctx)
+
+	var status string
+	var openedBy uuid.UUID
+	if err := tx.QueryRow(ctx, `
+		SELECT status, opened_by FROM pos_sessions
+		WHERE id = $1 AND store_id = $2
+		FOR UPDATE
+	`, sessionID, storeID).Scan(&status, &openedBy); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrPOSSessionNotFound
+		}
+		return err
+	}
+	if status != "open" {
 		return ErrPOSSessionNotOpen
 	}
+	if !isManager && openedBy != closedBy {
+		return ErrPOSForbidden
+	}
 
-	tag, err := r.pool.Exec(ctx, `
+	summary, err := computeSummary(ctx, tx, sessionID, storeID)
+	if err != nil {
+		return err
+	}
+
+	tag, err := tx.Exec(ctx, `
 		UPDATE pos_sessions
 		SET closing_cash_cents = $3,
-		    expected_cash_cents = $4,
-		    closed_by = $5,
-		    closed_at = now(),
-		    status = 'closed'
+			expected_cash_cents = $4,
+			closed_by = $5,
+			closed_at = now(),
+			status = 'closed'
 		WHERE id = $1 AND store_id = $2 AND status = 'open'
 	`, sessionID, storeID, closingCents, summary.ExpectedCash, closedBy)
 	if err != nil {
@@ -360,10 +436,31 @@ func (r *POSRepo) CloseSession(ctx context.Context, sessionID, storeID, closedBy
 	if tag.RowsAffected() == 0 {
 		return ErrPOSSessionNotFound
 	}
-	return nil
+	return tx.Commit(ctx)
 }
 
 // ─── Cash movements ──────────────────────────────────────────────────────────
+
+// assertOpenSession verifies the session exists in THIS store and is still
+// open. Without it a client could post cash movements or held carts against
+// another tenant's session id, or against a shift already closed and counted.
+func (r *POSRepo) assertOpenSession(ctx context.Context, sessionID, storeID uuid.UUID) error {
+	var status string
+	err := r.pool.QueryRow(ctx,
+		`SELECT status FROM pos_sessions WHERE id = $1 AND store_id = $2`,
+		sessionID, storeID,
+	).Scan(&status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrPOSSessionNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if status != "open" {
+		return ErrPOSSessionNotOpen
+	}
+	return nil
+}
 
 func (r *POSRepo) AddCashMovement(ctx context.Context, sessionID, storeID, userID uuid.UUID, kind string, amountCents int64, reason string) (*POSCashMovement, error) {
 	if kind != "in" && kind != "out" {
@@ -371,6 +468,9 @@ func (r *POSRepo) AddCashMovement(ctx context.Context, sessionID, storeID, userI
 	}
 	if amountCents <= 0 {
 		return nil, errors.New("jumlah harus lebih besar dari nol")
+	}
+	if err := r.assertOpenSession(ctx, sessionID, storeID); err != nil {
+		return nil, err
 	}
 
 	var m POSCashMovement
@@ -413,6 +513,9 @@ func (r *POSRepo) ListCashMovements(ctx context.Context, sessionID uuid.UUID) ([
 // ─── Held orders ─────────────────────────────────────────────────────────────
 
 func (r *POSRepo) CreateHeldOrder(ctx context.Context, storeID, sessionID, userID uuid.UUID, label string, snapshot json.RawMessage) (*POSHeldOrder, error) {
+	if err := r.assertOpenSession(ctx, sessionID, storeID); err != nil {
+		return nil, err
+	}
 	var h POSHeldOrder
 	err := r.pool.QueryRow(ctx, `
 		INSERT INTO pos_held_orders (store_id, pos_session_id, held_by, label, cart_snapshot)
@@ -665,20 +768,38 @@ func (r *POSRepo) CreatePOSOrder(ctx context.Context, in CreatePOSOrderInput) (*
 		primaryMethod = "pos_split"
 	}
 
-	// Upsert customer (if name + WA provided).
+	// Attach the order to a customer. When the WhatsApp number already matches
+	// an existing customer we use that row even if the cashier left the name
+	// blank — otherwise a redeem discount would be granted with no customer to
+	// debit the points from. A name is only required to CREATE a new customer.
 	var customerID *uuid.UUID
-	if name != "" && wa != "" {
+	switch {
+	case existingCust != nil:
+		cid := existingCust.ID
+		if _, err := tx.Exec(ctx, `
+			UPDATE customers
+			SET name = CASE WHEN $3 <> '' THEN $3 ELSE name END,
+				total_orders = total_orders + 1,
+				total_spent_cents = total_spent_cents + $4,
+				last_order_at = now(),
+				updated_at = now()
+			WHERE id = $1 AND store_id = $2
+		`, cid, in.StoreID, name, total); err != nil {
+			return nil, fmt.Errorf("update customer: %w", err)
+		}
+		customerID = &cid
+	case name != "" && wa != "":
 		var cid uuid.UUID
 		if err := tx.QueryRow(ctx, `
 			INSERT INTO customers (store_id, name, whatsapp_number,
-			                       total_orders, total_spent_cents, last_order_at)
+								   total_orders, total_spent_cents, last_order_at)
 			VALUES ($1, $2, $3, 1, $4, now())
 			ON CONFLICT (store_id, whatsapp_number) DO UPDATE SET
-			    name = EXCLUDED.name,
-			    total_orders = customers.total_orders + 1,
-			    total_spent_cents = customers.total_spent_cents + EXCLUDED.total_spent_cents,
-			    last_order_at = now(),
-			    updated_at = now()
+				name = EXCLUDED.name,
+				total_orders = customers.total_orders + 1,
+				total_spent_cents = customers.total_spent_cents + EXCLUDED.total_spent_cents,
+				last_order_at = now(),
+				updated_at = now()
 			RETURNING id
 		`, in.StoreID, name, wa, total).Scan(&cid); err != nil {
 			return nil, fmt.Errorf("upsert customer: %w", err)
@@ -743,6 +864,12 @@ func (r *POSRepo) CreatePOSOrder(ctx context.Context, in CreatePOSOrderInput) (*
 		return nil, fmt.Errorf("insert order: %w", err)
 	}
 
+	// Every line item must resolve inside this store before any stock moves —
+	// the client sends raw product/variant UUIDs and those are public.
+	if err := validateItemOwnershipTx(ctx, tx, in.StoreID, in.Items); err != nil {
+		return nil, err
+	}
+
 	// Decrement stock + insert order_items. needsReview is flipped when an
 	// offline-synced order has to overdraw stock (sale already happened).
 	needsReview := false
@@ -754,11 +881,15 @@ func (r *POSRepo) CreatePOSOrder(ctx context.Context, in CreatePOSOrderInput) (*
 		if !isDigital && it.ProductID != nil {
 			var rowsAffected int64
 			if it.VariantID != nil {
+				// store_id is re-asserted through the parent product so a
+				// foreign variant id can never be decremented here.
 				tag, err := tx.Exec(ctx, `
-					UPDATE product_variants
-					SET stock = stock - $2
-					WHERE id = $1 AND stock >= $2
-				`, *it.VariantID, it.Quantity)
+					UPDATE product_variants pv
+					SET stock = pv.stock - $2
+					FROM products p
+					WHERE pv.id = $1 AND pv.stock >= $2
+					  AND p.id = pv.product_id AND p.store_id = $3
+				`, *it.VariantID, it.Quantity, in.StoreID)
 				if err != nil {
 					return nil, fmt.Errorf("decrement variant stock: %w", err)
 				}
@@ -767,8 +898,8 @@ func (r *POSRepo) CreatePOSOrder(ctx context.Context, in CreatePOSOrderInput) (*
 				tag, err := tx.Exec(ctx, `
 					UPDATE products
 					SET stock = stock - $2, updated_at = now()
-					WHERE id = $1 AND stock >= $2
-				`, *it.ProductID, it.Quantity)
+					WHERE id = $1 AND stock >= $2 AND store_id = $3
+				`, *it.ProductID, it.Quantity, in.StoreID)
 				if err != nil {
 					return nil, fmt.Errorf("decrement product stock: %w", err)
 				}
@@ -783,15 +914,18 @@ func (r *POSRepo) CreatePOSOrder(ctx context.Context, in CreatePOSOrderInput) (*
 				// seller to reconcile manually.
 				needsReview = true
 				if it.VariantID != nil {
-					if _, err := tx.Exec(ctx,
-						`UPDATE product_variants SET stock = stock - $2 WHERE id = $1`,
-						*it.VariantID, it.Quantity); err != nil {
+					if _, err := tx.Exec(ctx, `
+						UPDATE product_variants pv
+						SET stock = pv.stock - $2
+						FROM products p
+						WHERE pv.id = $1 AND p.id = pv.product_id AND p.store_id = $3
+					`, *it.VariantID, it.Quantity, in.StoreID); err != nil {
 						return nil, fmt.Errorf("offline decrement variant stock: %w", err)
 					}
 				} else {
 					if _, err := tx.Exec(ctx,
-						`UPDATE products SET stock = stock - $2, updated_at = now() WHERE id = $1`,
-						*it.ProductID, it.Quantity); err != nil {
+						`UPDATE products SET stock = stock - $2, updated_at = now() WHERE id = $1 AND store_id = $3`,
+						*it.ProductID, it.Quantity, in.StoreID); err != nil {
 						return nil, fmt.Errorf("offline decrement product stock: %w", err)
 					}
 				}
@@ -872,7 +1006,17 @@ func (r *POSRepo) CreatePOSOrder(ctx context.Context, in CreatePOSOrderInput) (*
 			result.PointsRedeemed = redeemPoints
 		}
 		if loyaltyCfg.EarnRateCents > 0 {
-			earn := int(total / loyaltyCfg.EarnRateCents)
+			// Earn only on money actually collected. An offline order that
+			// synced short on payment must never mint points for cash the
+			// store never received.
+			earnBase := total
+			if paidTotal < earnBase {
+				earnBase = paidTotal
+			}
+			if earnBase < 0 {
+				earnBase = 0
+			}
+			earn := int(earnBase / loyaltyCfg.EarnRateCents)
 			if earn > 0 {
 				// Membership perk: boost earned points by the customer's tier
 				// multiplier (1.0 when no tier). Non-fatal — fall back to base.
@@ -915,42 +1059,89 @@ func (r *POSRepo) CreatePOSOrder(ctx context.Context, in CreatePOSOrderInput) (*
 	return &result, nil
 }
 
-// VoidPOSOrder cancels a POS order and restores stock. Only allowed if the
-// order is still within an open session that belongs to this store.
-func (r *POSRepo) VoidPOSOrder(ctx context.Context, orderID, storeID uuid.UUID, reason string) error {
-	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-
-	// Validate: order is POS, completed, and belongs to an open session.
-	var source, status string
-	var sessionID *uuid.UUID
-	if err := tx.QueryRow(ctx, `
-		SELECT source, status, pos_session_id FROM orders
-		WHERE id = $1 AND store_id = $2
-	`, orderID, storeID).Scan(&source, &status, &sessionID); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrOrderNotFound
+// validateItemOwnershipTx resolves every client-supplied product/variant id
+// against this store in one round-trip each. Product UUIDs are public via the
+// storefront, so without this a crafted POS order could decrement another
+// tenant's stock (and consume their raw materials).
+func validateItemOwnershipTx(ctx context.Context, tx pgx.Tx, storeID uuid.UUID, items []POSOrderItem) error {
+	var productIDs, variantIDs []uuid.UUID
+	for _, it := range items {
+		if it.ProductID != nil {
+			productIDs = append(productIDs, *it.ProductID)
 		}
-		return err
-	}
-	if source != "pos" || status != "completed" || sessionID == nil {
-		return ErrPOSOrderNotVoidable
-	}
-
-	var sessStatus string
-	if err := tx.QueryRow(ctx,
-		`SELECT status FROM pos_sessions WHERE id = $1`, *sessionID,
-	).Scan(&sessStatus); err != nil {
-		return err
-	}
-	if sessStatus != "open" {
-		return ErrPOSOrderNotVoidable
+		if it.VariantID != nil {
+			variantIDs = append(variantIDs, *it.VariantID)
+		}
 	}
 
-	// Restore stock per item (physical only).
+	if len(productIDs) > 0 {
+		owned := make(map[uuid.UUID]struct{}, len(productIDs))
+		rows, err := tx.Query(ctx,
+			`SELECT id FROM products WHERE id = ANY($1) AND store_id = $2`,
+			productIDs, storeID)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var id uuid.UUID
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+			owned[id] = struct{}{}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for _, id := range productIDs {
+			if _, ok := owned[id]; !ok {
+				return ErrPOSItemNotFound
+			}
+		}
+	}
+
+	if len(variantIDs) > 0 {
+		parents := make(map[uuid.UUID]uuid.UUID, len(variantIDs))
+		rows, err := tx.Query(ctx, `
+			SELECT pv.id, pv.product_id
+			FROM product_variants pv
+			JOIN products p ON p.id = pv.product_id
+			WHERE pv.id = ANY($1) AND p.store_id = $2
+		`, variantIDs, storeID)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var vid, pid uuid.UUID
+			if err := rows.Scan(&vid, &pid); err != nil {
+				rows.Close()
+				return err
+			}
+			parents[vid] = pid
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for _, it := range items {
+			if it.VariantID == nil {
+				continue
+			}
+			// The variant must live in this store AND belong to the product the
+			// line claims — a mismatched pair is just as wrong as a foreign id.
+			parent, ok := parents[*it.VariantID]
+			if !ok || (it.ProductID != nil && parent != *it.ProductID) {
+				return ErrPOSItemNotFound
+			}
+		}
+	}
+	return nil
+}
+
+// restoreOrderStockTx puts physical stock back for a cancelled/returned order.
+// Both UPDATEs re-assert store_id so the restore can never reach another tenant.
+func restoreOrderStockTx(ctx context.Context, tx pgx.Tx, storeID, orderID uuid.UUID) error {
 	rows, err := tx.Query(ctx, `
 		SELECT product_id, variant_id, quantity, product_type
 		FROM order_items WHERE order_id = $1
@@ -974,37 +1165,182 @@ func (r *POSRepo) VoidPOSOrder(ctx context.Context, orderID, storeID uuid.UUID, 
 		items = append(items, it)
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
 	for _, it := range items {
 		if it.ProductType == "digital" || it.ProductID == nil {
 			continue
 		}
 		if it.VariantID != nil {
-			if _, err := tx.Exec(ctx,
-				`UPDATE product_variants SET stock = stock + $2 WHERE id = $1`,
-				*it.VariantID, it.Quantity,
-			); err != nil {
+			if _, err := tx.Exec(ctx, `
+				UPDATE product_variants pv
+				SET stock = pv.stock + $2
+				FROM products p
+				WHERE pv.id = $1 AND p.id = pv.product_id AND p.store_id = $3
+			`, *it.VariantID, it.Quantity, storeID); err != nil {
 				return fmt.Errorf("restore variant stock: %w", err)
 			}
 		} else {
-			if _, err := tx.Exec(ctx,
-				`UPDATE products SET stock = stock + $2, updated_at = now() WHERE id = $1`,
-				*it.ProductID, it.Quantity,
-			); err != nil {
+			if _, err := tx.Exec(ctx, `
+				UPDATE products SET stock = stock + $2, updated_at = now()
+				WHERE id = $1 AND store_id = $3
+			`, *it.ProductID, it.Quantity, storeID); err != nil {
 				return fmt.Errorf("restore product stock: %w", err)
 			}
 		}
+	}
+	return nil
+}
+
+// reverseOrderSideEffectsTx undoes everything a completed POS sale wrote apart
+// from stock and the order row itself: raw-material consumption, loyalty points
+// and the customer's lifetime counters. Returns true when the loyalty clawback
+// had to be clamped (the buyer already spent the points) so the caller can flag
+// the order for manual review.
+func reverseOrderSideEffectsTx(
+	ctx context.Context, tx pgx.Tx,
+	storeID, orderID uuid.UUID, customerID *uuid.UUID, totalCents int64,
+) (bool, error) {
+	// Raw materials consumed by this order go back to stock (idempotent).
+	if err := reverseConsumptionTx(ctx, tx, storeID, orderID); err != nil {
+		return false, fmt.Errorf("reverse consumption: %w", err)
+	}
+	if customerID == nil {
+		return false, nil
+	}
+
+	// Lifetime counters — floored so a partial history can't go negative.
+	if _, err := tx.Exec(ctx, `
+		UPDATE customers
+		SET total_orders = GREATEST(total_orders - 1, 0),
+			total_spent_cents = GREATEST(total_spent_cents - $3, 0),
+			updated_at = now()
+		WHERE id = $1 AND store_id = $2
+	`, *customerID, storeID, totalCents); err != nil {
+		return false, fmt.Errorf("reverse customer totals: %w", err)
+	}
+
+	// Loyalty: a single compensating entry that negates what this order earned
+	// and hands back what it redeemed.
+	var earned, redeemed int
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(SUM(points) FILTER (WHERE type = 'earn'), 0),
+			   COALESCE(SUM(points) FILTER (WHERE type = 'redeem'), 0)
+		FROM loyalty_transactions
+		WHERE store_id = $1 AND order_id = $2
+	`, storeID, orderID).Scan(&earned, &redeemed); err != nil {
+		return false, fmt.Errorf("read loyalty history: %w", err)
+	}
+	delta := -(earned + redeemed)
+	if delta == 0 {
+		return false, nil
+	}
+
+	clamped := false
+	if delta < 0 {
+		// A clawback must not drive the balance negative — the buyer may have
+		// spent those points already. Clamp to zero and let the caller flag it.
+		var balance int
+		if err := tx.QueryRow(ctx,
+			`SELECT loyalty_points FROM customers WHERE id = $1 AND store_id = $2 FOR UPDATE`,
+			*customerID, storeID,
+		).Scan(&balance); err != nil {
+			return false, fmt.Errorf("lock loyalty balance: %w", err)
+		}
+		if balance+delta < 0 {
+			delta = -balance
+			clamped = true
+		}
+	}
+	if delta == 0 {
+		return clamped, nil
+	}
+	if err := applyLoyaltyTx(ctx, tx, storeID, *customerID, &orderID, delta, "adjust",
+		"Pembatalan transaksi POS"); err != nil {
+		return clamped, fmt.Errorf("reverse loyalty: %w", err)
+	}
+	return clamped, nil
+}
+
+// flagNeedsReviewTx marks an order for manual reconciliation.
+func flagNeedsReviewTx(ctx context.Context, tx pgx.Tx, orderID uuid.UUID, reason string) error {
+	_, err := tx.Exec(ctx,
+		`UPDATE orders SET needs_review = true, review_reason = $2 WHERE id = $1`,
+		orderID, reason)
+	return err
+}
+
+// VoidPOSOrder cancels a POS order and reverses everything it wrote: stock, raw
+// materials, loyalty points and customer totals. Only allowed while the order
+// still sits in an open session belonging to this store, and only for that
+// session's own cashier (or an owner/admin).
+func (r *POSRepo) VoidPOSOrder(ctx context.Context, orderID, storeID, actorID uuid.UUID, isManager bool, reason string) error {
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	// Validate: order is POS, completed, and belongs to an open session.
+	var source, status string
+	var sessionID, customerID *uuid.UUID
+	var totalCents int64
+	if err := tx.QueryRow(ctx, `
+		SELECT source, status, pos_session_id, customer_id, total_cents FROM orders
+		WHERE id = $1 AND store_id = $2
+	`, orderID, storeID).Scan(&source, &status, &sessionID, &customerID, &totalCents); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrOrderNotFound
+		}
+		return err
+	}
+	if source != "pos" || status != "completed" || sessionID == nil {
+		return ErrPOSOrderNotVoidable
+	}
+
+	var sessStatus string
+	var sessOwner uuid.UUID
+	if err := tx.QueryRow(ctx,
+		`SELECT status, opened_by FROM pos_sessions WHERE id = $1 AND store_id = $2`,
+		*sessionID, storeID,
+	).Scan(&sessStatus, &sessOwner); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrPOSOrderNotVoidable
+		}
+		return err
+	}
+	if sessStatus != "open" {
+		return ErrPOSOrderNotVoidable
+	}
+	if !isManager && sessOwner != actorID {
+		return ErrPOSForbidden
+	}
+
+	if err := restoreOrderStockTx(ctx, tx, storeID, orderID); err != nil {
+		return err
+	}
+	clamped, err := reverseOrderSideEffectsTx(ctx, tx, storeID, orderID, customerID, totalCents)
+	if err != nil {
+		return err
 	}
 
 	// Mark cancelled.
 	if _, err := tx.Exec(ctx, `
 		UPDATE orders
 		SET status = 'cancelled',
-		    cancelled_at = now(),
-		    cancellation_reason = $3,
-		    updated_at = now()
+			cancelled_at = now(),
+			cancellation_reason = $3,
+			updated_at = now()
 		WHERE id = $1 AND store_id = $2
 	`, orderID, storeID, reason); err != nil {
 		return err
+	}
+	if clamped {
+		if err := flagNeedsReviewTx(ctx, tx, orderID,
+			"poin loyalti tidak bisa ditarik penuh saat void"); err != nil {
+			return err
+		}
 	}
 
 	return tx.Commit(ctx)
@@ -1036,7 +1372,15 @@ type POSSessionOrder struct {
 	CashierName string
 }
 
-func (r *POSRepo) ListOrdersBySession(ctx context.Context, sessionID, storeID uuid.UUID) ([]POSSessionOrder, error) {
+// maxSessionOrderRows caps a single session listing / CSV export. A shift with
+// more transactions than this is truncated (the export appends a note row)
+// rather than streaming an unbounded result set through the API.
+const maxSessionOrderRows = 5000
+
+func (r *POSRepo) ListOrdersBySession(ctx context.Context, sessionID, storeID uuid.UUID, limit int) ([]POSSessionOrder, error) {
+	if limit <= 0 || limit > maxSessionOrderRows {
+		limit = maxSessionOrderRows
+	}
 	// Verify session belongs to store first.
 	var ok bool
 	if err := r.pool.QueryRow(ctx,
@@ -1051,14 +1395,14 @@ func (r *POSRepo) ListOrdersBySession(ctx context.Context, sessionID, storeID uu
 
 	rows, err := r.pool.Query(ctx, `
 		SELECT o.id, o.order_number, o.status, o.payment_method,
-		       o.subtotal_cents, o.discount_cents, o.total_cents, o.change_amount_cents,
-		       o.customer_name, o.customer_whatsapp, o.notes, o.created_at,
-		       o.refunded_at, COALESCE(o.refund_reason, ''),
-		       (SELECT COUNT(*) FROM order_items WHERE order_id = o.id) AS item_count
+			   o.subtotal_cents, o.discount_cents, o.total_cents, o.change_amount_cents,
+			   o.customer_name, o.customer_whatsapp, o.notes, o.created_at,
+			   o.refunded_at, COALESCE(o.refund_reason, '')
 		FROM orders o
 		WHERE o.pos_session_id = $1
 		ORDER BY o.created_at DESC
-	`, sessionID)
+		LIMIT $2
+	`, sessionID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -1070,7 +1414,7 @@ func (r *POSRepo) ListOrdersBySession(ctx context.Context, sessionID, storeID uu
 			&x.OrderID, &x.OrderNumber, &x.Status, &x.PaymentMethod,
 			&x.SubtotalCents, &x.DiscountCents, &x.TotalCents, &x.ChangeCents,
 			&x.CustomerName, &x.CustomerWA, &x.Notes, &x.CreatedAt,
-			&x.RefundedAt, &x.RefundReason, &x.ItemCount,
+			&x.RefundedAt, &x.RefundReason,
 		); err != nil {
 			return nil, err
 		}
@@ -1080,11 +1424,89 @@ func (r *POSRepo) ListOrdersBySession(ctx context.Context, sessionID, storeID uu
 		return nil, err
 	}
 
-	// Hydrate payments per order (single follow-up query — N is bounded).
-	for i := range out {
-		out[i].Payments, _ = r.GetOrderPayments(ctx, out[i].OrderID)
+	// Payments + item counts in two set-based queries instead of two per row.
+	if err := r.hydratePayments(ctx, out); err != nil {
+		return nil, err
+	}
+	if err := r.hydrateItemCounts(ctx, out); err != nil {
+		return nil, err
 	}
 	return out, nil
+}
+
+func orderIDsOf(out []POSSessionOrder) []uuid.UUID {
+	ids := make([]uuid.UUID, 0, len(out))
+	for _, o := range out {
+		ids = append(ids, o.OrderID)
+	}
+	return ids
+}
+
+// hydratePayments fills Payments for a page of orders in ONE query.
+func (r *POSRepo) hydratePayments(ctx context.Context, out []POSSessionOrder) error {
+	if len(out) == 0 {
+		return nil
+	}
+	byOrder := make(map[uuid.UUID][]POSPayment, len(out))
+	rows, err := r.pool.Query(ctx, `
+		SELECT order_id, method, amount_cents,
+			   COALESCE(card_brand, ''), COALESCE(card_last4, ''),
+			   COALESCE(reference_number, ''), COALESCE(approval_code, '')
+		FROM pos_order_payments
+		WHERE order_id = ANY($1)
+		ORDER BY order_id, created_at
+	`, orderIDsOf(out))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var oid uuid.UUID
+		var p POSPayment
+		if err := rows.Scan(&oid, &p.Method, &p.AmountCents,
+			&p.CardBrand, &p.CardLast4, &p.ReferenceNumber, &p.ApprovalCode); err != nil {
+			return err
+		}
+		byOrder[oid] = append(byOrder[oid], p)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for i := range out {
+		out[i].Payments = byOrder[out[i].OrderID]
+	}
+	return nil
+}
+
+// hydrateItemCounts fills ItemCount for a page of orders in ONE grouped query.
+func (r *POSRepo) hydrateItemCounts(ctx context.Context, out []POSSessionOrder) error {
+	if len(out) == 0 {
+		return nil
+	}
+	counts := make(map[uuid.UUID]int, len(out))
+	rows, err := r.pool.Query(ctx, `
+		SELECT order_id, COUNT(*) FROM order_items
+		WHERE order_id = ANY($1) GROUP BY order_id
+	`, orderIDsOf(out))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var oid uuid.UUID
+		var n int
+		if err := rows.Scan(&oid, &n); err != nil {
+			return err
+		}
+		counts[oid] = n
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for i := range out {
+		out[i].ItemCount = counts[out[i].OrderID]
+	}
+	return nil
 }
 
 // ListPOSOrdersFilter drives the cross-shift POS transaction history page.
@@ -1188,16 +1610,17 @@ func (r *POSRepo) ListPOSOrders(ctx context.Context, f ListPOSOrdersFilter) ([]P
 	countArgs := args[:len(args)-2] // drop limit + offset
 	_ = r.pool.QueryRow(ctx, countQ, countArgs...).Scan(&total)
 
-	// Hydrate payments per order (bounded by page size).
-	for i := range out {
-		out[i].Payments, _ = r.GetOrderPayments(ctx, out[i].OrderID)
+	// Hydrate payments for the page in one set-based query.
+	if err := r.hydratePayments(ctx, out); err != nil {
+		return nil, 0, err
 	}
 	return out, total, nil
 }
 
-// ReturnOrder fully cancels a previously-completed POS order. Restores stock,
-// marks order as cancelled, and records refund metadata. Used for past-shift
-// returns (vs VoidPOSOrder which is in-shift only).
+// ReturnOrder fully cancels a previously-completed POS order: restores stock,
+// reverses material consumption + loyalty points + customer totals, marks the
+// order cancelled and records refund metadata. Used for past-shift returns (vs
+// VoidPOSOrder which is in-shift only).
 func (r *POSRepo) ReturnOrder(ctx context.Context, orderID, storeID uuid.UUID, reason string) error {
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -1207,10 +1630,11 @@ func (r *POSRepo) ReturnOrder(ctx context.Context, orderID, storeID uuid.UUID, r
 
 	var source, status string
 	var totalCents int64
+	var customerID *uuid.UUID
 	if err := tx.QueryRow(ctx, `
-		SELECT source, status, total_cents FROM orders
+		SELECT source, status, total_cents, customer_id FROM orders
 		WHERE id = $1 AND store_id = $2
-	`, orderID, storeID).Scan(&source, &status, &totalCents); err != nil {
+	`, orderID, storeID).Scan(&source, &status, &totalCents, &customerID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrOrderNotFound
 		}
@@ -1220,63 +1644,32 @@ func (r *POSRepo) ReturnOrder(ctx context.Context, orderID, storeID uuid.UUID, r
 		return ErrPOSOrderNotVoidable
 	}
 
-	// Restore stock per item.
-	rows, err := tx.Query(ctx, `
-		SELECT product_id, variant_id, quantity, product_type
-		FROM order_items WHERE order_id = $1
-	`, orderID)
-	if err != nil {
+	if err := restoreOrderStockTx(ctx, tx, storeID, orderID); err != nil {
 		return err
 	}
-	type itemRestore struct {
-		ProductID   *uuid.UUID
-		VariantID   *uuid.UUID
-		Quantity    int
-		ProductType string
-	}
-	var items []itemRestore
-	for rows.Next() {
-		var it itemRestore
-		if err := rows.Scan(&it.ProductID, &it.VariantID, &it.Quantity, &it.ProductType); err != nil {
-			rows.Close()
-			return err
-		}
-		items = append(items, it)
-	}
-	rows.Close()
-	for _, it := range items {
-		if it.ProductType == "digital" || it.ProductID == nil {
-			continue
-		}
-		if it.VariantID != nil {
-			if _, err := tx.Exec(ctx,
-				`UPDATE product_variants SET stock = stock + $2 WHERE id = $1`,
-				*it.VariantID, it.Quantity,
-			); err != nil {
-				return err
-			}
-		} else {
-			if _, err := tx.Exec(ctx,
-				`UPDATE products SET stock = stock + $2, updated_at = now() WHERE id = $1`,
-				*it.ProductID, it.Quantity,
-			); err != nil {
-				return err
-			}
-		}
+	clamped, err := reverseOrderSideEffectsTx(ctx, tx, storeID, orderID, customerID, totalCents)
+	if err != nil {
+		return err
 	}
 
 	if _, err := tx.Exec(ctx, `
 		UPDATE orders
 		SET status = 'cancelled',
-		    cancelled_at = now(),
-		    refunded_at = now(),
-		    refund_amount_cents = $3,
-		    refund_reason = $4,
-		    cancellation_reason = 'Retur POS',
-		    updated_at = now()
+			cancelled_at = now(),
+			refunded_at = now(),
+			refund_amount_cents = $3,
+			refund_reason = $4,
+			cancellation_reason = 'Retur POS',
+			updated_at = now()
 		WHERE id = $1 AND store_id = $2
 	`, orderID, storeID, totalCents, reason); err != nil {
 		return err
+	}
+	if clamped {
+		if err := flagNeedsReviewTx(ctx, tx, orderID,
+			"poin loyalti tidak bisa ditarik penuh saat retur"); err != nil {
+			return err
+		}
 	}
 
 	return tx.Commit(ctx)
@@ -1434,6 +1827,28 @@ func (r *POSRepo) GetPOSReport(ctx context.Context, f POSReportFilter) (*POSRepo
 			}
 		}
 		rows.Close()
+
+		// Net the cash figure against change handed back, so a Rp 75.000 sale
+		// tendered with Rp 100.000 counts as Rp 75.000 of cash taken — mirrors
+		// computeSummary so the shift rekap and the report agree.
+		changeQ := fmt.Sprintf(`
+			SELECT COALESCE(SUM(o.change_amount_cents), 0)
+			FROM orders o
+			LEFT JOIN pos_sessions ps ON ps.id = o.pos_session_id
+			WHERE %s
+			  AND EXISTS (
+				  SELECT 1 FROM pos_order_payments p
+				  WHERE p.order_id = o.id AND p.method = 'cash'
+			  )
+		`, where)
+		var changeGiven int64
+		if err := r.pool.QueryRow(ctx, changeQ, args...).Scan(&changeGiven); err != nil {
+			return nil, fmt.Errorf("cash change: %w", err)
+		}
+		m.TotalCash -= changeGiven
+		if m.TotalCash < 0 {
+			m.TotalCash = 0
+		}
 	}
 
 	// Daily series (last 30 days within filter window).

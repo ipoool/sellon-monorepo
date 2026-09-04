@@ -89,7 +89,7 @@ export const tutorialPosts: BlogPost[] = [
         bullets: [
           "Password minimal 8 karakter dan kombinasi huruf & angka — SellOn menolak password yang terlalu lemah.",
           "URL toko tidak bisa diganti setelah toko dibuat. Pikirkan baik-baik nama link-nya sebelum lanjut.",
-          "Lupa password? Untuk saat ini hubungi halo@sellon.id dari email akunmu — fitur reset password self-service segera hadir.",
+          "Lupa password? Klik \"Lupa password?\" di halaman masuk. Kami kirim kode 6 digit ke emailmu, lalu kamu bisa langsung bikin password baru.",
         ],
       },
       {

@@ -37,12 +37,12 @@ export function UpgradePrompt({
         {description ??
           `Upgrade ke paket ${label} (${price}) untuk membuka fitur ini.`}
       </p>
-      <Link href="/settings/subscription" className="mt-5 inline-block">
-        <Button size="sm">
+      <Button asChild size="sm" className="mt-5">
+        <Link href="/settings/subscription">
           <Crown className="size-4" aria-hidden />
           Lihat Paket {label}
-        </Button>
-      </Link>
+        </Link>
+      </Button>
     </div>
   );
 }

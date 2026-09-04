@@ -157,11 +157,11 @@ func (h *TableHandler) Resolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response.JSON(w, http.StatusOK, map[string]any{
-		"store_slug":   res.StoreSlug,
-		"store_name":   res.StoreName,
-		"table_id":     res.TableID.String(),
-		"table_label":  res.TableLabel,
-		"payment_mode": res.PaymentMode,
+		"store_slug":     res.StoreSlug,
+		"store_name":     res.StoreName,
+		"table_id":       res.TableID.String(),
+		"table_label":    res.TableLabel,
+		"payment_mode":   res.PaymentMode,
 		"dinein_enabled": res.DineInOn,
 	})
 }

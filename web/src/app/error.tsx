@@ -55,12 +55,12 @@ export default function GlobalRouteError({
             <RotateCcw className="size-4" aria-hidden />
             Coba lagi
           </Button>
-          <Link href="/">
-            <Button size="md" variant="outline">
+          <Button asChild size="md" variant="outline">
+            <Link href="/">
               <Home className="size-4" aria-hidden />
               Kembali ke beranda
-            </Button>
-          </Link>
+            </Link>
+          </Button>
         </div>
       </div>
     </main>

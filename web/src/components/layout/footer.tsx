@@ -1,8 +1,6 @@
 import Link from "next/link";
 import { Container } from "@/components/layout/container";
 
-const COPYRIGHT_YEAR = new Date().getFullYear();
-
 type FooterLink = {
   label: string;
   href?: string;
@@ -53,6 +51,9 @@ const columns: FooterColumn[] = [
 ];
 
 export function Footer() {
+  // Computed per render, not at module scope — a module-level constant
+  // freezes at build / server-start time and shows a stale year forever.
+  const copyrightYear = new Date().getFullYear();
   return (
     <footer className="border-t border-neutral-200 bg-white">
       <Container>
@@ -113,7 +114,7 @@ export function Footer() {
         </div>
 
         <div className="flex flex-col gap-3 border-t border-neutral-200 py-6 text-sm text-neutral-500 sm:flex-row sm:items-center sm:justify-between">
-          <p>© {COPYRIGHT_YEAR} SellOn Indonesia. Semua hak dilindungi.</p>
+          <p>© {copyrightYear} SellOn Indonesia. Semua hak dilindungi.</p>
           <p className="flex items-center gap-1.5">
             <span aria-hidden>🇮🇩</span>
             <span>Dibuat di Indonesia untuk UMKM Indonesia.</span>

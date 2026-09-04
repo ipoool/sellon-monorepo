@@ -22,10 +22,17 @@ type Props = {
   onSuccess?: () => void;
 };
 
-// Convert ISO datetime → "YYYY-MM-DD" for <input type="date">
+// Convert ISO datetime → "YYYY-MM-DD" for <input type="date">.
+// Must be read as a Jakarta wall-clock date: the backend stores an
+// expiry as 23:59:59 WIB (= 16:59:59Z the same day), so a raw
+// `iso.slice(0, 10)` would show the seller the PREVIOUS day and silently
+// shorten the promo by one day every time they re-saved it.
 function isoToDateInput(iso: string | null | undefined): string {
   if (!iso) return "";
-  return iso.slice(0, 10);
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
+  // en-CA gives ISO-shaped "YYYY-MM-DD".
+  return d.toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
 }
 
 export function PromoForm({ initial, onSuccess }: Props) {

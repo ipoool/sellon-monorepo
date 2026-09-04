@@ -174,7 +174,7 @@ export function OrderQuickWA({ order, storeName, templates }: Props) {
         </Button>
         {showPaymentHint && (
           <p className="text-xs text-neutral-500">
-            Generate payment link dulu via tombol &ldquo;Buat Link Pembayaran&rdquo; di halaman pesanan.
+            Buat dulu link pembayaran lewat tombol &ldquo;Generate Link&rdquo; di panel Pembayaran halaman pesanan.
           </p>
         )}
         <Button

@@ -74,7 +74,7 @@ export function SubscriptionExpiryBanner({ subscription }: Props) {
           : "Perpanjang sekarang biar toko-mu tidak turun ke tier Gratis."}
       </p>
       <Link
-        href="/dashboard/settings/subscription"
+        href="/settings/subscription"
         className="inline-flex h-8 items-center gap-1.5 self-start rounded-md bg-neutral-900 px-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 sm:self-auto"
       >
         {cancelled ? "Aktifkan kembali" : "Perpanjang sekarang"}

@@ -45,7 +45,13 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
     initial?.is_configured && initial?.last_verify_status === "ok" ? "ok" : "idle",
   );
 
-  const [webhookURL, setWebhookURL] = useState(initial?.webhook_url ?? "");
+  // Derived from props, NOT useState: the API returns an empty
+  // webhook_url until the gateway is configured, and a state initializer
+  // only runs once — so after the first save + router.refresh() the "URL
+  // Webhook" block stayed hidden until a hard reload and sellers never
+  // pasted the notification URL into Midtrans. Every mutation here ends
+  // in refresh(), which re-renders the parent with the current value.
+  const webhookURL = initial?.webhook_url ?? "";
   const [webhookCopied, setWebhookCopied] = useState(false);
   const [rotating, setRotating] = useState(false);
   const [showRotateConfirm, setShowRotateConfirm] = useState(false);
@@ -157,7 +163,7 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
         error?: string;
       };
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-      if (data.webhook_url) setWebhookURL(data.webhook_url);
+      // No local setState — refresh() below re-reads the rotated URL.
       showSuccess(
         data.store_set_offline
           ? "URL webhook baru ter-generate. Toko di-set offline — paste URL baru di Midtrans lalu buka kembali toko."

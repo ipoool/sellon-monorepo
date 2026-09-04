@@ -28,7 +28,7 @@ type AdminHandler struct {
 	auditRepo     *repository.AuditRepo
 	subs          *repository.SubscriptionRepo
 	plans         *repository.PlanRepo
-	storage       *storage.SupabaseClient
+	storage       storage.Client
 	jwt           *auth.JWTService
 	mailer        *email.Mailer
 	webOrigin     string
@@ -44,7 +44,7 @@ func NewAdminHandler(
 	auditRepo *repository.AuditRepo,
 	subs *repository.SubscriptionRepo,
 	plans *repository.PlanRepo,
-	storageCli *storage.SupabaseClient,
+	storageCli storage.Client,
 	jwt *auth.JWTService,
 	mailer *email.Mailer,
 	webOrigin string,
@@ -257,10 +257,12 @@ func (h *AdminHandler) toggleBan(w http.ResponseWriter, r *http.Request, banned 
 
 // DELETE /api/v1/admin/users/{id}
 //
-// Hard-delete user beserta seluruh data terkait. FE wajib show
-// ConfirmDialog dengan typed phrase "DELETE NOW" — backend hanya guard:
-//   1) bukan diri sendiri
-//   2) bukan akun admin lain (admin baru bisa di-delete via DB direct)
+// Hard-delete user beserta seluruh data terkait. Guards:
+//  0. body harus berisi {"confirm":"DELETE NOW"} — repo convention says the
+//     backend enforces destructive typed phrases regardless of what the FE
+//     dialog does, so a stray curl can't cascade-delete a tenant
+//  1. bukan diri sendiri
+//  2. bukan akun admin lain (admin baru bisa di-delete via DB direct)
 //
 // Cascade DB sudah set di migration 0002+: stores → products, orders,
 // categories, bank_accounts, promos, dst. semua ON DELETE CASCADE
@@ -272,6 +274,16 @@ func (h *AdminHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusBadRequest, "invalid id")
 		return
 	}
+	var confirmBody struct {
+		Confirm string `json:"confirm"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&confirmBody)
+	if strings.TrimSpace(confirmBody.Confirm) != "DELETE NOW" {
+		response.Error(w, http.StatusBadRequest,
+			`konfirmasi wajib: kirim body {"confirm":"DELETE NOW"}`)
+		return
+	}
+
 	actorUID, _ := auth.UserIDFromContext(r.Context())
 	if actorUID == id {
 		response.Error(w, http.StatusBadRequest, "tidak bisa hapus akun sendiri")
@@ -343,9 +355,9 @@ func (h *AdminHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		})
 
 	response.JSON(w, http.StatusOK, map[string]any{
-		"ok":               true,
-		"deleted_user_id":  id.String(),
-		"storage_cleanup":  len(paths),
+		"ok":              true,
+		"deleted_user_id": id.String(),
+		"storage_cleanup": len(paths),
 	})
 }
 
@@ -357,6 +369,10 @@ func (h *AdminHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 // admin into the imp claim. The impersonation token uses the same TTL
 // as a regular session (JWT_TTL_HOURS) — exit happens via the explicit
 // "Keluar dari mode" button rather than a forced auto-expire.
+// impersonationTTL bounds how long an admin's "act as this seller" cookie
+// stays valid. Deliberately far shorter than a normal session.
+const impersonationTTL = 30 * time.Minute
+
 func (h *AdminHandler) Impersonate(w http.ResponseWriter, r *http.Request) {
 	targetID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
@@ -382,9 +398,10 @@ func (h *AdminHandler) Impersonate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ttl=0 → IssueImpersonation falls back to the service's default TTL
-	// (same as a normal seller session).
-	token, exp, err := h.jwt.IssueImpersonation(targetID, &adminUID, 0)
+	// Short TTL: an impersonation cookie left behind on a shared machine
+	// would otherwise stay a valid seller session for the full JWT_TTL_HOURS
+	// (7 days by default). The admin re-impersonates if they need longer.
+	token, exp, err := h.jwt.IssueImpersonation(targetID, &adminUID, impersonationTTL)
 	if err != nil {
 		h.logger.Error("issue impersonation jwt", "err", err)
 		response.Error(w, http.StatusInternalServerError, "internal error")
@@ -577,7 +594,7 @@ type platformAuditDTO struct {
 
 func toPlatformAuditDTO(e repository.PlatformAuditEntry) platformAuditDTO {
 	out := platformAuditDTO{
-		ID: e.ID.String(),
+		ID:         e.ID.String(),
 		ActorEmail: e.ActorEmail, ActorName: e.ActorName,
 		Action: e.Action, Summary: e.Summary,
 		Metadata:  e.Metadata,
@@ -749,6 +766,13 @@ func (h *AdminHandler) ActivateInvoice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sub, inv, err := h.subs.SettleInvoice(r.Context(), id)
+	if errors.Is(err, repository.ErrInvoiceNotPending) {
+		// Double-click, or the invoice was already rejected/failed. The
+		// period was NOT extended — that's the whole point of the guard.
+		response.Error(w, http.StatusConflict,
+			"invoice sudah diproses — statusnya bukan lagi 'pending'")
+		return
+	}
 	if err != nil {
 		h.logger.Error("admin settle invoice", "err", err, "invoice_id", id)
 		response.Error(w, http.StatusBadRequest,
@@ -820,9 +844,9 @@ func (h *AdminHandler) GrantSubscription(w http.ResponseWriter, r *http.Request)
 			}
 			expiresAt = t
 		case req.Months > 0 && req.Months <= 60:
-			expiresAt = time.Now().Add(
-				time.Duration(req.Months) * 30 * 24 * time.Hour,
-			)
+			// Calendar months, not 30-day blocks: months*30*24h made a
+			// 12-month grant expire ~5 days early.
+			expiresAt = time.Now().AddDate(0, req.Months, 0)
 		default:
 			response.Error(w, http.StatusBadRequest,
 				"isi expires_at atau months (1-60) untuk plan berbayar")
@@ -840,6 +864,17 @@ func (h *AdminHandler) GrantSubscription(w http.ResponseWriter, r *http.Request)
 		h.logger.Error("admin grant subscription", "err", err, "store_id", storeID)
 		response.Error(w, http.StatusInternalServerError, "gagal set langganan")
 		return
+	}
+
+	// Custom domain is Bisnis-only: dropping the store off that plan must
+	// also stop the domain from serving (and from renewing auto-TLS).
+	// Best-effort — never block the admin action on it.
+	if plan != "bisnis" {
+		if revoked, derr := h.stores.SuspendCustomDomain(r.Context(), storeID); derr != nil {
+			h.logger.Warn("suspend custom domain after grant", "err", derr, "store_id", storeID)
+		} else if revoked {
+			h.logger.Info("custom domain suspended (plan no longer bisnis)", "store_id", storeID)
+		}
 	}
 
 	h.logPlatform(r, "subscription.admin_granted", nil, &storeID,
@@ -905,14 +940,16 @@ func (h *AdminHandler) sendTierUpgradeEmail(ctx context.Context, storeID uuid.UU
 	})
 }
 
-// parseAdminDateInput accepts "YYYY-MM-DD" (interpreted as end-of-day
-// so trials don't expire mid-day) or RFC3339.
+// parseAdminDateInput accepts "YYYY-MM-DD" (interpreted as end-of-day in
+// Asia/Jakarta — admins and sellers both think in WIB, and parsing it as
+// UTC end-of-day made the grant die at 06:59 WIB the NEXT morning) or a
+// full RFC3339 timestamp.
 func parseAdminDateInput(raw string) (time.Time, error) {
 	if t, err := time.Parse(time.RFC3339, raw); err == nil {
 		return t, nil
 	}
-	if t, err := time.Parse("2006-01-02", raw); err == nil {
-		return t.Add(24 * time.Hour).Add(-time.Second), nil
+	if t, err := time.ParseInLocation("2006-01-02", raw, wib); err == nil {
+		return t.AddDate(0, 0, 1).Add(-time.Second), nil
 	}
 	return time.Time{}, errors.New("invalid date")
 }

@@ -134,9 +134,9 @@ func (h *PaymentHandler) RotateWebhook(w http.ResponseWriter, r *http.Request) {
 		EntityType: "payment_gateway",
 		Summary:    "Rotate webhook Midtrans — toko di-set offline sampai URL baru ter-update di Midtrans",
 		Metadata: map[string]any{
-			"provider":         "midtrans",
-			"old_webhook_url":  oldURL,
-			"new_webhook_url":  newURL,
+			"provider":          "midtrans",
+			"old_webhook_url":   oldURL,
+			"new_webhook_url":   newURL,
 			"store_set_offline": storeWasOpen,
 		},
 	})

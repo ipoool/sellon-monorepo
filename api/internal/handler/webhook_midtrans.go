@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -67,6 +68,39 @@ type midtransNotification struct {
 	GrossAmount       string `json:"gross_amount"`
 	SignatureKey      string `json:"signature_key"`
 	PaymentType       string `json:"payment_type"`
+	// Present on refund / partial_refund notifications: the cumulative amount
+	// refunded so far, same "150000.00" rupiah formatting as gross_amount.
+	RefundAmount string `json:"refund_amount"`
+}
+
+// rupiahToCents parses Midtrans' amount formatting ("150000.00", sometimes
+// "150000") into our cents unit. Returns ok=false for anything unparseable so
+// callers can skip the comparison rather than act on a bogus number.
+func rupiahToCents(s string) (int64, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, false
+	}
+	whole, frac, _ := strings.Cut(s, ".")
+	rupiah, err := strconv.ParseInt(whole, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	cents := rupiah * 100
+	if frac != "" {
+		if len(frac) > 2 {
+			frac = frac[:2]
+		}
+		for len(frac) < 2 {
+			frac += "0"
+		}
+		c, err := strconv.ParseInt(frac, 10, 64)
+		if err != nil {
+			return 0, false
+		}
+		cents += c
+	}
+	return cents, true
 }
 
 // POST /webhooks/midtrans/{token}
@@ -135,6 +169,18 @@ func (h *WebhookHandler) Midtrans(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Refund notifications never go through the payment-status path: a refund
+	// has to account for money AND stock, and a partial refund must stay
+	// 'paid'. Route them to the same repo refund path the seller UI uses.
+	if n.TransactionStatus == "refund" || n.TransactionStatus == "partial_refund" {
+		h.handleGatewayRefund(r.Context(), gateway.StoreID, order, n)
+		response.JSON(w, http.StatusOK, map[string]string{
+			"status":         "ok",
+			"payment_status": n.TransactionStatus,
+		})
+		return
+	}
+
 	mappedStatus := payments.MapTransactionStatus(n.TransactionStatus, n.FraudStatus)
 	if mappedStatus == "" {
 		h.logger.Info("webhook: unhandled transaction_status",
@@ -143,19 +189,40 @@ func (h *WebhookHandler) Midtrans(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.orders.SetPaymentStatus(r.Context(), gateway.StoreID, order.ID, mappedStatus, n.PaymentType); err != nil {
+	// Amount integrity: what Midtrans says was charged must match what we
+	// billed. A mismatch is never auto-fulfilled.
+	amountMismatch := false
+	if cents, ok := rupiahToCents(n.GrossAmount); ok && cents != order.TotalCents {
+		amountMismatch = true
+		h.logger.Warn("webhook: gross_amount mismatch",
+			"order_id", n.OrderID, "midtrans_cents", cents, "order_cents", order.TotalCents)
+	}
+
+	// One atomic guarded write that also hands back the pre-update values, so
+	// nothing (expiry worker, a concurrent notification) can slip between the
+	// read and the write. 0 rows = the order is already in a stronger payment
+	// state → replay, ack with no side effects.
+	change, err := h.orders.SetPaymentStatusGuarded(
+		r.Context(), gateway.StoreID, order.ID, mappedStatus, n.PaymentType)
+	if errors.Is(err, repository.ErrPaymentStatusUnchanged) {
+		h.logger.Info("webhook: ignored replay / stale status",
+			"order_id", n.OrderID, "incoming", mappedStatus, "current", order.PaymentStatus)
+		response.JSON(w, http.StatusOK, map[string]string{"status": "already_settled"})
+		return
+	}
+	if err != nil {
 		h.logger.Error("webhook: update payment status", "err", err)
 		response.Error(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
 	h.logger.Info("webhook: payment status updated",
-		"order_id", n.OrderID, "from", order.PaymentStatus, "to", mappedStatus)
+		"order_id", n.OrderID, "from", change.PrevPaymentStatus, "to", mappedStatus)
 
-	// React to the freshly-mapped status. order.PaymentStatus / order.Status are
-	// the pre-update values (loaded above), so these branches fire once.
+	// Branch on what the UPDATE actually returned — guaranteed atomic with the
+	// write, so each side effect fires exactly once.
 	switch {
-	case mappedStatus == "paid" && order.PaymentStatus != "paid" && order.Status == "cancelled":
+	case mappedStatus == "paid" && change.PrevStatus == "cancelled":
 		// Payment landed on an order that was already cancelled (e.g. the buyer
 		// paid after auto-expiry already released its stock/kuota). Do NOT
 		// auto-fulfill — the inventory may be gone/re-sold. Record the payment
@@ -167,7 +234,16 @@ func (h *WebhookHandler) Midtrans(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("webhook: payment on cancelled order — flagged for review",
 			"order_id", n.OrderID)
 
-	case mappedStatus == "paid" && order.PaymentStatus != "paid":
+	case mappedStatus == "paid" && amountMismatch:
+		// Money landed but not the amount we billed (price edited mid-checkout,
+		// tampered Snap request, partial capture). Record it, but never mint
+		// tokens or send delivery emails off a number we can't reconcile.
+		if rErr := h.orders.FlagNeedsReview(r.Context(), gateway.StoreID, order.ID,
+			"Nominal pembayaran tidak sama dengan total pesanan — cek di dashboard Midtrans"); rErr != nil {
+			h.logger.Error("webhook: flag needs_review", "err", rErr, "order_id", n.OrderID)
+		}
+
+	case mappedStatus == "paid":
 		// Normal fresh payment. Fire side-effects once.
 		go h.emailPaymentReceived(gateway.StoreID, order, n.PaymentType)
 		// Digital fulfillment: auto-complete + mint download tokens + email buyer.
@@ -180,9 +256,7 @@ func (h *WebhookHandler) Midtrans(w http.ResponseWriter, r *http.Request) {
 		}
 
 	case mappedStatus == "failed" &&
-		order.Status == "pending" &&
-		order.PaymentStatus != "paid" &&
-		order.PaymentStatus != "refunded" &&
+		change.PrevStatus == "pending" &&
 		strings.TrimSpace(order.PaymentProofURL) == "":
 		// Midtrans expire/cancel/deny on a still-open order (unpaid OR a pending
 		// VA/bank charge that lapsed): cancel it now so its stock + kuota + promo
@@ -199,6 +273,59 @@ func (h *WebhookHandler) Midtrans(w http.ResponseWriter, r *http.Request) {
 		"status":         "ok",
 		"payment_status": mappedStatus,
 	})
+}
+
+// handleGatewayRefund books a refund the seller issued from their Midtrans
+// dashboard. Previously these notifications only flipped payment_status, so no
+// amount was recorded, stock/kuota never came back, a partial refund looked
+// like a full one, and the seller's own refund button then refused with
+// "pesanan tidak bisa direfund" because the order was no longer 'paid'.
+func (h *WebhookHandler) handleGatewayRefund(ctx context.Context, storeID uuid.UUID, order *repository.Order, n midtransNotification) {
+	const reason = "Refund via dashboard Midtrans"
+
+	// refund_amount is the cumulative amount refunded; fall back to the full
+	// gross when Midtrans omits it.
+	amountCents, ok := rupiahToCents(n.RefundAmount)
+	if !ok || amountCents <= 0 {
+		amountCents, ok = rupiahToCents(n.GrossAmount)
+	}
+	if !ok || amountCents <= 0 {
+		h.logger.Warn("webhook: refund without a parseable amount",
+			"order_id", n.OrderID, "refund_amount", n.RefundAmount, "gross_amount", n.GrossAmount)
+		return
+	}
+	if amountCents > order.TotalCents {
+		amountCents = order.TotalCents
+	}
+
+	if n.TransactionStatus == "partial_refund" {
+		// Still a sale, just a smaller one — keep payment_status='paid' and
+		// record how much went back, so a later full refund is still possible.
+		if err := h.orders.RecordPartialRefund(ctx, storeID, order.ID, amountCents, reason); err != nil {
+			h.logger.Warn("webhook: record partial refund",
+				"err", err, "order_id", n.OrderID, "amount_cents", amountCents)
+			return
+		}
+		h.logger.Info("webhook: partial refund recorded",
+			"order_id", n.OrderID, "amount_cents", amountCents)
+		return
+	}
+
+	// Full refund: same path as the seller's refund button — flips
+	// payment_status, cancels the order and restores stock / kuota / promo /
+	// materials.
+	if err := h.orders.Refund(ctx, storeID, order.ID, amountCents, reason); err != nil {
+		if errors.Is(err, repository.ErrRefundNotAllowed) {
+			// Already refunded (replayed notification) or never paid.
+			h.logger.Info("webhook: refund notification ignored",
+				"order_id", n.OrderID, "current_payment_status", order.PaymentStatus)
+			return
+		}
+		h.logger.Error("webhook: apply refund", "err", err, "order_id", n.OrderID)
+		return
+	}
+	h.logger.Info("webhook: refund applied",
+		"order_id", n.OrderID, "amount_cents", amountCents)
 }
 
 func (h *WebhookHandler) emailPaymentReceived(storeID uuid.UUID, order *repository.Order, paymentType string) {

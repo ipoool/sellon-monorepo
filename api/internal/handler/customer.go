@@ -214,9 +214,9 @@ func (h *CustomerHandler) Update(w http.ResponseWriter, r *http.Request) {
 		EntityID:   c.ID.String(),
 		Summary:    "Update profil pelanggan " + c.Name,
 		Metadata: map[string]any{
-			"customer_name":   c.Name,
-			"is_blacklisted":  c.IsBlacklisted,
-			"notes_changed":   req.Notes != "",
+			"customer_name":  c.Name,
+			"is_blacklisted": c.IsBlacklisted,
+			"notes_changed":  req.Notes != "",
 		},
 	})
 	response.JSON(w, http.StatusOK, map[string]any{"customer": toCustomerDTO(*c)})
@@ -229,29 +229,55 @@ func (h *CustomerHandler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusBadRequest, "toko belum dibuat")
 		return
 	}
-	// Export hits the entire dataset (capped at 500 server-side).
-	rows, _, err := h.customers.ListByStore(r.Context(), store.ID, 500, 0)
-	if err != nil {
-		response.Error(w, http.StatusInternalServerError, "internal error")
-		return
-	}
+	// The repo clamps a single page to 500 rows, so page through with an
+	// offset until the store's customers are exhausted. Hard cap keeps a huge
+	// store from pinning the API; the file gets a trailer note when truncated.
+	const exportPageSize = 500
+	const exportMaxRows = 20000
 
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-	w.Header().Set("Content-Disposition", `attachment; filename="pelanggan-`+time.Now().Format("2006-01-02")+`.csv"`)
+	w.Header().Set("Content-Disposition", `attachment; filename="pelanggan-`+time.Now().In(wib).Format("2006-01-02")+`.csv"`)
+	// UTF-8 BOM so Excel (Windows) decodes accented names correctly instead
+	// of falling back to the system code page.
+	_, _ = w.Write([]byte("\xEF\xBB\xBF"))
 	cw := csv.NewWriter(w)
 	defer cw.Flush()
 
 	_ = cw.Write([]string{"Nama", "WhatsApp", "Email", "Kota", "Provinsi", "Total Order", "Total Belanja (Rp)", "Terakhir Order"})
-	for _, c := range rows {
-		last := ""
-		if c.LastOrderAt != nil {
-			last = c.LastOrderAt.Format("2006-01-02")
+	written := 0
+	capped := false
+	for offset := 0; ; offset += exportPageSize {
+		rows, total, err := h.customers.ListByStore(r.Context(), store.ID, exportPageSize, offset)
+		if err != nil {
+			h.logger.Error("export customers csv", "err", err)
+			// Headers already sent — can't switch to a JSON error; stop here so
+			// the seller gets a truncated file rather than a hung download.
+			return
 		}
+		for _, c := range rows {
+			if written >= exportMaxRows {
+				capped = true
+				break
+			}
+			last := ""
+			if c.LastOrderAt != nil {
+				last = c.LastOrderAt.In(wib).Format("2006-01-02")
+			}
+			_ = cw.Write([]string{
+				c.Name, c.WhatsAppNumber, c.Email, c.City, c.Province,
+				strconv.Itoa(c.TotalOrders),
+				strconv.FormatInt(c.TotalSpentCents/100, 10),
+				last,
+			})
+			written++
+		}
+		if capped || len(rows) < exportPageSize || offset+len(rows) >= total {
+			break
+		}
+	}
+	if capped {
 		_ = cw.Write([]string{
-			c.Name, c.WhatsAppNumber, c.Email, c.City, c.Province,
-			strconv.Itoa(c.TotalOrders),
-			strconv.FormatInt(c.TotalSpentCents/100, 10),
-			last,
+			"Catatan: export dipotong pada " + strconv.Itoa(exportMaxRows) + " pelanggan pertama (terbaru order). Hubungi support untuk export penuh.",
 		})
 	}
 }

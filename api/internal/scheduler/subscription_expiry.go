@@ -123,13 +123,29 @@ func (j *SubscriptionExpiryJob) sendOne(
 		return nil
 	}
 
+	// The claim is taken BEFORE the send (that's what makes it race-free
+	// across pods), so any failure after this point must give it back —
+	// otherwise a transient reports/mailer hiccup permanently suppresses
+	// this store's H-3/H-0 email with nothing but a log line. release()
+	// uses a detached context so it still runs if ctx is already dead.
+	release := func() {
+		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		if rerr := j.subs.ReleaseNotification(rctx, sub.StoreID, notifType, sub.ExpiresAt); rerr != nil {
+			j.logger.Error("scheduler: release expiry claim failed — email will stay suppressed",
+				"store_id", sub.StoreID, "type", notifType, "err", rerr)
+		}
+	}
+
 	// Pull 30-day stats.
 	headline, err := j.reports.Headline(ctx, sub.StoreID, since, until)
 	if err != nil {
+		release()
 		return err
 	}
 	topProds, err := j.reports.TopProducts(ctx, sub.StoreID, since, until, 1)
 	if err != nil {
+		release()
 		return err
 	}
 
@@ -162,14 +178,24 @@ func (j *SubscriptionExpiryJob) sendOne(
 	content := j.gen.Generate(ctx, data)
 	subject, text, htmlBody := email.RenderSubscriptionExpiry(content, data)
 
-	j.mailer.Send(email.Message{
+	msg := email.Message{
 		To:       sub.OwnerEmail,
 		ToName:   sub.OwnerName,
 		Subject:  subject,
 		Text:     text,
 		HTML:     htmlBody,
 		Category: "subscription_expiry",
-	})
+	}
+	// Send synchronously here (unlike the request-path fire-and-forget)
+	// so a delivery failure can hand the dedup claim back and let the
+	// next tick retry. When the mailer isn't configured at all, retrying
+	// is pointless — keep the claim and stay quiet.
+	if j.mailer.Configured() {
+		if err := j.mailer.SendSync(msg); err != nil {
+			release()
+			return err
+		}
+	}
 
 	j.logger.Info("scheduler: subscription expiry email sent",
 		"store", sub.StoreName, "type", notifType,

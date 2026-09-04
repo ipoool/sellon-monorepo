@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 
 // Thin top loading bar shown during route navigation (YouTube/nprogress style),
@@ -17,6 +17,28 @@ export function TopProgressBar() {
   const running = useRef(false);
   const trickle = useRef<ReturnType<typeof setInterval> | null>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stallTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── finish: run the bar to 100% and fade it out ───────────────────────
+  // Shared by the route-commit effect and the stall safety net, so there is
+  // exactly one place that can clear the "running" state.
+  const finish = useCallback(() => {
+    if (!running.current) return; // nothing in flight (e.g. initial mount)
+    running.current = false;
+    if (trickle.current) {
+      clearInterval(trickle.current);
+      trickle.current = null;
+    }
+    if (stallTimer.current) {
+      clearTimeout(stallTimer.current);
+      stallTimer.current = null;
+    }
+    setWidth(100);
+    hideTimer.current = setTimeout(() => {
+      setActive(false);
+      setWidth(0);
+    }, 240);
+  }, []);
 
   useEffect(() => {
     // ── start: begin/refresh the progress animation ──────────────────────
@@ -33,6 +55,11 @@ export function TopProgressBar() {
       trickle.current = setInterval(() => {
         setWidth((w) => (w < 90 ? w + Math.max(0.4, (90 - w) / 14) : w));
       }, 220);
+      // Safety net: if no route commit ever arrives (aborted navigation, a
+      // history entry Next never renders, a failed prefetch) the bar would
+      // otherwise sit frozen at ~90% forever. Force it to complete.
+      if (stallTimer.current) clearTimeout(stallTimer.current);
+      stallTimer.current = setTimeout(finish, 10000);
     };
 
     // Next's router calls history.pushState from inside a useInsertionEffect,
@@ -40,16 +67,34 @@ export function TopProgressBar() {
     // run the original first, then defer start() to a microtask — moving the
     // setState out of the insertion-effect phase.
     const schedule = () => queueMicrotask(start);
+
+    // Next calls history.replaceState on EVERY router state commit —
+    // router.refresh(), server-action revalidation, same-URL navigation. Those
+    // never change pathname/searchParams, so the finish effect below never
+    // fires and the bar stays stuck. Only start when the target URL actually
+    // differs from where we already are.
+    const changesUrl = (url: unknown, from: string): boolean => {
+      if (url === null || url === undefined) return false; // state-only update
+      try {
+        return new URL(String(url), from).href !== from;
+      } catch {
+        return false;
+      }
+    };
+
     const origPush = history.pushState;
     const origReplace = history.replaceState;
     history.pushState = function (...args) {
+      // Compare BEFORE the original runs — it mutates location synchronously.
+      const navigating = changesUrl(args[2], location.href);
       const res = origPush.apply(this, args as Parameters<typeof origPush>);
-      schedule();
+      if (navigating) schedule();
       return res;
     };
     history.replaceState = function (...args) {
+      const navigating = changesUrl(args[2], location.href);
       const res = origReplace.apply(this, args as Parameters<typeof origReplace>);
-      schedule();
+      if (navigating) schedule();
       return res;
     };
     window.addEventListener("popstate", schedule);
@@ -60,24 +105,14 @@ export function TopProgressBar() {
       window.removeEventListener("popstate", schedule);
       if (trickle.current) clearInterval(trickle.current);
       if (hideTimer.current) clearTimeout(hideTimer.current);
+      if (stallTimer.current) clearTimeout(stallTimer.current);
     };
-  }, []);
+  }, [finish]);
 
-  // ── finish: the new route has rendered ────────────────────────────────
+  // ── the new route has rendered ────────────────────────────────────────
   useEffect(() => {
-    if (!running.current) return; // skip the initial mount (no navigation)
-    running.current = false;
-    if (trickle.current) {
-      clearInterval(trickle.current);
-      trickle.current = null;
-    }
-    setWidth(100);
-    hideTimer.current = setTimeout(() => {
-      setActive(false);
-      setWidth(0);
-    }, 240);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname, searchParams]);
+    finish();
+  }, [pathname, searchParams, finish]);
 
   if (!active && width === 0) return null;
 

@@ -38,14 +38,23 @@ const (
 // r.UserAgent(). Values are validated/capped before storage since this is a
 // public endpoint and the headers are attacker-controllable.
 func clientIP(r *http.Request) string {
-	// Prefer the buyer's real IP. SSR pages forward X-Client-Ip; client-side
-	// fetches (e.g. the course viewer) reach the API behind Cloudflare/Caddy,
-	// which carry the real client in CF-Connecting-IP / X-Forwarded-For.
-	for _, c := range []string{
-		r.Header.Get("X-Client-Ip"),
+	// Edge-set headers first: client-side fetches (e.g. the course viewer)
+	// reach the API behind Cloudflare/Caddy, which overwrite CF-Connecting-IP /
+	// X-Forwarded-For with the real peer.
+	//
+	// X-Client-Ip comes from our own SSR page, which sits BEHIND that edge, so
+	// it is only trustworthy when the edge headers are absent. Preferring it
+	// unconditionally let a buyer who shares a link pin every access to one
+	// forged IP and defeat the seller's "distinct IPs" share signal.
+	edge := []string{
 		r.Header.Get("CF-Connecting-IP"),
 		firstForwarded(r.Header.Get("X-Forwarded-For")),
-	} {
+	}
+	candidates := edge
+	if strings.TrimSpace(edge[0]) == "" && strings.TrimSpace(edge[1]) == "" {
+		candidates = append(candidates, r.Header.Get("X-Client-Ip"))
+	}
+	for _, c := range candidates {
 		c = strings.TrimSpace(c)
 		if c != "" && net.ParseIP(c) != nil {
 			return c

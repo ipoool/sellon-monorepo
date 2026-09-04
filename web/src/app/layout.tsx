@@ -83,10 +83,10 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
-    { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
-  ],
+  // Single light theme color: the app has no dark palette (colorScheme is
+  // "light"), so advertising a dark browser chrome painted near-black UI
+  // above an all-white page on phones in dark mode.
+  themeColor: "#ffffff",
   colorScheme: "light",
   width: "device-width",
   initialScale: 1,

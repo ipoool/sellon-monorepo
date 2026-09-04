@@ -7,6 +7,7 @@ package payments
 import (
 	"bytes"
 	"crypto/sha512"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -249,10 +250,12 @@ func IsMidtransPaymentMethod(method string) bool {
 // Per Midtrans docs:
 //   signature_key = SHA512(order_id + status_code + gross_amount + ServerKey)
 func VerifySignature(orderID, statusCode, grossAmount, serverKey, providedSignature string) bool {
+// Compared in constant time so a webhook caller can't recover the expected
+// digest byte-by-byte from response timing.
 	raw := orderID + statusCode + grossAmount + serverKey
 	sum := sha512.Sum512([]byte(raw))
 	expected := hex.EncodeToString(sum[:])
-	return expected == providedSignature
+	return subtle.ConstantTimeCompare([]byte(expected), []byte(providedSignature)) == 1
 }
 
 // MapTransactionStatus translates Midtrans transaction_status into our DB

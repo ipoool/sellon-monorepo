@@ -39,9 +39,25 @@ type Config struct {
 	// {WebhookBaseURL}/webhooks/midtrans/{token} into Midtrans dashboard.
 	WebhookBaseURL string
 
-	// Supabase Storage — used by the API to host uploaded product photos.
-	// All three are optional; without them the upload endpoint returns 503
-	// and the frontend falls back to URL-only input.
+	// S3-compatible object storage — the ACTIVE backend for every upload
+	// (product photos, banners, payment proofs, digital deliverables).
+	// Optional: without credentials the upload endpoints return 503 and the
+	// frontend falls back to URL-only input.
+	S3Endpoint  string
+	S3Region    string
+	S3Bucket    string
+	S3AccessKey string
+	S3SecretKey string
+	// S3PublicBaseURL is the prefix of the asset URLs stored in the database
+	// and rendered in browsers. The bucket is PRIVATE, so this points at the
+	// API's own read-proxy (`{api}/api/v1/files`), not at the object store.
+	// Defaults to WEBHOOK_BASE_URL (the API's publicly reachable origin);
+	// override to put a CDN in front without touching stored rows.
+	S3PublicBaseURL string
+
+	// Supabase Storage — LEGACY. Kept only so assets uploaded before the S3
+	// migration can still be resolved and deleted from their stored public
+	// URL. Safe to unset once no row references a Supabase URL.
 	SupabaseURL        string
 	SupabaseServiceKey string
 	SupabaseBucket     string
@@ -104,6 +120,9 @@ func Load() (*Config, error) {
 	v.SetDefault("web_origin", "http://localhost:3000")
 	v.SetDefault("webhook_base_url", "http://localhost:8080")
 	v.SetDefault("supabase_bucket", "stores")
+	v.SetDefault("s3_endpoint", "https://kencana.basic.box.cloudeka.id")
+	v.SetDefault("s3_region", "kencana")
+	v.SetDefault("s3_bucket", "sellon-bucket-cosdi7")
 	v.SetDefault("rajaongkir_tier", "starter")
 	v.SetDefault("from_name", "SellOn")
 	v.SetDefault("postgres_sslmode", "disable")
@@ -126,7 +145,24 @@ func Load() (*Config, error) {
 		JWTSecret:      v.GetString("jwt_secret"),
 		JWTTTL:         time.Duration(v.GetInt("jwt_ttl_hours")) * time.Hour,
 		WebOrigin:      v.GetString("web_origin"),
-		WebhookBaseURL:     strings.TrimRight(v.GetString("webhook_base_url"), "/"),
+		WebhookBaseURL: strings.TrimRight(v.GetString("webhook_base_url"), "/"),
+		S3Endpoint:     strings.TrimRight(v.GetString("s3_endpoint"), "/"),
+		S3Region:       v.GetString("s3_region"),
+		S3Bucket:       v.GetString("s3_bucket"),
+		// Accept the AWS-standard variable names too, so a deploy that
+		// already exports AWS_ACCESS_KEY_ID works without duplication.
+		S3AccessKey: firstNonEmpty(
+			v.GetString("s3_access_key"),
+			v.GetString("aws_access_key_id"),
+		),
+		S3SecretKey: firstNonEmpty(
+			v.GetString("s3_secret_key"),
+			v.GetString("aws_secret_access_key"),
+		),
+		S3PublicBaseURL: strings.TrimRight(firstNonEmpty(
+			v.GetString("s3_public_base_url"),
+			strings.TrimRight(v.GetString("webhook_base_url"), "/")+"/api/v1/files",
+		), "/"),
 		SupabaseURL: strings.TrimRight(v.GetString("supabase_url"), "/"),
 		// Prefer SUPABASE_SERVICE_ROLE_KEY (Supabase dashboard naming),
 		// fallback ke SUPABASE_SERVICE_KEY untuk backward compat dengan
@@ -135,7 +171,7 @@ func Load() (*Config, error) {
 			v.GetString("supabase_service_role_key"),
 			v.GetString("supabase_service_key"),
 		),
-		SupabaseBucket: v.GetString("supabase_bucket"),
+		SupabaseBucket:            v.GetString("supabase_bucket"),
 		RajaOngkirAPIKey:          v.GetString("rajaongkir_api_key"),
 		RajaOngkirTier:            v.GetString("rajaongkir_tier"),
 		PlatformMidtransServerKey: v.GetString("platform_midtrans_server_key"),
