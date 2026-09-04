@@ -112,9 +112,14 @@ change — no web rebuild.
 - **Email + password** → 6-digit code emailed → session cookie. The whole path — register,
   verify, resend, forgot/reset AND login — is gated by `AUTH_EMAIL_PASSWORD_ENABLED`. Set it
   false to run Google-only: every one of those endpoints answers 503 naming Google, and the
-  login page renders the Google button alone. The flag is IGNORED when `GOOGLE_CLIENT_ID` is
-  empty, so the app can never be left with no way to sign in. `AUTH_EMAIL_SIGNUP_ENABLED` is
-  still read as the former name.
+  login page renders the Google button alone. **It defaults to FALSE** — the product ships
+  Google-only and a deployment opts back in explicitly, because outbound mail is currently
+  unavailable (Mailtrap suspended `sellon.id`). The flag is IGNORED when `GOOGLE_CLIENT_ID`
+  is empty, so the app can never be left with no way to sign in.
+  `AUTH_EMAIL_SIGNUP_ENABLED` is still read as the former name when the current one is
+  absent. Before flipping it back on, note that a password-only account
+  (`password_hash <> '' AND google_id IS NULL`) can only return via Google if its address is
+  a Google account.
 
 **The password is never written to `users.password_hash` before the mailbox is proven.**
 `POST /auth/register` parks the bcrypt hash (and name) on the `email_verifications` row

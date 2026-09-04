@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"time"
 
@@ -138,8 +139,11 @@ func Load() (*Config, error) {
 	v.SetDefault("postgres_sslmode", "disable")
 	v.SetDefault("cname_target", "cname.sellon.id")
 	v.SetDefault("order_expiry_hours", 1)
-	v.SetDefault("auth_email_password_enabled", true)
-	v.SetDefault("auth_email_signup_enabled", true) // previous name, still honoured
+	// Default OFF: the product runs Google-only until outbound mail is
+	// restored. Set AUTH_EMAIL_PASSWORD_ENABLED=true to bring the
+	// email+password path back.
+	v.SetDefault("auth_email_password_enabled", false)
+	v.SetDefault("auth_email_signup_enabled", false) // previous name, still honoured
 
 	cfg := &Config{
 		Port:                     v.GetString("api_port"),
@@ -246,15 +250,21 @@ func firstNonEmpty(vals ...string) string {
 
 // emailPasswordEnabled resolves the email+password switch.
 //
-// AUTH_EMAIL_PASSWORD_ENABLED is the current name; AUTH_EMAIL_SIGNUP_ENABLED
-// was the earlier one and is still honoured so an existing .env keeps
-// working. Either being explicitly false turns the path off.
+// Defaults to FALSE: sign-in is Google-only unless a deployment explicitly
+// opts back in, which is the state we want while outbound mail is banned —
+// every email flow either needs a delivered code or leaves a half-usable
+// account behind. Set AUTH_EMAIL_PASSWORD_ENABLED=true to restore it.
+// AUTH_EMAIL_SIGNUP_ENABLED is the former name, honoured when the current
+// one is absent.
 //
-// The Google guard is the important part: disabling email+password with no
-// Google client id configured would leave no way to sign in at all, so in
-// that case the switch is ignored and the path stays open.
+// The Google guard is the important part: running Google-only with no
+// Google client id configured would leave NO way to sign in at all, so the
+// switch is ignored in that case and the email path stays open.
 func emailPasswordEnabled(v *viper.Viper) bool {
-	enabled := v.GetBool("auth_email_password_enabled") && v.GetBool("auth_email_signup_enabled")
+	enabled := v.GetBool("auth_email_password_enabled")
+	if os.Getenv("AUTH_EMAIL_PASSWORD_ENABLED") == "" && os.Getenv("AUTH_EMAIL_SIGNUP_ENABLED") != "" {
+		enabled = v.GetBool("auth_email_signup_enabled")
+	}
 	if !enabled && v.GetString("google_client_id") == "" {
 		return true
 	}
