@@ -5,6 +5,7 @@ import { ShieldCheck, Zap, Wallet, Sparkles, Handshake } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { EmailAuthForm } from "@/components/auth/email-auth-form";
+import { GoogleSignInButton } from "@/components/auth/google-sign-in-button";
 import { MasukTestimonial } from "@/components/auth/login-testimonial";
 import { getMe } from "@/lib/server-auth";
 import { pageMetadata } from "@/lib/seo";
@@ -16,11 +17,14 @@ export const metadata = pageMetadata({
   noindex: true,
 });
 
-const benefits = [
+function benefitsFor(emailSignup: boolean) {
+  return [
   {
     icon: Zap,
     title: "Setup 5 menit",
-    description: "Daftar dengan email & password, verifikasi lewat kode di email. Tidak perlu isi formulir panjang.",
+    description: emailSignup
+      ? "Daftar dengan email & password, verifikasi lewat kode di email. Tidak perlu isi formulir panjang."
+      : "Masuk sekali klik pakai akun Google. Tidak perlu isi formulir panjang.",
   },
   {
     icon: Wallet,
@@ -30,9 +34,39 @@ const benefits = [
   {
     icon: ShieldCheck,
     title: "Aman & private",
-    description: "Password kamu disimpan terenkripsi. Kami hanya menyimpan email, nama, dan data yang kamu isi sendiri.",
+    description: emailSignup
+      ? "Password kamu disimpan terenkripsi. Kami hanya menyimpan email, nama, dan data yang kamu isi sendiri."
+      : "Kami hanya menyimpan email, nama, dan data yang kamu isi sendiri. Password Google-mu tidak pernah sampai ke kami.",
   },
-];
+  ];
+}
+
+/**
+ * Which sign-in options to offer. Read at request time from the API rather
+ * than baked into the bundle, so closing email signup (when outbound mail is
+ * down) or rotating the Google client id is a server env change, not a web
+ * rebuild + redeploy. Falls back to email-only if the API can't be reached,
+ * which is the pre-existing behaviour.
+ */
+async function signInOptions(): Promise<{
+  google: boolean;
+  emailSignup: boolean;
+  googleClientId?: string;
+}> {
+  try {
+    const base = process.env.API_INTERNAL_URL || process.env.NEXT_PUBLIC_API_URL;
+    const res = await fetch(`${base}/api/v1/info`, { cache: "no-store" });
+    if (!res.ok) throw new Error(String(res.status));
+    const data = await res.json();
+    return {
+      google: !!data?.features?.google_signin,
+      emailSignup: data?.features?.email_signup !== false,
+      googleClientId: data?.google_client_id,
+    };
+  } catch {
+    return { google: false, emailSignup: true };
+  }
+}
 
 export default async function MasukPage({
   searchParams,
@@ -49,6 +83,7 @@ export default async function MasukPage({
 
   const { invite } = await searchParams;
   const inviteCode = invite?.trim().toUpperCase() || undefined;
+  const options = await signInOptions();
 
   return (
     <div className="grid min-h-svh lg:grid-cols-2">
@@ -77,7 +112,9 @@ export default async function MasukPage({
                   Daftar & langsung mulai resell
                 </h1>
                 <p className="mt-2 text-sm text-neutral-600">
-                  Belum punya akun? Daftar pakai email — setelah verifikasi kamu langsung aktif sebagai reseller.
+                  {options.emailSignup
+                    ? "Belum punya akun? Daftar pakai email — setelah verifikasi kamu langsung aktif sebagai reseller."
+                    : "Belum punya akun? Lanjutkan dengan Google — kamu langsung aktif sebagai reseller."}
                 </p>
               </>
             ) : (
@@ -86,7 +123,9 @@ export default async function MasukPage({
                   Masuk untuk mulai jualan
                 </h1>
                 <p className="mt-2 text-sm text-neutral-600">
-                  Belum punya akun? Daftar pakai email dan password — tinggal verifikasi kode di email.
+                  {options.emailSignup
+                    ? "Belum punya akun? Daftar pakai email dan password — tinggal verifikasi kode di email."
+                    : "Belum punya akun? Lanjutkan dengan Google, akunmu langsung dibuat."}
                 </p>
               </>
             )}
@@ -96,7 +135,7 @@ export default async function MasukPage({
             <CardContent className="gap-6">
               {!inviteCode && (
                 <ul className="flex flex-col gap-4">
-                  {benefits.map(({ icon: Icon, title, description }) => (
+                  {benefitsFor(options.emailSignup).map(({ icon: Icon, title, description }) => (
                     <li key={title} className="flex items-start gap-3">
                       <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
                         <Icon className="size-5" strokeWidth={2} aria-hidden />
@@ -110,7 +149,31 @@ export default async function MasukPage({
                 </ul>
               )}
 
-              <EmailAuthForm inviteCode={inviteCode} />
+              {options.google && (
+                <div className="flex flex-col gap-4">
+                  <GoogleSignInButton
+                    inviteCode={inviteCode}
+                    clientId={options.googleClientId}
+                  />
+                  {!options.emailSignup && (
+                    <p className="text-center text-xs leading-relaxed text-neutral-500">
+                      Pendaftaran lewat email sedang tidak tersedia. Masuk dengan
+                      Google — kalau kamu pernah daftar pakai email yang sama,
+                      akunmu tetap yang itu juga.
+                    </p>
+                  )}
+                  <div className="flex items-center gap-3">
+                    <span className="h-px flex-1 bg-neutral-200" />
+                    <span className="text-xs text-neutral-400">atau</span>
+                    <span className="h-px flex-1 bg-neutral-200" />
+                  </div>
+                </div>
+              )}
+
+              <EmailAuthForm
+                inviteCode={inviteCode}
+                emailSignupEnabled={options.emailSignup}
+              />
               <p className="text-center text-xs leading-relaxed text-neutral-500">
                 Dengan masuk, kamu menyetujui{" "}
                 <Link href="/terms" className="font-medium text-brand-600 hover:text-brand-700">

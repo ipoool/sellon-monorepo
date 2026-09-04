@@ -31,6 +31,23 @@ type AuthHandler struct {
 	webOrigin     string
 	logger        *slog.Logger
 	cookieSecure  bool
+	// emailSignupEnabled gates the three flows that dead-end without
+	// outbound mail. Login with an existing password is deliberately NOT
+	// gated — it needs no delivery.
+	emailSignupEnabled bool
+}
+
+// errEmailSignupDisabled is the copy shown while outbound mail is
+// unavailable. It names the alternative rather than just refusing.
+const errEmailSignupDisabled = "pendaftaran & reset password lewat email sedang tidak tersedia. " +
+	"Silakan masuk dengan Google — akun kamu tetap sama."
+
+func (h *AuthHandler) emailFlowsOpen(w http.ResponseWriter) bool {
+	if h.emailSignupEnabled {
+		return true
+	}
+	response.Error(w, http.StatusServiceUnavailable, errEmailSignupDisabled)
+	return false
 }
 
 func NewAuthHandler(
@@ -43,17 +60,19 @@ func NewAuthHandler(
 	webOrigin string,
 	logger *slog.Logger,
 	cookieSecure bool,
+	emailSignupEnabled bool,
 ) *AuthHandler {
 	return &AuthHandler{
-		users:         users,
-		verifications: verifications,
-		memberships:   memberships,
-		google:        google,
-		jwt:           jwt,
-		mailer:        mailer,
-		webOrigin:     webOrigin,
-		logger:        logger,
-		cookieSecure:  cookieSecure,
+		users:              users,
+		verifications:      verifications,
+		memberships:        memberships,
+		google:             google,
+		jwt:                jwt,
+		mailer:             mailer,
+		webOrigin:          webOrigin,
+		logger:             logger,
+		cookieSecure:       cookieSecure,
+		emailSignupEnabled: emailSignupEnabled,
 	}
 }
 
@@ -156,6 +175,9 @@ type registerReq struct {
 // platform admin, by POSTing an email + a password of their choosing.
 // No session cookie is issued until VerifyEmail.
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
+	if !h.emailFlowsOpen(w) {
+		return
+	}
 	var req registerReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.Error(w, http.StatusBadRequest, "data tidak valid")
@@ -379,6 +401,9 @@ type resendVerificationReq struct {
 
 // POST /api/v1/auth/resend-verification
 func (h *AuthHandler) ResendVerification(w http.ResponseWriter, r *http.Request) {
+	if !h.emailFlowsOpen(w) {
+		return
+	}
 	var req resendVerificationReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.Error(w, http.StatusBadRequest, "data tidak valid")
@@ -415,6 +440,9 @@ type forgotPasswordReq struct {
 // POST /api/v1/auth/forgot-password
 // Always 200 — the response must not reveal whether the email is registered.
 func (h *AuthHandler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
+	if !h.emailFlowsOpen(w) {
+		return
+	}
 	var req forgotPasswordReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.Error(w, http.StatusBadRequest, "data tidak valid")

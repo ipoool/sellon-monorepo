@@ -98,9 +98,21 @@ web/                    Next.js 16 App Router
 
 ### Auth flow (the load-bearing piece)
 
-End-to-end: **email + password → 6-digit code emailed → session cookie**. Google SSO was
-replaced in `1efd466`; `/auth/google` still exists as a backend-only fallback for legacy rows
-and is wired to no UI.
+Two sign-in paths, both live. Which ones the login page offers is decided at request time
+from `GET /api/v1/info` (`features.google_signin`, `features.email_signup`, plus
+`google_client_id`), so closing a path or rotating the Google client id is a server env
+change — no web rebuild.
+
+- **Google Sign-In** (`/auth/google`) needs no mail delivery, which is why it is the fallback
+  whenever outbound email is down. `FindOrCreateByGoogleID` LINKS by verified email when a row
+  for that address already exists without a Google id — an abandoned email signup, or a
+  password account. That link is safe because a row only ever holds a password after its own
+  email verification passed, and because Google has proved the address. A second Google
+  identity claiming an address that another one already holds is refused outright.
+- **Email + password** → 6-digit code emailed → session cookie. Gated by
+  `AUTH_EMAIL_SIGNUP_ENABLED`: set it false and `/auth/register`,
+  `/auth/resend-verification` and `/auth/forgot-password` all answer 503 pointing at Google,
+  while login with an existing password keeps working.
 
 **The password is never written to `users.password_hash` before the mailbox is proven.**
 `POST /auth/register` parks the bcrypt hash (and name) on the `email_verifications` row

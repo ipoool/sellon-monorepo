@@ -113,7 +113,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	metaClient := meta.NewClient(logger)
 	metaNotifier := meta.NewNotifier(stores, orders, subscriptions, encryptor, metaClient, publicWebURL, logger)
 
-	authHandler := handler.NewAuthHandler(users, emailVerifications, memberships, googleVerifier, jwtSvc, mailer, publicWebURL, logger, cfg.IsProd())
+	authHandler := handler.NewAuthHandler(users, emailVerifications, memberships, googleVerifier, jwtSvc, mailer, publicWebURL, logger, cfg.IsProd(), cfg.AuthEmailSignupEnabled)
 	storeHandler := handler.NewStoreHandler(stores, subscriptions, auditLogger, logger)
 	metaHandler := handler.NewMetaHandler(stores, encryptor, cfg.WebhookBaseURL, auditLogger, logger)
 	productHandler := handler.NewProductHandler(products, variants, stores, subscriptions, planRepo, bulkJobs, productDiscounts, modifierRepo, materialRepo, categories, courseVideos, storageClient, broker, auditLogger, logger)
@@ -197,7 +197,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	r.Post("/webhooks/platform/midtrans", platformWebhookHandler.Handle)
 
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Get("/info", handler.Info(cfg))
+		r.Get("/info", handler.Info(cfg, storageClient.IsConfigured()))
 		// Read-proxy for uploaded assets. Public by necessity: the bucket is
 		// private and a storefront visitor has no session, so this is what
 		// makes product photos loadable at all. Keys carry 8 random bytes and

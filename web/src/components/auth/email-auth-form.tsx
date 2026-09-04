@@ -31,9 +31,22 @@ async function postJSON(path: string, body: unknown) {
   return { ok: res.ok, status: res.status, data };
 }
 
-export function EmailAuthForm({ inviteCode }: { inviteCode?: string }) {
+export function EmailAuthForm({
+  inviteCode,
+  /**
+   * False while outbound mail is unavailable: registration and password
+   * reset both end on a code that would never arrive, so we hide them
+   * rather than let someone walk into a dead end. Signing in with an
+   * existing password still works — that needs no delivery.
+   */
+  emailSignupEnabled = true,
+}: {
+  inviteCode?: string;
+  emailSignupEnabled?: boolean;
+}) {
   const { push, refresh } = useRouter();
-  const [mode, setMode] = useState<Mode>("login");
+  const [modeState, setMode] = useState<Mode>("login");
+  const mode: Mode = emailSignupEnabled ? modeState : "login";
   const [step, setStep] = useState<Step>("form");
   const [submitting, setSubmitting] = useState(false);
   const [resending, setResending] = useState(false);
@@ -349,6 +362,7 @@ export function EmailAuthForm({ inviteCode }: { inviteCode?: string }) {
 
   return (
     <div className="flex flex-col gap-5">
+      {emailSignupEnabled && (
       <div className="grid grid-cols-2 gap-1 rounded-lg bg-neutral-100 p-1 text-sm font-medium">
         {(["login", "register"] as Mode[]).map((m) => (
           <button
@@ -366,6 +380,7 @@ export function EmailAuthForm({ inviteCode }: { inviteCode?: string }) {
           </button>
         ))}
       </div>
+      )}
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         {mode === "register" && (
@@ -396,7 +411,7 @@ export function EmailAuthForm({ inviteCode }: { inviteCode?: string }) {
         <div className="flex flex-col gap-1.5">
           <div className="flex items-baseline justify-between gap-2">
             <Label htmlFor="password">Password</Label>
-            {mode === "login" && (
+            {mode === "login" && emailSignupEnabled && (
               <button
                 type="button"
                 onClick={() => setStep("forgot")}

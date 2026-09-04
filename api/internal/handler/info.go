@@ -7,24 +7,37 @@ import (
 	"github.com/sellon/sellon/api/internal/pkg/response"
 )
 
-func Info(cfg *config.Config) http.HandlerFunc {
+// Info is public. It carries only switches and identifiers the browser is
+// meant to see, so the login page can render the right sign-in options
+// without baking them into the JS bundle at build time — flipping a flag is
+// a server env change, not a web rebuild.
+func Info(cfg *config.Config, storageReady bool) http.HandlerFunc {
+	googleReady := cfg.GoogleClientID != ""
 	return func(w http.ResponseWriter, r *http.Request) {
-		response.JSON(w, http.StatusOK, map[string]any{
+		out := map[string]any{
 			"name":    "sellon-api",
 			"version": "0.1.0",
 			"env":     cfg.Env,
 			"features": map[string]bool{
-				// True when Supabase URL+key+bucket are all configured server
-				// side. The web client uses this to decide whether to surface
-				// the upload button or fall back to URL-only input.
-				"photo_upload": cfg.SupabaseURL != "" &&
-					cfg.SupabaseServiceKey != "" &&
-					cfg.SupabaseBucket != "",
+				// Whether uploads can succeed right now, straight from the
+				// storage client rather than re-deriving it from env vars
+				// (which silently went stale when the backend changed).
+				"photo_upload": storageReady,
 				// True when the platform Midtrans server key is set; lets the
 				// dashboard show the "Bayar Sekarang" button next to the
 				// manual-transfer fallback.
 				"platform_billing": cfg.PlatformMidtransServerKey != "",
+				// Sign-in options. email_signup goes false when outbound mail
+				// is unavailable, so the UI stops offering a flow that would
+				// dead-end on a code that never arrives.
+				"google_signin": googleReady,
+				"email_signup":  cfg.AuthEmailSignupEnabled,
 			},
-		})
+		}
+		// Public by design: this id is visible in any Google sign-in button.
+		if googleReady {
+			out["google_client_id"] = cfg.GoogleClientID
+		}
+		response.JSON(w, http.StatusOK, out)
 	}
 }

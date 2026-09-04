@@ -77,32 +77,68 @@ func scanUser(row pgx.Row) (*User, error) {
 // xmax non-zero. Email/name/picture are refreshed every login so profile
 // changes propagate. Role + banned_at are preserved.
 func (r *UserRepo) FindOrCreateByGoogleID(ctx context.Context, googleID, email, name, pictureURL string) (*User, bool, error) {
-	const q = `
-		INSERT INTO users (google_id, email, name, picture_url)
-		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (google_id) DO UPDATE
-		SET email = EXCLUDED.email,
-		    name = EXCLUDED.name,
-		    picture_url = EXCLUDED.picture_url,
-		    updated_at = now()
-		RETURNING ` + userCols + `, (xmax = 0) AS is_new`
-	row := r.pool.QueryRow(ctx, q, googleID, email, name, pictureURL)
-	var u User
-	var isNew bool
-	if err := row.Scan(
-		&u.ID, &u.GoogleID, &u.Email, &u.Name, &u.PictureURL,
-		&u.Role, &u.PasswordHash, &u.EmailVerifiedAt, &u.SessionsValidAfter, &u.BannedAt, &u.CreatedAt, &u.UpdatedAt,
-		&isNew,
-	); err != nil {
+	email = strings.ToLower(strings.TrimSpace(email))
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
 		return nil, false, err
 	}
-	return &u, isNew, nil
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	// 1. Known Google identity — refresh the profile and return.
+	u, err := scanUser(tx.QueryRow(ctx,
+		`UPDATE users SET email = $2, name = $3, picture_url = $4, updated_at = now()
+		 WHERE google_id = $1
+		 RETURNING `+userCols, googleID, email, name, pictureURL))
+	if err == nil {
+		return u, false, tx.Commit(ctx)
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, false, err
+	}
+
+	// 2. No row for this Google id, but the address may already exist — a
+	//    seller who signed up with email+password, or an abandoned
+	//    registration that never got its code. Link the two instead of
+	//    hitting the unique index on lower(email) and 500-ing, which is what
+	//    happened before this branch existed.
+	//
+	//    Linking is safe because Google has verified the address, and a row
+	//    only ever holds a password after its own email verification passed —
+	//    so this can't hand a stranger's password account to someone else.
+	//    Only an unlinked row is claimed: a row already bound to a DIFFERENT
+	//    Google id means two identities claim one address, which we refuse.
+	existing, err := scanUser(tx.QueryRow(ctx,
+		`SELECT `+userCols+` FROM users WHERE LOWER(email) = $1 FOR UPDATE`, email))
+	switch {
+	case err == nil && existing.GoogleID != "" && existing.GoogleID != googleID:
+		return nil, false, errors.New("email sudah terhubung ke akun Google lain")
+	case err == nil:
+		u, uerr := scanUser(tx.QueryRow(ctx,
+			`UPDATE users SET google_id = $2, name = COALESCE(NULLIF($3, ''), name),
+			     picture_url = COALESCE(NULLIF($4, ''), picture_url),
+			     email_verified_at = COALESCE(email_verified_at, now()),
+			     updated_at = now()
+			 WHERE id = $1
+			 RETURNING `+userCols, existing.ID, googleID, name, pictureURL))
+		if uerr != nil {
+			return nil, false, uerr
+		}
+		return u, false, tx.Commit(ctx)
+	case !errors.Is(err, pgx.ErrNoRows):
+		return nil, false, err
+	}
+
+	// 3. Brand new. Google already proved the address, so it starts verified.
+	u, err = scanUser(tx.QueryRow(ctx,
+		`INSERT INTO users (google_id, email, name, picture_url, email_verified_at)
+		 VALUES ($1, $2, $3, $4, now())
+		 RETURNING `+userCols, googleID, email, name, pictureURL))
+	if err != nil {
+		return nil, false, err
+	}
+	return u, true, tx.Commit(ctx)
 }
 
-// CreateWithPassword inserts a brand-new email+password account
-// (google_id NULL, email_verified_at NULL — set by the caller after OTP
-// verification). Caller must check FindByEmail first — a duplicate email
-// hits the unique index and returns a raw pg error.
 func (r *UserRepo) CreateWithPassword(ctx context.Context, email, name, passwordHash string) (*User, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	const q = `
