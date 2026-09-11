@@ -72,7 +72,7 @@ func (c *MidtransClient) CreateSnapTransaction(in SnapTransactionInput) (*SnapRe
 			"phone":      in.CustomerPhone,
 		},
 		"item_details": toSnapItems(in.Items),
-		"credit_card": map[string]any{"secure": true},
+		"credit_card":  map[string]any{"secure": true},
 	}
 
 	buf, err := json.Marshal(body)
@@ -248,10 +248,12 @@ func IsMidtransPaymentMethod(method string) bool {
 // VerifySignature validates the Midtrans webhook signature_key.
 //
 // Per Midtrans docs:
-//   signature_key = SHA512(order_id + status_code + gross_amount + ServerKey)
-func VerifySignature(orderID, statusCode, grossAmount, serverKey, providedSignature string) bool {
+//
+//	signature_key = SHA512(order_id + status_code + gross_amount + ServerKey)
+//
 // Compared in constant time so a webhook caller can't recover the expected
 // digest byte-by-byte from response timing.
+func VerifySignature(orderID, statusCode, grossAmount, serverKey, providedSignature string) bool {
 	raw := orderID + statusCode + grossAmount + serverKey
 	sum := sha512.Sum512([]byte(raw))
 	expected := hex.EncodeToString(sum[:])

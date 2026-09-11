@@ -78,7 +78,32 @@ func (h *PlatformWebhookHandler) Handle(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Amount integrity, same rule the per-store webhook applies: what
+	// Midtrans says was charged must match what we billed. The signature
+	// already covers gross_amount, so this is not about forgery — it catches
+	// a transaction whose amount drifted from the invoice (a plan price
+	// edited between checkout and payment, a transaction re-created by hand
+	// in the Midtrans dashboard under the same order id). Granting a full
+	// period for a smaller payment is not something to discover from a
+	// support ticket. Tolerance is one rupiah: the gateway settles in whole
+	// rupiah.
+	const grossToleranceCents = 100
+	amountMismatch := false
+	if cents, ok := rupiahToCents(n.GrossAmount); ok && absInt64(cents-inv.AmountCents) >= grossToleranceCents {
+		amountMismatch = true
+		h.logger.Error("platform webhook: gross_amount mismatch — not settling",
+			"order_id", n.OrderID, "invoice_id", inv.ID,
+			"midtrans_cents", cents, "invoice_cents", inv.AmountCents)
+	}
+
 	mapped := payments.MapTransactionStatus(n.TransactionStatus, n.FraudStatus)
+	if mapped == "paid" && amountMismatch {
+		// Ack so Midtrans stops retrying, but grant nothing. The invoice
+		// stays pending and visible to ops in /platform/subscriptions.
+		response.JSON(w, http.StatusOK, map[string]any{"ok": true, "status": "amount_mismatch"})
+		return
+	}
+
 	switch mapped {
 	case "paid":
 		if inv.Status == "paid" {
