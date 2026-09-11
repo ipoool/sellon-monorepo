@@ -350,6 +350,10 @@ func computeSummary(ctx context.Context, q posQuerier, sessionID, storeID uuid.U
 
 	// Change handed back on orders that took cash — subtracting it turns the
 	// tendered figure above into the cash actually left in the drawer.
+	// CreatePOSOrder now caps change at the cash tendered, so the cash-row
+	// EXISTS guard is redundant for new sales; it stays because rows written
+	// before that cap can still carry a fabricated change on a non-cash sale,
+	// and those must not be subtracted from any drawer.
 	var changeGiven int64
 	if err := q.QueryRow(ctx, `
 		SELECT COALESCE(SUM(o.change_amount_cents), 0)
@@ -617,11 +621,25 @@ func (r *POSRepo) CreatePOSOrder(ctx context.Context, in CreatePOSOrderInput) (*
 
 	// Validate session: must exist, belong to this store, be open, and be
 	// owned by the cashier creating the order.
+	//
+	// FOR SHARE is load-bearing. An unlocked read let a close commit between
+	// this check and the order insert: the sale then attached to a session
+	// whose expected_cash_cents had already been computed without it, so the
+	// cash the cashier had just counted into the drawer was missing from the
+	// rekap they reconciled against — a short drawer with no trace of why.
+	// CloseSession holds the same row FOR UPDATE, so it now blocks behind every
+	// in-flight sale and its summary sees them. SHARE (not UPDATE) is
+	// deliberate: concurrent sales on one shift only conflict with a close,
+	// never with each other, so two cashier terminals still ring up in
+	// parallel. Under READ COMMITTED a close that wins the race re-evaluates
+	// this row to its new version, so the status check below sees 'closed'
+	// rather than the stale snapshot.
 	var sessStatus string
 	var sessOwner uuid.UUID
 	if err := tx.QueryRow(ctx, `
 		SELECT status, opened_by FROM pos_sessions
 		WHERE id = $1 AND store_id = $2
+		FOR SHARE
 	`, in.SessionID, in.StoreID).Scan(&sessStatus, &sessOwner); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrPOSSessionNotFound
@@ -734,12 +752,15 @@ func (r *POSRepo) CreatePOSOrder(ctx context.Context, in CreatePOSOrderInput) (*
 	}
 
 	// Validate payments cover total.
-	var paidTotal int64
+	var paidTotal, cashTendered int64
 	for _, p := range in.Payments {
 		if p.AmountCents <= 0 {
 			return nil, errors.New("nominal pembayaran harus > 0")
 		}
 		paidTotal += p.AmountCents
+		if p.Method == "cash" {
+			cashTendered += p.AmountCents
+		}
 	}
 	// Offline-synced sales were already paid physically against the totals shown
 	// at sale time. If a config change (e.g. tax/loyalty rate) recomputes a higher
@@ -753,9 +774,20 @@ func (r *POSRepo) CreatePOSOrder(ctx context.Context, in CreatePOSOrderInput) (*
 		}
 		paymentShort = true
 	}
+	// Change is physically cash leaving the drawer, so it can never exceed the
+	// cash that was tendered. The raw over-tender (paidTotal - total) counted
+	// a mistyped QRIS/EDC/transfer amount as kembalian: it printed change the
+	// buyer never received, and because computeSummary nets change against the
+	// cash column for any order carrying a cash row, a split sale whose
+	// over-tender sat on the non-cash rail subtracted money that had never left
+	// the drawer — the shift then read short by that amount. Capping at
+	// cashTendered also zeroes it for a pure non-cash sale.
 	change := paidTotal - total
 	if change < 0 {
 		change = 0
+	}
+	if change > cashTendered {
+		change = cashTendered
 	}
 
 	// Determine primary payment method label for orders.payment_method.

@@ -902,7 +902,15 @@ func (h *POSHandler) CreatePOSOrder(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusBadRequest, "Poin pembeli tidak cukup untuk redeem")
 		return
 	}
-	if errors.Is(err, repository.ErrPOSSessionNotFound) || errors.Is(err, repository.ErrPOSSessionNotOpen) {
+	// A shift closing mid-sale is a race, not a malformed request: the session
+	// was open when the cashier hit Bayar. 409 + explicit copy so the terminal
+	// tells them to reopen a shift instead of surfacing an opaque 400/500.
+	if errors.Is(err, repository.ErrPOSSessionNotOpen) {
+		response.Error(w, http.StatusConflict,
+			"Sesi kasir sudah ditutup — buka sesi baru lalu ulangi transaksi ini")
+		return
+	}
+	if errors.Is(err, repository.ErrPOSSessionNotFound) {
 		response.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
