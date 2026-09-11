@@ -268,9 +268,18 @@ func (h *WebhookHandler) Midtrans(w http.ResponseWriter, r *http.Request) {
 		// are released. The order-expiry worker only matches payment_status=
 		// 'unpaid', so a 'failed'/'pending' order would otherwise hold inventory
 		// forever until a manual cancel. Never touches an already-paid order.
-		if cErr := h.orders.Cancel(r.Context(), gateway.StoreID, order.ID,
+		// CancelIfNotSettled, not Cancel: a settlement notification can land
+		// between the guarded status write above and this call, and an
+		// unguarded cancel would then cancel a paid order and put its stock
+		// back on the shelf.
+		if cErr := h.orders.CancelIfNotSettled(r.Context(), gateway.StoreID, order.ID,
 			"Pembayaran gagal / kadaluwarsa (Midtrans)"); cErr != nil {
-			h.logger.Error("webhook: cancel on failed payment", "err", cErr, "order_id", n.OrderID)
+			if errors.Is(cErr, repository.ErrInvalidTransition) {
+				h.logger.Info("webhook: skipped cancel — payment landed first",
+					"order_id", n.OrderID)
+			} else {
+				h.logger.Error("webhook: cancel on failed payment", "err", cErr, "order_id", n.OrderID)
+			}
 		}
 	}
 
@@ -288,10 +297,12 @@ func (h *WebhookHandler) Midtrans(w http.ResponseWriter, r *http.Request) {
 func (h *WebhookHandler) handleGatewayRefund(ctx context.Context, storeID uuid.UUID, order *repository.Order, n midtransNotification) {
 	const reason = "Refund via dashboard Midtrans"
 
-	// refund_amount is the cumulative amount refunded; fall back to the full
-	// gross when Midtrans omits it.
+	// refund_amount is the cumulative amount refunded. Falling back to the
+	// full gross is only defensible for a FULL refund — on a partial it would
+	// book the entire order as refunded while payment_status stays 'paid',
+	// telling the seller they gave back money they still hold.
 	amountCents, ok := rupiahToCents(n.RefundAmount)
-	if !ok || amountCents <= 0 {
+	if (!ok || amountCents <= 0) && n.TransactionStatus != "partial_refund" {
 		amountCents, ok = rupiahToCents(n.GrossAmount)
 	}
 	if !ok || amountCents <= 0 {

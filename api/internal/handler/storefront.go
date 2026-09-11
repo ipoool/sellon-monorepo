@@ -1183,6 +1183,26 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 				"kuota kode promo barusan habis — hapus kodenya lalu coba lagi")
 			return
 		}
+		// Two submits raced past the pre-read above and the unique index
+		// caught the second one. The order DID get created — replay it rather
+		// than telling the buyer it failed, which is what makes them press
+		// "pesan" again with a fresh key and end up with two real orders.
+		if errors.Is(err, repository.ErrDuplicateIdempotencyKey) {
+			if existing, fErr := h.orders.FindByIdempotencyKey(r.Context(), store.ID, req.IdempotencyKey); fErr == nil && existing != nil {
+				response.JSON(w, http.StatusOK, map[string]any{
+					"order_number": existing.OrderNumber,
+					"total_cents":  existing.TotalCents,
+					"status":       existing.Status,
+					"replay":       true,
+				})
+				return
+			}
+			// The winning transaction has not committed yet. 409 tells the
+			// client to retry, and the retry hits the pre-read.
+			response.Error(w, http.StatusConflict,
+				"pesanan sedang diproses — tunggu sebentar lalu cek status pesanan kamu")
+			return
+		}
 		h.logger.Error("storefront create order", "err", err)
 		response.Error(w, http.StatusInternalServerError, "gagal membuat pesanan")
 		return

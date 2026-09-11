@@ -8,9 +8,11 @@ import (
 	"github.com/sellon/sellon/api/internal/repository"
 )
 
-// OrderExpiryJob auto-cancels stale 'pending'/'unpaid' orders (with no payment
-// proof uploaded) older than ttl, releasing their stock + digital kuota + promo
-// allocation. Ticks every 30 minutes. main only starts it when ttl > 0.
+// OrderExpiryJob auto-cancels abandoned orders (no payment proof uploaded),
+// releasing their stock + digital kuota + promo allocation + the customer
+// lifetime totals checkout had already counted. Orders the buyer never acted
+// on expire after ttl; ones parked at payment_status='pending' get at least
+// pendingGrace. Ticks every 30 minutes. main only starts it when ttl > 0.
 type OrderExpiryJob struct {
 	orders *repository.OrderRepo
 	ttl    time.Duration
@@ -50,15 +52,27 @@ func (j *OrderExpiryJob) loop(ctx context.Context) {
 	}
 }
 
+// pendingGrace is the minimum age before an order parked at
+// payment_status='pending' is expired. A pending order means a real payment
+// instrument exists — an issued Midtrans VA, or a buyer who pressed "saya
+// sudah bayar" — so it deserves more patience than one the buyer never
+// touched. 24 hours matches the longest Midtrans VA lifetime, so we never
+// cancel a charge the gateway itself still considers payable.
+const pendingGrace = 24 * time.Hour
+
 func (j *OrderExpiryJob) run(ctx context.Context) {
-	cutoff := time.Now().Add(-j.ttl)
-	n, err := j.orders.ExpireStaleUnpaid(ctx, cutoff)
+	now := time.Now()
+	unpaidCutoff := now.Add(-j.ttl)
+	pendingCutoff := now.Add(-max(j.ttl, pendingGrace))
+	n, err := j.orders.ExpireStaleUnpaid(ctx, unpaidCutoff, pendingCutoff)
 	if err != nil {
 		j.logger.Error("scheduler: order expiry failed", "err", err)
 		return
 	}
 	if n > 0 {
 		j.logger.Info("scheduler: expired stale unpaid orders",
-			"count", n, "cutoff", cutoff.Format(time.RFC3339))
+			"count", n,
+			"unpaid_cutoff", unpaidCutoff.Format(time.RFC3339),
+			"pending_cutoff", pendingCutoff.Format(time.RFC3339))
 	}
 }

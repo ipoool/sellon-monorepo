@@ -3,11 +3,11 @@ package repository
 import (
 	"context"
 	"errors"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -258,12 +258,13 @@ func (r *PromoRepo) IncrementUsage(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+// isUniqueViolation reports whether err is a Postgres unique-constraint
+// violation. Matched on SQLSTATE 23505 rather than by searching the message
+// text: the message embeds user-supplied values (a promo code, a slug), so a
+// substring match could be triggered by what someone typed into a form.
+// Shared across this package — orders.go uses it for the idempotency-key
+// collision that means "this order already exists".
 func isUniqueViolation(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "duplicate key") ||
-		strings.Contains(msg, "unique constraint") ||
-		strings.Contains(msg, "23505")
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }

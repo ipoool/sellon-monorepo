@@ -642,9 +642,51 @@ func (r *OrderRepo) CancelIfUnpaid(ctx context.Context, storeID, id uuid.UUID, r
 		" AND payment_status = 'unpaid' AND COALESCE(payment_proof_url, '') = ''")
 }
 
+// CancelIfNotSettled cancels an order only while no money is recorded against
+// it. Unlike CancelIfUnpaid it tolerates 'pending' and 'failed', which is what
+// the gateway webhook needs: it has just written 'failed' and wants to release
+// the stock, but a settlement notification can land in the gap between that
+// write and this cancel. Without the guard that race cancels an order the
+// buyer has actually paid for, and hands its stock back to the shelf.
+// Returns ErrInvalidTransition when a payment won the race.
+func (r *OrderRepo) CancelIfNotSettled(ctx context.Context, storeID, id uuid.UUID, reason string) error {
+	return r.cancel(ctx, storeID, id, reason,
+		" AND payment_status NOT IN ('paid', 'refunded')")
+}
+
 // cancel does the actual work for Cancel / CancelIfUnpaid. extraGuard is
 // appended verbatim to the UPDATE's WHERE clause (callers only ever pass
 // constant SQL — never user input).
+// reverseCustomerTotalsTx undoes the lifetime counters that Create bumped for
+// this order's customer. Create increments total_orders/total_spent_cents at
+// CHECKOUT, not at payment, so every cancelled, expired or refunded order left
+// the seller's CRM permanently overstated — and those two columns are what the
+// Pelanggan segments (VIP, loyal, sekali beli) are computed from, so a buyer
+// who ordered ten times and cancelled ten times was being marketed to as the
+// store's best customer.
+//
+// GREATEST(0, ...) because these counters predate this reversal: rows carrying
+// historical over-counting must not be driven negative by a later cancel.
+// Anonymous orders (customer_id NULL) match no row and are a no-op.
+//
+// last_order_at is deliberately NOT rewound — "when did this person last order
+// from me" is a true statement about a cancelled order too, and recomputing it
+// would cost a scan on every cancel.
+//
+// Safe to call exactly once per order: every caller runs it inside the same
+// transaction as a guarded status transition that only one writer can win.
+func reverseCustomerTotalsTx(ctx context.Context, tx pgx.Tx, id uuid.UUID) error {
+	_, err := tx.Exec(ctx, `
+		UPDATE customers c
+		SET total_orders = GREATEST(0, c.total_orders - 1),
+		    total_spent_cents = GREATEST(0, c.total_spent_cents - o.total_cents),
+		    updated_at = now()
+		FROM orders o
+		WHERE o.id = $1 AND o.customer_id = c.id
+	`, id)
+	return err
+}
+
 func (r *OrderRepo) cancel(ctx context.Context, storeID, id uuid.UUID, reason, extraGuard string) error {
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -728,6 +770,12 @@ func (r *OrderRepo) cancel(ctx context.Context, storeID, id uuid.UUID, reason, e
 	// 'restore' ledger rows). Mirrors the product-stock restore above.
 	if err := reverseConsumptionTx(ctx, tx, storeID, id); err != nil {
 		return fmt.Errorf("restore material stock: %w", err)
+	}
+
+	// Take the order back off the customer's lifetime totals. The guarded
+	// UPDATE above means exactly one caller reaches this line per order.
+	if err := reverseCustomerTotalsTx(ctx, tx, id); err != nil {
+		return fmt.Errorf("reverse customer totals: %w", err)
 	}
 
 	return tx.Commit(ctx)
@@ -850,6 +898,12 @@ func (r *OrderRepo) Refund(ctx context.Context, storeID, id uuid.UUID, amountCen
 		if err := reverseConsumptionTx(ctx, tx, storeID, id); err != nil {
 			return fmt.Errorf("restore material stock on refund: %w", err)
 		}
+		// Only inside this branch: an order that was ALREADY cancelled had its
+		// customer totals reversed by that cancel, and doing it twice would
+		// under-count the buyer instead of over-counting them.
+		if err := reverseCustomerTotalsTx(ctx, tx, id); err != nil {
+			return fmt.Errorf("reverse customer totals on refund: %w", err)
+		}
 	}
 
 	return tx.Commit(ctx)
@@ -914,9 +968,14 @@ func (r *OrderRepo) ReleaseRefundClaim(ctx context.Context, storeID, id uuid.UUI
 // smaller one — so a later full refund is still possible. Flagged for review
 // so the seller sees the money moved.
 func (r *OrderRepo) RecordPartialRefund(ctx context.Context, storeID, id uuid.UUID, amountCents int64, reason string) error {
+	// GREATEST, not assignment: Midtrans sends the CUMULATIVE refunded amount,
+	// and notifications are neither ordered nor delivered once. A replayed or
+	// out-of-order notification carrying an earlier, smaller total would
+	// otherwise rewrite the order to show less money refunded than actually
+	// went back to the buyer.
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE orders
-		SET refund_amount_cents = $3,
+		SET refund_amount_cents = GREATEST(COALESCE(refund_amount_cents, 0), $3),
 		    refund_reason = $4,
 		    needs_review = true,
 		    review_reason = 'Refund sebagian dari Midtrans — cek nominal & stok',
@@ -932,14 +991,27 @@ func (r *OrderRepo) RecordPartialRefund(ctx context.Context, storeID, id uuid.UU
 	return nil
 }
 
-// ExpireStaleUnpaid auto-cancels orders left 'pending'/'unpaid' past the cutoff
-// with NO payment proof uploaded (buyers who transferred + uploaded proof are
-// awaiting seller confirmation, not abandoned — those are never touched).
-// Cancelling releases stock + digital kuota + promo allocation, mirroring Cancel.
+// ExpireStaleUnpaid auto-cancels abandoned orders with NO payment proof
+// uploaded (buyers who transferred + uploaded proof are awaiting seller
+// confirmation, not abandoned — those are never touched). Cancelling releases
+// stock + digital kuota + promo allocation + customer totals, mirroring Cancel.
 // One transaction; target rows are locked (FOR UPDATE SKIP LOCKED) so a
 // concurrent payment webhook can't pay an order we're expiring. Returns the
 // count cancelled.
-func (r *OrderRepo) ExpireStaleUnpaid(ctx context.Context, cutoff time.Time) (int, error) {
+//
+// Two cutoffs, because 'unpaid' and 'pending' mean different things:
+//
+//   - unpaidCutoff covers orders the buyer never acted on at all.
+//   - pendingCutoff covers orders parked at payment_status='pending' — a
+//     Midtrans VA/bank charge that was issued, or a buyer who pressed "saya
+//     sudah bayar" without uploading proof. These were previously swept up by
+//     NOTHING: the worker only matched 'unpaid', and the gateway's expire
+//     notification is the only other thing that would release them, so a
+//     single missed webhook (rotated URL, downtime) held that stock forever.
+//     They get a longer grace than 'unpaid' because someone may genuinely be
+//     walking to an ATM; the caller is responsible for passing a pendingCutoff
+//     no later than unpaidCutoff.
+func (r *OrderRepo) ExpireStaleUnpaid(ctx context.Context, unpaidCutoff, pendingCutoff time.Time) (int, error) {
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return 0, err
@@ -950,11 +1022,13 @@ func (r *OrderRepo) ExpireStaleUnpaid(ctx context.Context, cutoff time.Time) (in
 	rows, err := tx.Query(ctx, `
 		SELECT id, store_id FROM orders
 		WHERE status = 'pending'
-		  AND payment_status = 'unpaid'
-		  AND created_at < $1
 		  AND COALESCE(payment_proof_url, '') = ''
+		  AND (
+		        (payment_status = 'unpaid'  AND created_at < $1)
+		     OR (payment_status = 'pending' AND created_at < $2)
+		  )
 		FOR UPDATE SKIP LOCKED
-	`, cutoff)
+	`, unpaidCutoff, pendingCutoff)
 	if err != nil {
 		return 0, fmt.Errorf("select stale orders: %w", err)
 	}
@@ -1036,6 +1110,25 @@ func (r *OrderRepo) ExpireStaleUnpaid(ctx context.Context, cutoff time.Time) (in
 		WHERE pr.id = c.promo_id
 	`, ids); err != nil {
 		return 0, fmt.Errorf("restore promo usage: %w", err)
+	}
+	// Take the expired orders back off their customers' lifetime totals —
+	// same reason as the single-order reversal in cancel(): those counters
+	// were bumped at checkout and drive the Pelanggan segments, so abandoned
+	// orders were silently promoting buyers into the VIP segment.
+	if _, err := tx.Exec(ctx, `
+		UPDATE customers c
+		SET total_orders = GREATEST(0, c.total_orders - agg.cnt),
+		    total_spent_cents = GREATEST(0, c.total_spent_cents - agg.spend),
+		    updated_at = now()
+		FROM (
+			SELECT customer_id, COUNT(*) AS cnt, SUM(total_cents) AS spend
+			FROM orders
+			WHERE id = ANY($1) AND customer_id IS NOT NULL
+			GROUP BY customer_id
+		) agg
+		WHERE c.id = agg.customer_id
+	`, ids); err != nil {
+		return 0, fmt.Errorf("reverse customer totals: %w", err)
 	}
 	// Finally, cancel the orders.
 	if _, err := tx.Exec(ctx, `
@@ -1438,6 +1531,16 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 		&o.CustomerName, &o.CustomerWhatsApp, &o.CustomerEmail, &o.CustomerCity, &o.CreatedAt,
 		&o.QueueNumber, &o.KitchenStatus, &o.ServingType, &o.TaxCents, &o.TaxBps, &o.TaxInclusive,
 	); err != nil {
+		// A genuine double-tap (two submits in flight at once) gets past the
+		// handler's pre-read and collides on the partial unique index from
+		// migration 0090. That is the index doing its job, not a failure: the
+		// order exists. Report it as such so the caller can replay the
+		// original instead of telling the buyer their order failed — a 500
+		// there is what makes people press "pesan" a second time with a fresh
+		// key and actually end up with two orders.
+		if isUniqueViolation(err) {
+			return nil, ErrDuplicateIdempotencyKey
+		}
 		return nil, fmt.Errorf("insert order: %w", err)
 	}
 
@@ -1548,6 +1651,11 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 	}
 	return &o, nil
 }
+
+// ErrDuplicateIdempotencyKey means this store already has an order under the
+// submitted idempotency key — the caller should return that order rather than
+// creating a second one.
+var ErrDuplicateIdempotencyKey = errors.New("duplicate idempotency key")
 
 // FindByIdempotencyKey returns a previously-created order for this key, or
 // ErrOrderNotFound. Used by the storefront create path so a retried submit
