@@ -149,6 +149,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	subscriptionHandler := handler.NewSubscriptionHandler(
 		subscriptions, stores, products, orders, users, planRepo,
 		midtransClient, cfg.PlatformMidtransServerKey,
+		storageClient, mailer, cfg.BillingNotifyEmail, publicWebURL,
 		auditLogger, logger,
 	)
 	plansHandler := handler.NewPlansHandler(planRepo, logger)

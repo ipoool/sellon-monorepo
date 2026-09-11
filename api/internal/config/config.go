@@ -98,6 +98,13 @@ type Config struct {
 	FromEmail      string
 	FromName       string
 
+	// BillingNotifyEmail is BCC'd on manual-transfer upgrade requests so
+	// whoever verifies the payment sees it the moment it lands instead of
+	// having to poll /platform/subscriptions. BCC, not To: the seller's own
+	// copy is the primary message and must not expose an internal address.
+	// Empty disables the BCC without touching any other mail.
+	BillingNotifyEmail string
+
 	// Twilio (platform-funded) — single account on the platform side,
 	// used to push WhatsApp new-order alerts to sellers. When
 	// AccountSID or AuthToken is empty the notify package becomes a
@@ -141,6 +148,7 @@ func Load() (*Config, error) {
 	v.SetDefault("s3_bucket", "sellon-bucket-cosdi7")
 	v.SetDefault("rajaongkir_tier", "starter")
 	v.SetDefault("from_name", "SellOn")
+	v.SetDefault("billing_notify_email", "asepulloh0109@gmail.com")
 	v.SetDefault("postgres_sslmode", "disable")
 	v.SetDefault("cname_target", "cname.sellon.id")
 	v.SetDefault("order_expiry_hours", 1)
@@ -201,6 +209,7 @@ func Load() (*Config, error) {
 		PlatformMidtransServerKey: v.GetString("platform_midtrans_server_key"),
 		PlatformMidtransClientKey: v.GetString("platform_midtrans_client_key"),
 		MailtrapAPIKey:            v.GetString("mailtrap_api_key"),
+		BillingNotifyEmail:        strings.TrimSpace(v.GetString("billing_notify_email")),
 		FromEmail:                 v.GetString("from_email"),
 		FromName:                  v.GetString("from_name"),
 		TwilioAccountSID:          v.GetString("twilio_account_sid"),

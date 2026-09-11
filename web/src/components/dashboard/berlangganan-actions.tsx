@@ -11,6 +11,9 @@ import {
   RotateCcw,
   AlertTriangle,
   MessageCircle,
+  Upload,
+  Paperclip,
+  Trash2,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -66,6 +69,13 @@ export function BerlanggananActions({
   );
   const [months, setMonths] = useState(1);
   const [busy, setBusy] = useState(false);
+  // Transfer receipt. Held as a File until submit so the upload happens in
+  // the same request that records the invoice — a separate upload call could
+  // succeed against an invoice that was never created, or vice versa.
+  const [proofFile, setProofFile] = useState<File | null>(null);
+  const [proofPreview, setProofPreview] = useState<string>("");
+  const [proofError, setProofError] = useState<string>("");
+  const proofInputRef = useRef<HTMLInputElement>(null);
   const upgradeRef = useRef<HTMLDialogElement>(null);
   const cancelRef = useRef<HTMLDialogElement>(null);
 
@@ -165,32 +175,92 @@ export function BerlanggananActions({
     ? [...quotaBullets(activePlan), ...activePlan.features]
     : [];
 
+  const MAX_PROOF_BYTES = 10 * 1024 * 1024;
+  const PROOF_TYPES = ["image/jpeg", "image/png", "image/webp"];
+
+  function pickProof(file: File | null) {
+    // Revoke the previous object URL before replacing it — without this
+    // every re-pick leaks a blob for the lifetime of the page.
+    setProofPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return "";
+    });
+    if (!file) {
+      setProofFile(null);
+      setProofError("");
+      return;
+    }
+    // Checked here as well as on the server so the seller learns the file is
+    // wrong before waiting out a 10 MB upload.
+    if (!PROOF_TYPES.includes(file.type)) {
+      setProofFile(null);
+      setProofError("Format harus JPG, PNG, atau WebP.");
+      return;
+    }
+    if (file.size > MAX_PROOF_BYTES) {
+      setProofFile(null);
+      setProofError("Ukuran maksimal 10 MB. Coba screenshot ulang atau kompres dulu.");
+      return;
+    }
+    setProofError("");
+    setProofFile(file);
+    setProofPreview(URL.createObjectURL(file));
+  }
+
+  function clearProof() {
+    pickProof(null);
+    if (proofInputRef.current) proofInputRef.current.value = "";
+  }
+
+  // Release the preview blob when the component goes away.
+  useEffect(() => {
+    return () => {
+      if (proofPreview) URL.revokeObjectURL(proofPreview);
+    };
+  }, [proofPreview]);
+
   async function requestUpgrade() {
     setBusy(true);
     try {
+      const notes = `Permintaan upgrade ke ${tierLabel} ${months} bulan dari halaman Pengaturan.`;
+      // Multipart carries the receipt in the SAME request that records the
+      // invoice, so the seller never ends up with a pending request the
+      // admin has nothing to verify against.
+      const form = new FormData();
+      form.set("tier", tier);
+      form.set("months", String(months));
+      form.set("notes", notes);
+      if (proofFile) form.set("payment_proof", proofFile);
+
       const res = await fetch(
         `${apiBase}/api/v1/subscription/request-upgrade`,
-        {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            tier,
-            months,
-            notes: `Permintaan upgrade ke ${tierLabel} ${months} bulan dari halaman Pengaturan.`,
-          }),
-        },
+        { method: "POST", credentials: "include", body: form },
       );
       const data = (await res.json().catch(() => ({}))) as {
         error?: string;
         already_pending?: boolean;
+        proof_uploaded?: boolean;
       };
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-      showSuccess(
-        data.already_pending
-          ? "Permintaan upgrade sebelumnya masih diproses oleh tim. Tidak perlu kirim lagi — kami akan aktifkan dalam 1×24 jam."
-          : "Permintaan upgrade tercatat. Silakan transfer dan kontak support - tim akan aktifkan dalam 1×24 jam.",
-      );
+
+      if (proofFile && data.proof_uploaded === false) {
+        // The request is recorded either way — say so plainly rather than
+        // let the seller think the whole thing failed.
+        showError(
+          "Permintaan tercatat, tapi bukti transfer gagal diunggah. Coba kirim ulang buktinya, atau kirim lewat WhatsApp support.",
+        );
+      } else {
+        showSuccess(
+          data.already_pending
+            ? proofFile
+              ? "Bukti transfer tersimpan di permintaan yang sedang diproses. Tidak perlu kirim lagi — tim aktifkan dalam 1×24 jam."
+              : "Permintaan upgrade sebelumnya masih diproses oleh tim. Tidak perlu kirim lagi — kami akan aktifkan dalam 1×24 jam."
+            : proofFile
+              ? "Permintaan upgrade & bukti transfer tercatat. Tim akan aktifkan dalam 1×24 jam."
+              : "Permintaan upgrade tercatat. Kirim bukti transfer ke support - tim akan aktifkan dalam 1×24 jam.",
+        );
+        clearProof();
+      }
       refresh();
     } catch (err) {
       showError(err);
@@ -436,7 +506,7 @@ export function BerlanggananActions({
                 </div>
               </li>
               <li>
-                Kirim bukti transfer ke{" "}
+                Lampirkan bukti transfer di bawah ini — atau kirim ke{" "}
                 <a
                   href={`https://wa.me/${SUPPORT_WA}`}
                   target="_blank"
@@ -454,6 +524,95 @@ export function BerlanggananActions({
             </ol>
           </div>
 
+          {/* Transfer receipt. Optional on purpose: WhatsApp stays a valid
+              channel, and a seller who has already paid must never be
+              blocked from recording that just because their phone will not
+              cooperate with the file picker. */}
+          <div className="mt-4">
+            <Label htmlFor="proof-upload">
+              Bukti transfer{" "}
+              <span className="font-normal text-neutral-500">(opsional)</span>
+            </Label>
+            <p className="mt-0.5 text-xs text-neutral-500">
+              Lampirkan screenshot transfer supaya tim bisa langsung verifikasi
+              tanpa perlu chat. JPG, PNG, atau WebP — maksimal 10 MB.
+            </p>
+
+            <input
+              ref={proofInputRef}
+              id="proof-upload"
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="sr-only"
+              onChange={(e) => pickProof(e.target.files?.[0] ?? null)}
+            />
+
+            {proofPreview ? (
+              <div className="mt-2 flex items-start gap-3 rounded-lg border border-neutral-200 bg-white p-2.5">
+                {/* Plain <img>: the source is a local object URL, which
+                    next/image cannot optimise. */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={proofPreview}
+                  alt="Pratinjau bukti transfer"
+                  className="size-16 shrink-0 rounded-md border border-neutral-200 object-cover"
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-neutral-900">
+                    {proofFile?.name}
+                  </p>
+                  <p className="mt-0.5 text-xs text-neutral-500">
+                    {proofFile
+                      ? `${(proofFile.size / 1024 / 1024).toFixed(2)} MB`
+                      : ""}{" "}
+                    · akan dikirim saat kamu klik &ldquo;Saya sudah
+                    transfer&rdquo;
+                  </p>
+                  <div className="mt-1.5 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => proofInputRef.current?.click()}
+                      className="text-xs font-medium text-brand-700 hover:underline"
+                    >
+                      Ganti file
+                    </button>
+                    <button
+                      type="button"
+                      onClick={clearProof}
+                      className="inline-flex items-center gap-1 text-xs font-medium text-neutral-500 hover:text-danger"
+                    >
+                      <Trash2 className="size-3" aria-hidden />
+                      Hapus
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => proofInputRef.current?.click()}
+                className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-neutral-300 bg-white px-4 py-4 text-sm font-medium text-neutral-600 transition-colors hover:border-brand-400 hover:bg-brand-50 hover:text-brand-700"
+              >
+                <Upload className="size-4" aria-hidden />
+                Pilih file bukti transfer
+              </button>
+            )}
+
+            {proofError && (
+              <p role="alert" className="mt-1.5 text-xs font-medium text-danger">
+                {proofError}
+              </p>
+            )}
+
+            {!proofFile && pendingManual?.payment_proof_url && (
+              <p className="mt-1.5 inline-flex items-center gap-1.5 text-xs text-success">
+                <Paperclip className="size-3" aria-hidden />
+                Bukti transfer sudah terlampir di permintaan yang sedang
+                diproses.
+              </p>
+            )}
+          </div>
+
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-2 border-t border-neutral-200 bg-neutral-50 px-5 py-3">
@@ -469,21 +628,33 @@ export function BerlanggananActions({
             Chat support
           </a>
           <Button
-            variant={pendingManual ? "outline" : "default"}
+            variant={pendingManual && !proofFile ? "outline" : "default"}
             onClick={requestUpgrade}
-            disabled={busy || !!pendingManual}
+            // The pending-request lock exists to stop DUPLICATE invoices, so
+            // it must not also lock out a receipt: the backend attaches one
+            // to the open invoice, and a seller who forgot to include it
+            // would otherwise have no way to send it from here at all.
+            disabled={busy || (!!pendingManual && !proofFile)}
             title={
-              pendingManual
-                ? "Permintaan sebelumnya masih diproses"
+              pendingManual && !proofFile
+                ? "Permintaan sebelumnya masih diproses — lampirkan bukti transfer kalau belum sempat"
                 : undefined
             }
           >
-            <Check className="size-4" aria-hidden />
+            {busy ? (
+              <Check className="size-4" aria-hidden />
+            ) : pendingManual && proofFile ? (
+              <Upload className="size-4" aria-hidden />
+            ) : (
+              <Check className="size-4" aria-hidden />
+            )}
             {busy
               ? "Menyimpan…"
               : pendingManual
-              ? "Menunggu verifikasi"
-              : "Saya sudah transfer"}
+                ? proofFile
+                  ? "Kirim bukti transfer"
+                  : "Menunggu verifikasi"
+                : "Saya sudah transfer"}
           </Button>
         </div>
       </dialog>

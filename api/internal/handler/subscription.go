@@ -4,17 +4,23 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/sellon/sellon/api/internal/audit"
 	"github.com/sellon/sellon/api/internal/auth"
 	"github.com/sellon/sellon/api/internal/domain/feature"
+	"github.com/sellon/sellon/api/internal/email"
 	"github.com/sellon/sellon/api/internal/payments"
 	"github.com/sellon/sellon/api/internal/pkg/response"
 	"github.com/sellon/sellon/api/internal/repository"
+	"github.com/sellon/sellon/api/internal/storage"
 )
 
 type SubscriptionHandler struct {
@@ -26,8 +32,13 @@ type SubscriptionHandler struct {
 	plans             *repository.PlanRepo
 	midtrans          *payments.MidtransClient
 	platformServerKey string
-	audit             *audit.Logger
-	logger            *slog.Logger
+	storage           storage.Client
+	mailer            *email.Mailer
+	// billingNotifyEmail is BCC'd on upgrade requests; "" disables it.
+	billingNotifyEmail string
+	webOrigin          string
+	audit              *audit.Logger
+	logger             *slog.Logger
 }
 
 func NewSubscriptionHandler(
@@ -39,17 +50,25 @@ func NewSubscriptionHandler(
 	plans *repository.PlanRepo,
 	midtrans *payments.MidtransClient,
 	platformServerKey string,
+	storageClient storage.Client,
+	mailer *email.Mailer,
+	billingNotifyEmail string,
+	webOrigin string,
 	audit *audit.Logger,
 	logger *slog.Logger,
 ) *SubscriptionHandler {
 	return &SubscriptionHandler{
 		subs: subs, stores: stores, products: products, orders: orders,
-		users:             users,
-		plans:             plans,
-		midtrans:          midtrans,
-		platformServerKey: platformServerKey,
-		audit:             audit,
-		logger:            logger,
+		users:              users,
+		plans:              plans,
+		midtrans:           midtrans,
+		platformServerKey:  platformServerKey,
+		storage:            storageClient,
+		mailer:             mailer,
+		billingNotifyEmail: strings.TrimSpace(billingNotifyEmail),
+		webOrigin:          strings.TrimRight(webOrigin, "/"),
+		audit:              audit,
+		logger:             logger,
 	}
 }
 
@@ -122,7 +141,10 @@ type invoiceDTO struct {
 	PeriodEnd   *string `json:"period_end"`
 	PaidAt      *string `json:"paid_at"`
 	Notes       string  `json:"notes"`
-	CreatedAt   string  `json:"created_at"`
+	// PaymentProofURL lets the seller see that their receipt is attached to
+	// a pending request, so they know not to send it again.
+	PaymentProofURL string `json:"payment_proof_url"`
+	CreatedAt       string `json:"created_at"`
 }
 
 // toSubDTO builds the response DTO. Pricing is injected from the
@@ -165,12 +187,13 @@ func toInvoiceDTO(inv repository.SubscriptionInvoice) invoiceDTO {
 	}
 	return invoiceDTO{
 		ID: inv.ID.String(), AmountCents: inv.AmountCents, Status: inv.Status,
-		Provider:    inv.Provider,
-		PeriodStart: formatPtr(inv.PeriodStart),
-		PeriodEnd:   formatPtr(inv.PeriodEnd),
-		PaidAt:      formatPtr(inv.PaidAt),
-		Notes:       inv.Notes,
-		CreatedAt:   inv.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		Provider:        inv.Provider,
+		PeriodStart:     formatPtr(inv.PeriodStart),
+		PeriodEnd:       formatPtr(inv.PeriodEnd),
+		PaidAt:          formatPtr(inv.PaidAt),
+		Notes:           inv.Notes,
+		PaymentProofURL: inv.PaymentProofURL,
+		CreatedAt:       inv.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 }
 
@@ -269,9 +292,14 @@ func (h *SubscriptionHandler) RequestUpgrade(w http.ResponseWriter, r *http.Requ
 		response.Error(w, http.StatusBadRequest, "toko belum dibuat")
 		return
 	}
-	var req requestUpgradeReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		response.Error(w, http.StatusBadRequest, "invalid body")
+	// Two body shapes. A plain JSON post is the original contract and stays
+	// working; multipart carries the same fields plus the transfer receipt,
+	// so attaching a proof is the SAME action as recording the request
+	// rather than a second call that can fail on its own and leave an
+	// invoice nobody can verify.
+	req, proof, err := parseUpgradeRequest(w, r)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	tier, months, errMsg := resolveUpgradeRequest(req.Tier, req.Plan, req.Months)
@@ -295,13 +323,25 @@ func (h *SubscriptionHandler) RequestUpgrade(w http.ResponseWriter, r *http.Requ
 	// safe. `already_pending: true` lets the frontend swap its toast
 	// from "tercatat" to "lagi diverifikasi".
 	if existing, err := h.subs.FindOpenManualInvoice(r.Context(), sub.ID); err == nil && existing != nil {
+		// A receipt sent with the retry still belongs on the open invoice —
+		// dropping it because a row already exists is how a seller ends up
+		// unable to attach proof at all after their first click.
+		proofURL := existing.PaymentProofURL
+		if proof != nil {
+			if url, upErr := h.storeUpgradeProof(r.Context(), store.ID, existing.ID, proof); upErr != nil {
+				h.logger.Error("upgrade proof upload (pending)", "err", upErr, "invoice", existing.ID)
+			} else {
+				proofURL = url
+			}
+		}
 		response.JSON(w, http.StatusOK, map[string]any{
-			"ok":              true,
-			"already_pending": true,
-			"tier":            existing.Plan,
-			"amount_cents":    existing.AmountCents,
-			"months":          existing.Months,
-			"created_at":      existing.CreatedAt.Format(time.RFC3339),
+			"ok":                true,
+			"already_pending":   true,
+			"tier":              existing.Plan,
+			"amount_cents":      existing.AmountCents,
+			"months":            existing.Months,
+			"payment_proof_url": proofURL,
+			"created_at":        existing.CreatedAt.Format(time.RFC3339),
 		})
 		return
 	}
@@ -317,11 +357,26 @@ func (h *SubscriptionHandler) RequestUpgrade(w http.ResponseWriter, r *http.Requ
 		// tier ("P") in the slot meant for the months count.
 		notes = "Upgrade " + planLabel + " · " + intToStr(months) + " bulan"
 	}
-	if err := h.subs.CreatePendingInvoice(r.Context(), store.ID, sub.ID, amount, tier, months, notes); err != nil {
+	invoice, err := h.subs.CreatePendingInvoice(r.Context(), store.ID, sub.ID, amount, tier, months, notes)
+	if err != nil {
 		h.logger.Error("create pending invoice", "err", err)
 		response.Error(w, http.StatusInternalServerError, "gagal mencatat permintaan upgrade")
 		return
 	}
+
+	// The seller has already moved the money by the time they click, so an
+	// upload failure must not discard the request. Record it, report the
+	// proof as missing, and let them retry — the retry lands on the
+	// already-pending branch above and attaches to this same invoice.
+	proofURL := ""
+	if proof != nil {
+		if url, upErr := h.storeUpgradeProof(r.Context(), store.ID, invoice.ID, proof); upErr != nil {
+			h.logger.Error("upgrade proof upload", "err", upErr, "invoice", invoice.ID)
+		} else {
+			proofURL = url
+		}
+	}
+	h.sendUpgradeRequestEmail(r.Context(), store, invoice, planLabel, months, amount, proofURL)
 	h.audit.Log(r.Context(), store.ID, audit.Event{
 		Action:     "subscription.upgrade_requested",
 		EntityType: "subscription",
@@ -335,11 +390,16 @@ func (h *SubscriptionHandler) RequestUpgrade(w http.ResponseWriter, r *http.Requ
 		},
 	})
 	response.JSON(w, http.StatusCreated, map[string]any{
-		"ok":              true,
-		"already_pending": false,
-		"tier":            tier,
-		"amount_cents":    amount,
-		"months":          months,
+		"ok":                true,
+		"already_pending":   false,
+		"tier":              tier,
+		"amount_cents":      amount,
+		"months":            months,
+		"invoice_id":        invoice.ID.String(),
+		"payment_proof_url": proofURL,
+		// The seller transferred before clicking, so a failed upload is
+		// worth telling them about rather than silently succeeding.
+		"proof_uploaded": proof == nil || proofURL != "",
 	})
 }
 
@@ -546,4 +606,143 @@ func intToStr(n int) string {
 		buf[i] = '-'
 	}
 	return string(buf[i:])
+}
+
+// uploadedProof is a sniffed, size-checked receipt ready to be stored.
+type uploadedProof struct {
+	body        []byte
+	contentType string
+	ext         string
+}
+
+// maxProofBytes caps the receipt at 10 MB — comfortably above a phone
+// screenshot and matching the buyer-side payment-proof endpoint.
+const maxProofBytes = 10 * 1024 * 1024
+
+// parseUpgradeRequest reads the upgrade fields from either a JSON body (the
+// original contract) or a multipart form carrying the transfer receipt.
+// Returns a nil proof when no file was attached, which is still a valid
+// request: sending the receipt over WhatsApp remains supported.
+func parseUpgradeRequest(w http.ResponseWriter, r *http.Request) (requestUpgradeReq, *uploadedProof, error) {
+	var req requestUpgradeReq
+
+	if !strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			return req, nil, errors.New("invalid body")
+		}
+		return req, nil, nil
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxProofBytes)
+	if err := r.ParseMultipartForm(maxProofBytes); err != nil {
+		return req, nil, errors.New("file terlalu besar (maks 10 MB)")
+	}
+	req.Tier = r.FormValue("tier")
+	req.Plan = r.FormValue("plan")
+	req.Notes = r.FormValue("notes")
+	req.Months, _ = strconv.Atoi(r.FormValue("months"))
+
+	file, _, err := r.FormFile("payment_proof")
+	if err != nil {
+		// No file on a multipart post is fine — the client may simply have
+		// used the form encoding without picking a receipt.
+		return req, nil, nil
+	}
+	defer file.Close()
+
+	body, err := io.ReadAll(file)
+	if err != nil {
+		return req, nil, errors.New("gagal baca file bukti transfer")
+	}
+	if len(body) == 0 {
+		return req, nil, nil
+	}
+	// Sniff the bytes rather than trust the multipart part's Content-Type,
+	// which the client sets freely.
+	contentType := http.DetectContentType(body)
+	ext := ""
+	switch contentType {
+	case "image/jpeg":
+		ext = "jpg"
+	case "image/png":
+		ext = "png"
+	case "image/webp":
+		ext = "webp"
+	default:
+		return req, nil, errors.New("bukti transfer harus JPG / PNG / WebP")
+	}
+	return req, &uploadedProof{body: body, contentType: contentType, ext: ext}, nil
+}
+
+// storeUpgradeProof puts the receipt in object storage and attaches it to the
+// invoice. The key carries the store prefix that the cross-tenant delete
+// guard checks, and the invoice id so one store's receipts stay separable.
+func (h *SubscriptionHandler) storeUpgradeProof(
+	ctx context.Context, storeID, invoiceID uuid.UUID, proof *uploadedProof,
+) (string, error) {
+	if h.storage == nil || !h.storage.IsConfigured() {
+		return "", errors.New("upload belum dikonfigurasi di server")
+	}
+	key, err := storage.RandomKey(
+		storeID.String()+"/subscription_proofs/"+invoiceID.String(), proof.ext)
+	if err != nil {
+		return "", err
+	}
+	res, err := h.storage.Upload(ctx, key, proof.contentType, proof.body)
+	if err != nil {
+		return "", err
+	}
+	if err := h.subs.SetInvoicePaymentProof(ctx, storeID, invoiceID, res.PublicURL); err != nil {
+		return "", err
+	}
+	return res.PublicURL, nil
+}
+
+// sendUpgradeRequestEmail confirms the request to the seller and BCCs the
+// billing inbox so a manual activation does not depend on anyone polling
+// /platform/subscriptions. Fire-and-forget: mail is never allowed to fail a
+// request whose money has already moved.
+func (h *SubscriptionHandler) sendUpgradeRequestEmail(
+	ctx context.Context,
+	store *repository.Store,
+	invoice *repository.SubscriptionInvoice,
+	planLabel string,
+	months int,
+	amountCents int64,
+	proofURL string,
+) {
+	if h.mailer == nil || !h.mailer.Configured() {
+		return
+	}
+	owner, err := h.users.FindByID(ctx, store.OwnerID)
+	if err != nil || owner == nil || owner.Email == "" {
+		// Without an owner address there is no primary recipient, and a
+		// BCC-only message would arrive with an empty To header.
+		h.logger.Warn("upgrade request email: no owner address", "store", store.ID)
+		return
+	}
+	subject, text, htmlBody := email.RenderSubscriptionUpgradeRequest(email.UpgradeRequestData{
+		StoreName:    store.Name,
+		StoreSlug:    store.Slug,
+		OwnerName:    owner.Name,
+		OwnerEmail:   owner.Email,
+		PlanLabel:    planLabel,
+		Months:       months,
+		AmountCents:  amountCents,
+		InvoiceID:    invoice.ID.String(),
+		ProofURL:     proofURL,
+		AdminURL:     h.webOrigin + "/platform/subscriptions",
+		DashboardURL: h.webOrigin + "/settings/subscription",
+	})
+	var bcc []string
+	if h.billingNotifyEmail != "" {
+		bcc = []string{h.billingNotifyEmail}
+	}
+	h.mailer.Send(email.Message{
+		To:      owner.Email,
+		BCC:     bcc,
+		Subject: subject,
+		Text:    text,
+		HTML:    htmlBody,
+	})
 }

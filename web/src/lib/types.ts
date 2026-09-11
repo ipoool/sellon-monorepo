@@ -586,6 +586,9 @@ export type AdminSubscriptionInvoice = {
   provider: string; // "manual_transfer" | "midtrans" | ""
   provider_order_id: string;
   notes: string;
+  // Transfer receipt for a manual upgrade — what the admin verifies against.
+  payment_proof_url: string;
+  payment_proof_at: string | null;
   paid_at: string | null;
   period_start: string | null;
   period_end: string | null;
@@ -712,6 +715,9 @@ export type SubscriptionInvoice = {
   period_end: string | null;
   paid_at: string | null;
   notes: string;
+  // Transfer receipt the seller attached ("" when none). Lets the upgrade
+  // dialog say the proof is already in rather than ask for it again.
+  payment_proof_url: string;
   created_at: string;
 };
 

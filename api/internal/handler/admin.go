@@ -695,20 +695,24 @@ var _ = strings.TrimSpace
 // === Subscription transactions (admin-only) ===
 
 type adminInvoiceDTO struct {
-	ID              string  `json:"id"`
-	StoreID         string  `json:"store_id"`
-	StoreName       string  `json:"store_name"`
-	StoreSlug       string  `json:"store_slug"`
-	OwnerName       string  `json:"owner_name"`
-	OwnerEmail      string  `json:"owner_email"`
-	OwnerPicture    string  `json:"owner_picture"`
-	Plan            string  `json:"plan"`
-	Months          int     `json:"months"`
-	AmountCents     int64   `json:"amount_cents"`
-	Status          string  `json:"status"`
-	Provider        string  `json:"provider"`
-	ProviderOrderID string  `json:"provider_order_id"`
-	Notes           string  `json:"notes"`
+	ID              string `json:"id"`
+	StoreID         string `json:"store_id"`
+	StoreName       string `json:"store_name"`
+	StoreSlug       string `json:"store_slug"`
+	OwnerName       string `json:"owner_name"`
+	OwnerEmail      string `json:"owner_email"`
+	OwnerPicture    string `json:"owner_picture"`
+	Plan            string `json:"plan"`
+	Months          int    `json:"months"`
+	AmountCents     int64  `json:"amount_cents"`
+	Status          string `json:"status"`
+	Provider        string `json:"provider"`
+	ProviderOrderID string `json:"provider_order_id"`
+	Notes           string `json:"notes"`
+	// PaymentProofURL is the seller's transfer receipt ("" when none was
+	// attached). The admin verifying a manual upgrade checks this.
+	PaymentProofURL string  `json:"payment_proof_url"`
+	PaymentProofAt  *string `json:"payment_proof_at"`
 	PaidAt          *string `json:"paid_at"`
 	PeriodStart     *string `json:"period_start"`
 	PeriodEnd       *string `json:"period_end"`
@@ -738,6 +742,8 @@ func toAdminInvoiceDTO(row repository.AdminInvoiceRow) adminInvoiceDTO {
 		Provider:        row.Provider,
 		ProviderOrderID: row.ProviderOrderID,
 		Notes:           row.Notes,
+		PaymentProofURL: row.PaymentProofURL,
+		PaymentProofAt:  formatT(row.PaymentProofAt),
 		PaidAt:          formatT(row.PaidAt),
 		PeriodStart:     formatT(row.PeriodStart),
 		PeriodEnd:       formatT(row.PeriodEnd),

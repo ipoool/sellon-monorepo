@@ -11,6 +11,8 @@ import {
   Clock,
   Loader2,
   Receipt,
+  Eye,
+  Paperclip,
 } from "lucide-react";
 
 import { Avatar } from "@/components/ui/avatar";
@@ -18,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { AdminInvoiceDetailDialog } from "@/components/admin/admin-invoice-detail-dialog";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import {
@@ -92,6 +95,8 @@ export function AdminSubscriptionsTable({
   const [pending, startTransition] = useTransition();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogState>(null);
+  // The row whose full detail (including the transfer receipt) is open.
+  const [detail, setDetail] = useState<AdminSubscriptionInvoice | null>(null);
 
   function applyFilters(e?: FormEvent<HTMLFormElement>) {
     e?.preventDefault();
@@ -123,6 +128,7 @@ export function AdminSubscriptionsTable({
         ),
       );
       setDialog(null);
+      setDetail(null);
       refresh();
     } catch (err) {
       showError(err);
@@ -148,6 +154,7 @@ export function AdminSubscriptionsTable({
       setRows((prev) =>
         prev.map((r) => (r.id === row.id ? { ...r, status: "failed" } : r)),
       );
+      setDetail(null);
       setDialog(null);
       refresh();
     } catch (err) {
@@ -292,6 +299,21 @@ export function AdminSubscriptionsTable({
                     </td>
                     <td className="px-5 py-3">
                       <div className="flex items-center justify-end gap-1.5">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setDetail(r)}
+                          title="Lihat detail transaksi & bukti transfer"
+                        >
+                          <Eye className="size-3.5" aria-hidden />
+                          Detail
+                          {r.payment_proof_url && (
+                            <Paperclip
+                              className="size-3 text-success"
+                              aria-label="Ada bukti transfer"
+                            />
+                          )}
+                        </Button>
                         {r.status === "pending" ? (
                           <>
                             <Button
@@ -349,6 +371,24 @@ export function AdminSubscriptionsTable({
         pageSize={TABLE_PAGE_SIZE}
         total={total}
         paramName="page"
+      />
+
+      <AdminInvoiceDetailDialog
+        invoice={detail}
+        onClose={() => setDetail(null)}
+        // Route through the same confirm dialogs the table uses, so an
+        // activation from the detail view still states what it will do.
+        // The detail closes first: two stacked <dialog showModal()> would
+        // paint two backdrops over each other.
+        onActivate={(row) => {
+          setDetail(null);
+          setDialog({ kind: "activate", row });
+        }}
+        onReject={(row) => {
+          setDetail(null);
+          setDialog({ kind: "reject", row });
+        }}
+        busy={busyId === detail?.id}
       />
 
       <ConfirmDialog

@@ -44,6 +44,11 @@ type SubscriptionInvoice struct {
 	ProviderOrderID string
 	Months          int
 	Plan            string
+	// PaymentProofURL is the seller's uploaded transfer receipt for a
+	// manual-transfer invoice ("" = none). Manual upgrades are verified by
+	// hand, so this is what the admin actually checks before activating.
+	PaymentProofURL string
+	PaymentProofAt  *time.Time
 	CreatedAt       time.Time
 }
 
@@ -284,7 +289,8 @@ func (r *SubscriptionRepo) Resume(ctx context.Context, storeID uuid.UUID) (*Subs
 
 const invoiceCols = `id, store_id, subscription_id, amount_cents, status,
 	period_start, period_end, paid_at, notes,
-	provider, provider_order_id, months, plan, created_at`
+	provider, provider_order_id, months, plan,
+	payment_proof_url, payment_proof_at, created_at`
 
 func scanInvoice(row pgx.Row) (*SubscriptionInvoice, error) {
 	var inv SubscriptionInvoice
@@ -293,6 +299,7 @@ func scanInvoice(row pgx.Row) (*SubscriptionInvoice, error) {
 		&inv.Status, &inv.PeriodStart, &inv.PeriodEnd, &inv.PaidAt,
 		&inv.Notes,
 		&inv.Provider, &inv.ProviderOrderID, &inv.Months, &inv.Plan,
+		&inv.PaymentProofURL, &inv.PaymentProofAt,
 		&inv.CreatedAt,
 	); err != nil {
 		return nil, err
@@ -486,6 +493,9 @@ func (r *SubscriptionRepo) FindOpenManualInvoice(
 // (clicked "Saya sudah transfer"). Plan + months are stored so the admin
 // can activate later via SettleInvoice without re-asking. Provider is
 // "manual_transfer" to set these apart from Midtrans-Snap pending rows.
+// CreatePendingInvoice records a manual-transfer upgrade request. It returns
+// the row because the caller needs the id: the payment proof is stored under
+// a key derived from it, and the confirmation email names it.
 func (r *SubscriptionRepo) CreatePendingInvoice(
 	ctx context.Context,
 	storeID, subscriptionID uuid.UUID,
@@ -493,20 +503,48 @@ func (r *SubscriptionRepo) CreatePendingInvoice(
 	plan string,
 	months int,
 	notes string,
-) error {
+) (*SubscriptionInvoice, error) {
 	if months <= 0 {
 		months = 1
 	}
 	if plan == "" {
 		plan = "pro"
 	}
-	_, err := r.pool.Exec(ctx, `
+	row := r.pool.QueryRow(ctx, `
 		INSERT INTO subscription_invoices
 		    (store_id, subscription_id, amount_cents, status, notes,
 		     provider, plan, months)
 		VALUES ($1, $2, $3, 'pending', $4, 'manual_transfer', $5, $6)
-	`, storeID, subscriptionID, amountCents, notes, plan, months)
-	return err
+		RETURNING `+invoiceCols,
+		storeID, subscriptionID, amountCents, notes, plan, months)
+	return scanInvoice(row)
+}
+
+// SetInvoicePaymentProof attaches an uploaded receipt to a PENDING invoice.
+//
+// Guarded on status, not read-then-write: once ops has marked the invoice
+// paid or failed the proof is the evidence that decision was made against,
+// so a late upload must not silently replace it. store_id is re-asserted so
+// an invoice id from another tenant matches nothing. Re-uploading over a
+// still-pending invoice IS allowed — unlike the public buyer-proof endpoint
+// this caller is the authenticated owner fixing their own mistake.
+//
+// Returns ErrInvoiceNotPending when nothing matched.
+func (r *SubscriptionRepo) SetInvoicePaymentProof(
+	ctx context.Context, storeID, invoiceID uuid.UUID, proofURL string,
+) error {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE subscription_invoices
+		SET payment_proof_url = $3, payment_proof_at = now()
+		WHERE id = $1 AND store_id = $2 AND status = 'pending'
+	`, invoiceID, storeID, proofURL)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrInvoiceNotPending
+	}
+	return nil
 }
 
 // AdminInvoiceRow is a denormalized view used by the admin transactions
@@ -571,7 +609,8 @@ func (r *SubscriptionRepo) AdminListInvoices(
 		SELECT
 		    si.id, si.store_id, si.subscription_id, si.amount_cents, si.status,
 		    si.period_start, si.period_end, si.paid_at, si.notes,
-		    si.provider, si.provider_order_id, si.months, si.plan, si.created_at,
+		    si.provider, si.provider_order_id, si.months, si.plan,
+		    si.payment_proof_url, si.payment_proof_at, si.created_at,
 		    s.name, s.slug,
 		    COALESCE(u.name, ''), COALESCE(u.email, ''), COALESCE(u.picture_url, '')
 		FROM subscription_invoices si
@@ -593,7 +632,8 @@ func (r *SubscriptionRepo) AdminListInvoices(
 		if err := rows.Scan(
 			&row.ID, &row.StoreID, &row.SubscriptionID, &row.AmountCents, &row.Status,
 			&row.PeriodStart, &row.PeriodEnd, &row.PaidAt, &row.Notes,
-			&row.Provider, &row.ProviderOrderID, &row.Months, &row.Plan, &row.CreatedAt,
+			&row.Provider, &row.ProviderOrderID, &row.Months, &row.Plan,
+			&row.PaymentProofURL, &row.PaymentProofAt, &row.CreatedAt,
 			&row.StoreName, &row.StoreSlug,
 			&row.OwnerName, &row.OwnerEmail, &row.OwnerPicture,
 		); err != nil {
