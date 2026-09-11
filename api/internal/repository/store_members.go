@@ -277,6 +277,14 @@ func (r *MembershipRepo) AcceptInvitesForEmail(ctx context.Context, userID uuid.
 		pendings = append(pendings, p)
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		// A truncated read here would silently accept only SOME of a user's
+		// invites and report success, leaving them locked out of the other
+		// stores with nothing to retry — the invite rows stay unaccepted but
+		// this runs once per login, so the next login picks them up. Failing
+		// loudly is still better than reporting a wrong count.
+		return 0, err
+	}
 
 	for _, p := range pendings {
 		if _, err := tx.Exec(ctx, `

@@ -1881,7 +1881,11 @@ func (r *POSRepo) GetPOSReport(ctx context.Context, f POSReportFilter) (*POSRepo
 			LEFT JOIN pos_sessions ps ON ps.id = o.pos_session_id
 			WHERE %s
 		`, refWhere)
-		_ = r.pool.QueryRow(ctx, q, refArgs...).Scan(&m.TotalRefunded)
+		if err := r.pool.QueryRow(ctx, q, refArgs...).Scan(&m.TotalRefunded); err != nil {
+			// Swallowing this reported "Rp 0 direfund" on a query failure,
+			// which reads as good news rather than as a broken report.
+			return nil, fmt.Errorf("report refunded: %w", err)
+		}
 	}
 
 	if m.OrderCount > 0 {
@@ -1925,6 +1929,12 @@ func (r *POSRepo) GetPOSReport(ctx context.Context, f POSReportFilter) (*POSRepo
 			}
 		}
 		rows.Close()
+		if err := rows.Err(); err != nil {
+			// Without this, a connection dropping mid-iteration produced a
+			// SHORTER breakdown with no error — the seller reads lower sales
+			// and has no way to know the number is incomplete.
+			return nil, fmt.Errorf("payment breakdown: %w", err)
+		}
 
 		// Net the cash figure against change handed back, so a Rp 75.000 sale
 		// tendered with Rp 100.000 counts as Rp 75.000 of cash taken — mirrors
@@ -1974,6 +1984,9 @@ func (r *POSRepo) GetPOSReport(ctx context.Context, f POSReportFilter) (*POSRepo
 			m.DailySeries = append(m.DailySeries, p)
 		}
 		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("daily series: %w", err)
+		}
 	}
 
 	// By cashier rollup.
@@ -2003,6 +2016,9 @@ func (r *POSRepo) GetPOSReport(ctx context.Context, f POSReportFilter) (*POSRepo
 			m.ByCashier = append(m.ByCashier, c)
 		}
 		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("by cashier: %w", err)
+		}
 	}
 
 	// Top products by quantity.
@@ -2031,6 +2047,9 @@ func (r *POSRepo) GetPOSReport(ctx context.Context, f POSReportFilter) (*POSRepo
 			m.TopProducts = append(m.TopProducts, p)
 		}
 		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("top products: %w", err)
+		}
 	}
 
 	return m, nil
