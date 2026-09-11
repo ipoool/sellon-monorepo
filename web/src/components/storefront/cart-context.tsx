@@ -146,7 +146,6 @@ export function CartProvider({ storeSlug, children }: Props) {
   }, [state.items]);
   useEffect(() => {
     if (!isHydrated || reconciledRef.current || state.items.length === 0) return;
-    reconciledRef.current = true;
     const ctrl = new AbortController();
     void fetch(`${apiBase}/api/v1/storefront/${storeSlug}`, { signal: ctrl.signal })
       .then((r) => (r.ok ? r.json() : null))
@@ -221,6 +220,12 @@ export function CartProvider({ storeSlug, children }: Props) {
             patch.available_stock = freshStock;
           }
           if (variantMissing || (tracked && freshStock === 0)) {
+            // 0 is the cart's sentinel for "no cap" (see the `|| qty` in
+            // setQty and the `> 0` in cart-view's reachedStock), so writing
+            // a sold-out stock of 0 would RE-ENABLE the "+" on a line that
+            // just became unavailable. Drop the line instead; the notice
+            // below is what tells the buyer why it disappeared.
+            patch.qty = 0;
             found.push({
               key,
               product_name: it.product_name,
@@ -248,19 +253,31 @@ export function CartProvider({ storeSlug, children }: Props) {
         if (patches.size > 0) {
           setState((prev) => {
             let changed = false;
-            const items = prev.items.map((it) => {
+            const items = prev.items.reduce<CartItem[]>((acc, it) => {
               const patch = patches.get(itemKey(it));
-              if (!patch) return it;
+              if (!patch) {
+                acc.push(it);
+                return acc;
+              }
               changed = true;
-              return { ...it, ...patch };
-            });
+              const next = { ...it, ...patch };
+              // qty 0 means the line is gone (sold out or variant removed).
+              if (next.qty > 0) acc.push(next);
+              return acc;
+            }, []);
             return changed ? { items } : prev;
           });
         }
         if (found.length > 0) setNotices(found);
+        // Only now: setting this before the fetch meant a cart change that
+        // aborted the request left the flag set, so price/stock reconcile
+        // never ran again for the whole session and the buyer reviewed
+        // stale prices.
+        reconciledRef.current = true;
       })
       .catch(() => {
-        // Network/abort — keep the snapshot as-is (no worse than before).
+        // Network/abort — keep the snapshot as-is and leave the flag clear
+        // so the next render retries.
       });
     return () => ctrl.abort();
   }, [isHydrated, storeSlug, state.items.length]);

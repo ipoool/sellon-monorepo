@@ -10,6 +10,15 @@ import { BuyerOtpGate } from "@/components/storefront/buyer-otp-gate";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
+/**
+ * Resolve the file link the API hands back. It is normally a path on the API
+ * origin ("/api/v1/download/{token}/file"); a seller who pointed at a file
+ * hosted elsewhere still yields an absolute URL, which we pass through.
+ */
+function fileHref(url: string): string {
+  return url.startsWith("/") ? `${apiBase}${url}` : url;
+}
+
 type DownloadDTO = {
   store_name: string;
   store_slug: string;
@@ -228,10 +237,13 @@ export function DigitalDownloadViewer({ token }: { token: string }) {
 
           {hasFile && (
             <a
-              href={d.digital_file_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              download
+              // The API returns a path on its own origin, not the object URL:
+              // the download is gated by this buyer's session and honours the
+              // seller's revoke. Same-origin top-level navigation, so the
+              // buyer_session cookie travels with it; the server sets
+              // Content-Disposition, so no `download` attribute is needed
+              // (it is ignored cross-origin anyway).
+              href={fileHref(d.digital_file_url)}
               className="group flex items-start justify-between gap-4 rounded-lg border border-neutral-200 bg-white p-4 transition-colors hover:border-brand-300 hover:bg-brand-50/30"
             >
               <div className="min-w-0">

@@ -59,6 +59,11 @@ type Config struct {
 	// configured, so the app can never end up with zero ways to sign in.
 	AuthEmailPasswordEnabled bool
 
+	// WeeklyTipsEnabled turns on the weekly promotional email. OFF by
+	// default: it is marketing, so it may only run with a real opt-in
+	// funnel behind it and a sending domain in good standing.
+	WeeklyTipsEnabled bool
+
 	// S3PublicBaseURL is the prefix of the asset URLs stored in the database
 	// and rendered in browsers. The bucket is PRIVATE, so this points at the
 	// API's own read-proxy (`{api}/api/v1/files`), not at the object store.
@@ -142,6 +147,7 @@ func Load() (*Config, error) {
 	// Default OFF: the product runs Google-only until outbound mail is
 	// restored. Set AUTH_EMAIL_PASSWORD_ENABLED=true to bring the
 	// email+password path back.
+	v.SetDefault("weekly_tips_enabled", false)
 	v.SetDefault("auth_email_password_enabled", false)
 	v.SetDefault("auth_email_signup_enabled", false) // previous name, still honoured
 
@@ -163,6 +169,7 @@ func Load() (*Config, error) {
 		WebOrigin:                v.GetString("web_origin"),
 		WebhookBaseURL:           strings.TrimRight(v.GetString("webhook_base_url"), "/"),
 		AuthEmailPasswordEnabled: emailPasswordEnabled(v),
+		WeeklyTipsEnabled:        v.GetBool("weekly_tips_enabled"),
 		S3Endpoint:               strings.TrimRight(v.GetString("s3_endpoint"), "/"),
 		S3Region:                 v.GetString("s3_region"),
 		S3Bucket:                 v.GetString("s3_bucket"),

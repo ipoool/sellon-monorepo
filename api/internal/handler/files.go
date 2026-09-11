@@ -52,6 +52,15 @@ func (h *FilesHandler) Serve(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusBadRequest, "path tidak valid")
 		return
 	}
+	// Paid deliverables are NOT public. They are served by
+	// /api/v1/download/{token}/file, which checks the buyer's OTP session
+	// and honours revoke + expiry; leaving them readable here would make
+	// both meaningless the moment a link was forwarded. 404 rather than 403
+	// so this endpoint never confirms that a given key exists.
+	if isDigitalDeliverableKey(key) {
+		response.Error(w, http.StatusNotFound, "file tidak ditemukan")
+		return
+	}
 
 	if h.storage == nil || !h.storage.IsConfigured() {
 		response.Error(w, http.StatusServiceUnavailable, "storage belum dikonfigurasi")
@@ -99,6 +108,13 @@ func (h *FilesHandler) Serve(w http.ResponseWriter, r *http.Request) {
 		// out so there's nothing to report but a log line.
 		h.logger.Debug("files proxy copy interrupted", "err", err, "key", key)
 	}
+}
+
+// isDigitalDeliverableKey reports whether a key lives under a store's
+// `digital/` prefix — the layout RandomKey produces for paid files
+// ({store_id}/digital/...).
+func isDigitalDeliverableKey(key string) bool {
+	return strings.HasPrefix(key, "digital/") || strings.Contains(key, "/digital/")
 }
 
 // setAssetCacheHeaders marks the response immutable. Object keys embed 8

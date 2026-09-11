@@ -341,6 +341,17 @@ The codebase ships with **placeholder content** that's intentionally not product
 - **Midtrans is production-only (no sandbox).** Sandbox was removed from both the seller integration AND platform billing. The `payments.MidtransClient` always hits production hosts (no `IsSandbox` param). Seller key verification = "Connect" button → backend creates a real Rp 1.000 dummy Snap transaction (`/payments/midtrans/connect`) → frontend opens the Snap.js popup (`lib/load-snap.ts`); popup rendering confirms both server + client key (seller just closes it, no payment). The dormant `is_sandbox`/`*_sandbox` DB columns remain (no migration) but are always written false/ignored. Don't reintroduce sandbox UI/branches.
 - **Offline-first POS** — full architecture in the "Offline-first POS" section under Architecture. Invariants to preserve: per-order `idempotency_key` (anti double-charge via the partial UNIQUE index), sync conflict = flag (`needs_review`) not block, cash-only when offline, the service worker is production-only, and the active shift lives under its own IndexedDB key. NEVER `pnpm build` against the dev container — it clobbers `next dev`'s `.next`; use `tsc`/`eslint` to verify.
 - **Digital/course delivery** — full architecture in "Digital & course products" under Architecture. Invariants: `fulfillment.OnPaymentPaid` is the ONE mint path (idempotent, fed by webhook + manual mark-paid — don't add a parallel one); buyer email-OTP (`buyer_session`/`RequireBuyer`) is a separate auth path from seller auth and is token-scoped; access "masa aktif" → token `expires_at` set calendar-correctly at mint (`accessExpiry`), enforced as 410 in `resolveToken`; access logged once per OTP verify, not per refresh.
+- **Non-transactional email needs consent and an opt-out. Transactional email needs neither.**
+  Marketing goes only to `users.marketing_opt_in_at IS NOT NULL` (migration 0101; every
+  pre-existing row starts NULL because signing up is not consent), carries a visible opt-out
+  link plus `List-Unsubscribe` + `List-Unsubscribe-Post`, and the weekly job is off unless
+  `WEEKLY_TIPS_ENABLED=true`. The opt-out endpoint `/api/v1/unsubscribe` is public and
+  session-free on purpose — the recipient is rarely logged in and a mail client has no
+  session — and is authorised by an HMAC of the user id keyed by `JWT_SECRET`. The scheduler
+  re-derives that token locally to avoid an import cycle; `TestUnsubscribeLinkMatchesHandler`
+  pins the two together, so don't change one side alone. This exists because blasting every
+  account with promotional mail and no opt-out got the sending domain suspended, which took
+  ALL transactional email down with it.
 - **Money-path writes are guarded UPDATEs, never read-then-write.** Every transition that
   moves money or inventory re-checks its precondition inside the same statement and reports
   0-rows as "someone else won the race": `SetPaymentStatusGuarded` (webhook), `MarkPaid`,

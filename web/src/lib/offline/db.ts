@@ -208,3 +208,31 @@ export async function getMeta<T>(key: string): Promise<T | null> {
   if (!d) return null;
   return ((await d.get("meta", key)) as T | undefined) ?? null;
 }
+
+/**
+ * Remove the queue entries the server permanently rejected, returning them so
+ * the caller can record what was dropped.
+ *
+ * Without this there is no way out of a `failed` entry: requeueFailed only
+ * flips it back to pending, so one order the server will never accept (a
+ * product deleted on another device, say) left the shift-close button
+ * disabled forever. Discarding is the cashier's explicit choice and the
+ * returned rows are written into the shift note, so the sale is not silently
+ * lost.
+ */
+export async function discardFailed(): Promise<QueuedOrder[]> {
+  const d = await db();
+  if (!d) return [];
+  const tx = d.transaction("pos_order_queue", "readwrite");
+  const store = tx.objectStore("pos_order_queue");
+  const all = await store.getAll();
+  const dropped: QueuedOrder[] = [];
+  for (const it of all) {
+    if (it.status === "failed") {
+      dropped.push(it);
+      await store.delete(it.idempotency_key);
+    }
+  }
+  await tx.done;
+  return dropped;
+}

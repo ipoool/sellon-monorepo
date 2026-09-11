@@ -25,9 +25,12 @@ type User struct {
 	// SessionsValidAfter, when set, revokes every session token issued
 	// before it (password reset). Compared against the JWT iat.
 	SessionsValidAfter *time.Time
-	BannedAt           *time.Time
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	// MarketingOptInAt is nil until the user explicitly asks for
+	// non-transactional mail. Creating an account is NOT consent.
+	MarketingOptInAt *time.Time
+	BannedAt         *time.Time
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 func (u *User) IsAdmin() bool { return u != nil && u.Role == "admin" }
@@ -56,13 +59,14 @@ func NewUserRepo(pool *pgxpool.Pool) *UserRepo {
 	return &UserRepo{pool: pool}
 }
 
-const userCols = `id, COALESCE(google_id, ''), email, name, picture_url, role, password_hash, email_verified_at, sessions_valid_after, banned_at, created_at, updated_at`
+const userCols = `id, COALESCE(google_id, ''), email, name, picture_url, role, password_hash, email_verified_at, sessions_valid_after, marketing_opt_in_at, banned_at, created_at, updated_at`
 
 func scanUser(row pgx.Row) (*User, error) {
 	var u User
 	err := row.Scan(
 		&u.ID, &u.GoogleID, &u.Email, &u.Name, &u.PictureURL,
-		&u.Role, &u.PasswordHash, &u.EmailVerifiedAt, &u.SessionsValidAfter, &u.BannedAt, &u.CreatedAt, &u.UpdatedAt,
+		&u.Role, &u.PasswordHash, &u.EmailVerifiedAt, &u.SessionsValidAfter,
+		&u.MarketingOptInAt, &u.BannedAt, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -113,9 +117,17 @@ func (r *UserRepo) FindOrCreateByGoogleID(ctx context.Context, googleID, email, 
 	case err == nil && existing.GoogleID != "" && existing.GoogleID != googleID:
 		return nil, false, errors.New("email sudah terhubung ke akun Google lain")
 	case err == nil:
+		// Clearing password_hash when we stamp email_verified_at is the
+		// load-bearing part. Rows created before migration 0097 can carry a
+		// password that was never verified — planted by registering someone
+		// else's address and never entering the code. Marking such a row
+		// verified without clearing it would hand that planted password a
+		// working login on the victim's account. A password that predates
+		// its own verification is not a credential.
 		u, uerr := scanUser(tx.QueryRow(ctx,
 			`UPDATE users SET google_id = $2, name = COALESCE(NULLIF($3, ''), name),
 			     picture_url = COALESCE(NULLIF($4, ''), picture_url),
+			     password_hash = CASE WHEN email_verified_at IS NULL THEN '' ELSE password_hash END,
 			     email_verified_at = COALESCE(email_verified_at, now()),
 			     updated_at = now()
 			 WHERE id = $1
@@ -244,6 +256,21 @@ func (r *UserRepo) FindByEmail(ctx context.Context, email string) (*User, error)
 // passing daftar ini ke storage.DeleteObjects setelah DB cascade
 // delete supaya tidak ada file orphan. Run sebelum HardDelete karena
 // setelah delete, semua row sudah lenyap.
+// SetMarketingOptIn records or clears marketing consent. Idempotent, and
+// opting in twice does not move the original timestamp.
+func (r *UserRepo) SetMarketingOptIn(ctx context.Context, id uuid.UUID, optIn bool) error {
+	var err error
+	if optIn {
+		_, err = r.pool.Exec(ctx,
+			`UPDATE users SET marketing_opt_in_at = COALESCE(marketing_opt_in_at, now()),
+			     updated_at = now() WHERE id = $1`, id)
+	} else {
+		_, err = r.pool.Exec(ctx,
+			`UPDATE users SET marketing_opt_in_at = NULL, updated_at = now() WHERE id = $1`, id)
+	}
+	return err
+}
+
 func (r *UserRepo) CollectStorageURLs(ctx context.Context, userID uuid.UUID) ([]string, error) {
 	const q = `
 		WITH owner_stores AS (
@@ -281,10 +308,14 @@ func (r *UserRepo) CollectStorageURLs(ctx context.Context, userID uuid.UUID) ([]
 // Used by the weekly tips scheduler. Ordered by created_at so new users
 // always appear at the end of any batched send.
 func (r *UserRepo) ListForMarketing(ctx context.Context) ([]*User, error) {
+	// Opted-in users ONLY. This used to select every account with an
+	// address, which is what got our sending domain suspended — see
+	// migration 0101.
 	const q = `
 		SELECT ` + userCols + `
 		FROM users
 		WHERE banned_at IS NULL AND email <> ''
+		  AND marketing_opt_in_at IS NOT NULL
 		ORDER BY created_at`
 	rows, err := r.pool.Query(ctx, q)
 	if err != nil {

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Power, X } from "lucide-react";
 import { formatRupiah } from "@/lib/format";
 import { showError, showSuccess } from "@/lib/toast";
-import { queueCounts } from "@/lib/offline/db";
+import { discardFailed, queueCounts } from "@/lib/offline/db";
 import { cn } from "@/lib/utils";
 import type { POSSessionSummary } from "@/lib/types";
 
@@ -20,7 +20,11 @@ export function ShiftCloseModal({ sessionId, onClose, onClosed }: Props) {
   const [summary, setSummary] = useState<POSSessionSummary | null>(null);
   const [actualRupiah, setActualRupiah] = useState<number>(0);
   const [submitting, setSubmitting] = useState(false);
-  const [pendingOffline, setPendingOffline] = useState(0);
+  // Tracked separately: `active` drains by itself, `failed` never will.
+  // Counting them together left the cashier permanently unable to close a
+  // shift whenever one order hit a rejection the server will never accept.
+  const [activeQueued, setActiveQueued] = useState(0);
+  const [failedQueued, setFailedQueued] = useState(0);
 
   // Closing a shift while offline sales are still queued would reconcile the
   // drawer against an incomplete summary — that cash hasn't reached the server
@@ -29,7 +33,10 @@ export function ShiftCloseModal({ sessionId, onClose, onClosed }: Props) {
     let alive = true;
     const check = async () => {
       const { active, failed } = await queueCounts();
-      if (alive) setPendingOffline(active + failed);
+      if (alive) {
+        setActiveQueued(active);
+        setFailedQueued(failed);
+      }
     };
     void check();
     const iv = setInterval(() => void check(), 3000);
@@ -49,19 +56,33 @@ export function ShiftCloseModal({ sessionId, onClose, onClosed }: Props) {
   }, [sessionId]);
 
   const handleClose = async () => {
-    if (pendingOffline > 0) {
+    // Only block on orders still in flight — those will land on their own.
+    if (activeQueued > 0) {
       showError(
-        `Masih ada ${pendingOffline} transaksi offline yang belum tersinkron.`,
+        `Masih ada ${activeQueued} transaksi offline yang sedang disinkronkan.`,
       );
       return;
     }
     setSubmitting(true);
     try {
+      // Rejected orders are discarded only here, on the cashier's explicit
+      // action, and their details go into the shift note so the sale is
+      // recorded somewhere a human will see rather than vanishing.
+      let note = "";
+      if (failedQueued > 0) {
+        const dropped = await discardFailed();
+        if (dropped.length > 0) {
+          const lines = dropped
+            .map((d) => `${d.local_number} (${formatRupiah(d.total_cents)}): ${d.error || "ditolak server"}`)
+            .join("; ");
+          note = `${dropped.length} transaksi offline gagal tersimpan dan dibuang saat tutup shift — ${lines}`;
+        }
+      }
       const res = await fetch(`${apiBase}/api/v1/pos/sessions/${sessionId}/close`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ closing_cash_cents: actualRupiah * 100 }),
+        body: JSON.stringify({ closing_cash_cents: actualRupiah * 100, notes: note || undefined }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -150,11 +171,20 @@ export function ShiftCloseModal({ sessionId, onClose, onClosed }: Props) {
             </>
           )}
 
-          {pendingOffline > 0 && (
+          {activeQueued > 0 && (
             <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-              Masih ada {pendingOffline} transaksi offline yang belum tersinkron.
+              Masih ada {activeQueued} transaksi offline yang sedang disinkronkan.
               Tunggu sampai semuanya tersimpan ke server sebelum menutup shift —
               kalau tidak, rekap kas ini belum lengkap.
+            </p>
+          )}
+
+          {failedQueued > 0 && (
+            <p className="mt-4 rounded-lg border border-danger/30 bg-danger/5 px-3 py-2 text-xs text-danger">
+              {failedQueued} transaksi offline ditolak server dan tidak bisa
+              tersimpan lagi. Shift tetap bisa ditutup — transaksi itu akan
+              dibuang dari antrean dan dicatat di catatan shift supaya bisa
+              dicek ulang. Uangnya tetap ada di laci, jadi cocokkan manual.
             </p>
           )}
         </div>
@@ -169,7 +199,7 @@ export function ShiftCloseModal({ sessionId, onClose, onClosed }: Props) {
           </button>
           <button
             onClick={handleClose}
-            disabled={!summary || submitting || pendingOffline > 0}
+            disabled={!summary || submitting || activeQueued > 0}
             className="flex-1 rounded-lg bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-amber-700 disabled:bg-neutral-300"
           >
             {submitting ? "Menutup..." : "Tutup Shift"}

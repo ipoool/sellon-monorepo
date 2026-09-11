@@ -19,14 +19,28 @@ import (
 // the tax and this returns the embedded portion (base − base/(1+rate)); the
 // order total is unchanged. When exclusive, it returns base·rate (added on top).
 // Shared by the storefront and POS order paths so they agree exactly.
+// ComputeTaxCents returns the tax for a base amount, ROUNDED TO A WHOLE
+// RUPIAH (a multiple of 100 cents).
+//
+// Nothing downstream can represent a fraction of a rupiah: Midtrans charges
+// whole rupiah, a cashier hands over whole rupiah, and a receipt prints
+// whole rupiah. Rounding to the cent here produced order totals like
+// Rp 23.587,50, so the amount we billed could never equal the amount the
+// gateway reported — and the webhook's amount-integrity check then refused
+// to fulfil every taxed order at that store. Rounding here keeps the stored
+// total and the charged total equal by construction.
 func ComputeTaxCents(base int64, bps int, inclusive bool) int64 {
 	if bps <= 0 || base <= 0 {
 		return 0
 	}
+	var exact float64
 	if inclusive {
-		return int64(math.Round(float64(base) * float64(bps) / float64(10000+bps)))
+		exact = float64(base) * float64(bps) / float64(10000+bps)
+	} else {
+		exact = float64(base) * float64(bps) / 10000.0
 	}
-	return int64(math.Round(float64(base) * float64(bps) / 10000.0))
+	// Round to the nearest whole rupiah.
+	return int64(math.Round(exact/100)) * 100
 }
 
 type Order struct {
@@ -924,8 +938,9 @@ func (r *OrderRepo) ExpireStaleUnpaid(ctx context.Context, cutoff time.Time) (in
 	}
 	defer tx.Rollback(ctx)
 
+	// store_id comes along so raw materials can be reversed per order below.
 	rows, err := tx.Query(ctx, `
-		SELECT id FROM orders
+		SELECT id, store_id FROM orders
 		WHERE status = 'pending'
 		  AND payment_status = 'unpaid'
 		  AND created_at < $1
@@ -936,13 +951,16 @@ func (r *OrderRepo) ExpireStaleUnpaid(ctx context.Context, cutoff time.Time) (in
 		return 0, fmt.Errorf("select stale orders: %w", err)
 	}
 	var ids []uuid.UUID
+	type staleOrder struct{ id, storeID uuid.UUID }
+	var stale []staleOrder
 	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
+		var id, storeID uuid.UUID
+		if err := rows.Scan(&id, &storeID); err != nil {
 			rows.Close()
 			return 0, err
 		}
 		ids = append(ids, id)
+		stale = append(stale, staleOrder{id: id, storeID: storeID})
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
@@ -950,6 +968,16 @@ func (r *OrderRepo) ExpireStaleUnpaid(ctx context.Context, cutoff time.Time) (in
 	}
 	if len(ids) == 0 {
 		return 0, tx.Commit(ctx)
+	}
+
+	// Give raw materials back too. Cancel/CancelIfUnpaid/Refund all do this;
+	// the worker did not, so an abandoned BOM-backed order leaked its
+	// ingredients permanently — and since the worker is the path most
+	// expiries take, material stock drifted continuously.
+	for _, o := range stale {
+		if err := reverseConsumptionTx(ctx, tx, o.storeID, o.id); err != nil {
+			return 0, fmt.Errorf("reverse consumption: %w", err)
+		}
 	}
 
 	// Restore physical product stock.
@@ -1104,10 +1132,11 @@ var ErrPaymentStatusUnchanged = errors.New("payment status unchanged")
 func (r *OrderRepo) SetPaymentStatusGuarded(ctx context.Context, storeID, id uuid.UUID, paymentStatus, paymentMethod string) (*PaymentStatusChange, error) {
 	// 'paid' may overwrite anything except another 'paid'. Weaker states
 	// (pending/failed) may never overwrite a settled or refunded order.
-	guard := "payment_status <> 'paid'"
-	if paymentStatus != "paid" {
-		guard = "payment_status NOT IN ('paid', 'refunded')"
-	}
+	// 'refunded' is terminal: a late settlement arriving after the seller
+	// refunded must not flip the order back to paid, which would leave it
+	// reading "lunas" with refunded_at still set, block any further refund
+	// (ClaimRefund requires refunded_at IS NULL) and count as revenue.
+	guard := "payment_status NOT IN ('paid', 'refunded')"
 	q := `
 		WITH locked AS (
 		    SELECT id, status, payment_status

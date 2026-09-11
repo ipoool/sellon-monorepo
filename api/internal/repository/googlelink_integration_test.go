@@ -119,3 +119,64 @@ func TestGoogleSignInRefusesSecondIdentityOnSameEmail(t *testing.T) {
 		t.Fatal("a second Google identity claiming the same address must be refused")
 	}
 }
+
+// A password planted on a row that never verified its email must NOT become
+// usable when Google sign-in later marks that address verified. Before this,
+// registering someone else's address (pre-0097 behaviour wrote the hash
+// immediately) and waiting for them to sign in with Google handed the
+// attacker a working login on the victim's account.
+func TestGoogleLinkClearsUnverifiedPassword(t *testing.T) {
+	pool := testPool(t)
+	defer pool.Close()
+	ctx := context.Background()
+	users := repository.NewUserRepo(pool)
+
+	email := "planted-" + randSuffix() + "@example.com"
+	// Simulate the pre-0097 row: password present, never verified.
+	victim, err := users.CreateWithPassword(ctx, email, "Victim", hashOf(t, "Attacker1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !victim.HasPassword() || victim.IsEmailVerified() {
+		t.Fatal("fixture should have a password and be unverified")
+	}
+
+	linked, _, err := users.FindOrCreateByGoogleID(ctx, "google-"+randSuffix(), email, "Victim", "")
+	if err != nil {
+		t.Fatalf("google sign-in: %v", err)
+	}
+	if !linked.IsEmailVerified() {
+		t.Fatal("linking should verify the address")
+	}
+	if linked.HasPassword() {
+		t.Fatal("a password that predates its own verification must be cleared on link, " +
+			"or it becomes a working login for whoever planted it")
+	}
+}
+
+// A password on an ALREADY-verified row is a real credential and must
+// survive linking — otherwise a seller who legitimately set a password
+// would silently lose it by signing in with Google once.
+func TestGoogleLinkKeepsVerifiedPassword(t *testing.T) {
+	pool := testPool(t)
+	defer pool.Close()
+	ctx := context.Background()
+	users := repository.NewUserRepo(pool)
+
+	email := "real-" + randSuffix() + "@example.com"
+	u, err := users.CreateWithPassword(ctx, email, "Real", hashOf(t, "Legit1234"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := users.MarkEmailVerified(ctx, u.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	linked, _, err := users.FindOrCreateByGoogleID(ctx, "google-"+randSuffix(), email, "Real", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !linked.HasPassword() {
+		t.Error("a verified account's password must survive Google linking")
+	}
+}

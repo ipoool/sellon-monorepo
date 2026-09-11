@@ -4,7 +4,12 @@ package scheduler
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"github.com/google/uuid"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/sellon/sellon/api/internal/email"
@@ -26,7 +31,22 @@ type WeeklyTipsJob struct {
 	mailer  *email.Mailer
 	gen     *email.TipGenerator
 	dashURL string
-	logger  *slog.Logger
+	// publicAPIURL + secret build each recipient's opt-out link.
+	publicAPIURL string
+	secret       string
+	enabled      bool
+	logger       *slog.Logger
+}
+
+// handlerUnsubscribeURL mirrors handler.UnsubscribeURL. Duplicated rather
+// than imported because scheduler importing handler would be a cycle; the
+// token derivation is one HMAC and is covered by a test that pins the two
+// implementations together.
+func handlerUnsubscribeURL(base, secret string, userID uuid.UUID) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte("unsubscribe:" + userID.String()))
+	tok := hex.EncodeToString(mac.Sum(nil))[:32]
+	return strings.TrimRight(base, "/") + "/api/v1/unsubscribe?u=" + userID.String() + "&t=" + tok
 }
 
 func NewWeeklyTipsJob(
@@ -35,20 +55,34 @@ func NewWeeklyTipsJob(
 	mailer *email.Mailer,
 	gen *email.TipGenerator,
 	dashURL string,
+	publicAPIURL string,
+	secret string,
+	enabled bool,
 	logger *slog.Logger,
 ) *WeeklyTipsJob {
 	return &WeeklyTipsJob{
-		users:   users,
-		state:   state,
-		mailer:  mailer,
-		gen:     gen,
-		dashURL: dashURL,
-		logger:  logger,
+		users:        users,
+		state:        state,
+		mailer:       mailer,
+		gen:          gen,
+		dashURL:      dashURL,
+		publicAPIURL: publicAPIURL,
+		secret:       secret,
+		enabled:      enabled,
+		logger:       logger,
 	}
 }
 
 // Start runs the scheduler in the background. Cancel ctx to stop cleanly.
+//
+// Off unless WEEKLY_TIPS_ENABLED is set. This is promotional mail: it should
+// only run once there is a real opt-in funnel behind it and the sending
+// domain is in good standing, so the safe state is "not sending".
 func (j *WeeklyTipsJob) Start(ctx context.Context) {
+	if !j.enabled {
+		j.logger.Info("scheduler: weekly tips disabled (WEEKLY_TIPS_ENABLED not set)")
+		return
+	}
 	go j.loop(ctx)
 }
 
@@ -172,14 +206,18 @@ func (j *WeeklyTipsJob) run(ctx context.Context) {
 		default:
 		}
 		firstName := firstWord(u.Name)
-		subject, text, htmlBody := email.RenderWeeklyTips(tip, firstName, j.dashURL)
+		// Every recipient gets their own opt-out link, carried both in the
+		// body and in the List-Unsubscribe headers.
+		unsubURL := handlerUnsubscribeURL(j.publicAPIURL, j.secret, u.ID)
+		subject, text, htmlBody := email.RenderWeeklyTips(tip, firstName, j.dashURL, unsubURL)
 		j.mailer.Send(email.Message{
-			To:       u.Email,
-			ToName:   u.Name,
-			Subject:  subject,
-			Text:     text,
-			HTML:     htmlBody,
-			Category: "weekly_tips",
+			To:             u.Email,
+			ToName:         u.Name,
+			Subject:        subject,
+			Text:           text,
+			HTML:           htmlBody,
+			Category:       "weekly_tips",
+			UnsubscribeURL: unsubURL,
 		})
 		sent++
 	}

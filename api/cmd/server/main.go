@@ -60,7 +60,8 @@ func main() {
 	schedulerState := repository.NewSchedulerStateRepo(pool)
 	tipGen := email.NewTipGenerator(cfg.AnthropicAPIKey, logger)
 	dashURL := cfg.PrimaryWebOrigin() + "/dashboard"
-	scheduler.NewWeeklyTipsJob(users, schedulerState, mailer, tipGen, dashURL, logger).Start(ctx)
+	scheduler.NewWeeklyTipsJob(users, schedulerState, mailer, tipGen, dashURL,
+		cfg.WebhookBaseURL, cfg.JWTSecret, cfg.WeeklyTipsEnabled, logger).Start(ctx)
 
 	subs := repository.NewSubscriptionRepo(pool)
 	reports := repository.NewReportsRepo(pool)

@@ -191,8 +191,13 @@ func (h *WebhookHandler) Midtrans(w http.ResponseWriter, r *http.Request) {
 
 	// Amount integrity: what Midtrans says was charged must match what we
 	// billed. A mismatch is never auto-fulfilled.
+	// Tolerance is one rupiah, not zero: the gateway settles in whole
+	// rupiah, so an order written before tax was rounded to the rupiah can
+	// legitimately differ by the sub-rupiah remainder. Anything bigger is a
+	// real mismatch and must not be auto-fulfilled.
+	const grossToleranceCents = 100
 	amountMismatch := false
-	if cents, ok := rupiahToCents(n.GrossAmount); ok && cents != order.TotalCents {
+	if cents, ok := rupiahToCents(n.GrossAmount); ok && absInt64(cents-order.TotalCents) >= grossToleranceCents {
 		amountMismatch = true
 		h.logger.Warn("webhook: gross_amount mismatch",
 			"order_id", n.OrderID, "midtrans_cents", cents, "order_cents", order.TotalCents)
@@ -366,4 +371,12 @@ func (h *WebhookHandler) emailPaymentReceived(storeID uuid.UUID, order *reposito
 		HTML:     htmlBody,
 		Category: "order_paid",
 	})
+}
+
+// absInt64 is |v|, used for the gross-amount tolerance check.
+func absInt64(v int64) int64 {
+	if v < 0 {
+		return -v
+	}
+	return v
 }

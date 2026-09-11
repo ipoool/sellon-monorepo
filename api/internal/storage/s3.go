@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -71,10 +73,56 @@ func (c *S3Client) IsConfigured() bool {
 	return !placeholderCreds[c.signer.accessKey] && !placeholderCreds[c.signer.secretKey]
 }
 
+// ErrInvalidObjectKey rejects a key that could change the SHAPE of the
+// upstream request rather than just naming an object.
+var ErrInvalidObjectKey = errors.New("object key tidak valid")
+
+// validKeySegment allows exactly the characters our own RandomKey produces,
+// per path segment.
+var validKeySegment = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
+// checkKey rejects anything that is not a plain, relative object path.
+//
+// This is the guard that stops a key from becoming something other than a
+// key. Concatenating one straight into a URL string let `?list-type=2`
+// through as a QUERY on the bucket root — a signed ListObjectsV2 that
+// enumerated every tenant's objects, including payment proofs and paid
+// digital files. `..` likewise survived into the upstream path and could
+// walk out of a store's prefix on a gateway that normalises. Validating the
+// shape here protects every caller (upload, delete, the read proxy) rather
+// than relying on each one to sanitise first.
+func checkKey(key string) error {
+	if key == "" || len(key) > 1024 {
+		return ErrInvalidObjectKey
+	}
+	if strings.HasPrefix(key, "/") || strings.Contains(key, "//") {
+		return ErrInvalidObjectKey
+	}
+	for _, seg := range strings.Split(key, "/") {
+		if seg == "." || seg == ".." || !validKeySegment.MatchString(seg) {
+			return ErrInvalidObjectKey
+		}
+	}
+	return nil
+}
+
 // objectURL is the ORIGIN URL used to talk to the object store. Never handed
 // to a browser — the bucket is private and this URL 403s anonymously.
+//
+// Built through url.URL so the key lands in the PATH and nowhere else: Go
+// escapes `?`, `#` and friends on the way out, so a key can never contribute
+// a query string or a fragment however it was spelled.
 func (c *S3Client) objectURL(key string) string {
-	return c.endpoint + "/" + c.bucket + "/" + strings.TrimLeft(key, "/")
+	u, err := url.Parse(c.endpoint)
+	if err != nil {
+		// endpoint is operator-supplied config; fall back to the literal
+		// form rather than silently addressing the wrong host.
+		return c.endpoint + "/" + c.bucket + "/" + strings.TrimLeft(key, "/")
+	}
+	u.Path = "/" + c.bucket + "/" + strings.TrimLeft(key, "/")
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String()
 }
 
 // PublicBaseURL is the proxy prefix every stored asset URL shares.
@@ -97,8 +145,8 @@ func (c *S3Client) Upload(ctx context.Context, path, contentType string, body []
 	if !c.IsConfigured() {
 		return nil, errors.New("object storage tidak dikonfigurasi")
 	}
-	if strings.TrimSpace(path) == "" {
-		return nil, errors.New("path kosong")
+	if err := checkKey(strings.TrimSpace(path)); err != nil {
+		return nil, err
 	}
 	if contentType == "" {
 		contentType = "application/octet-stream"
@@ -167,6 +215,9 @@ func (c *S3Client) DeleteObjects(ctx context.Context, paths []string) error {
 }
 
 func (c *S3Client) deleteOne(ctx context.Context, key string) error {
+	if err := checkKey(key); err != nil {
+		return err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.objectURL(key), nil)
 	if err != nil {
 		return err
@@ -214,8 +265,8 @@ func (c *S3Client) Get(ctx context.Context, key, ifNoneMatch string) (*Object, e
 	if !c.IsConfigured() {
 		return nil, errors.New("object storage tidak dikonfigurasi")
 	}
-	key = strings.TrimLeft(strings.TrimSpace(key), "/")
-	if key == "" {
+	key = strings.TrimSpace(key)
+	if err := checkKey(key); err != nil {
 		return nil, ErrObjectNotFound
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.objectURL(key), nil)

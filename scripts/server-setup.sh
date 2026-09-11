@@ -465,6 +465,16 @@ setup_caddy() {
 # Reverse-proxy rules shared by the platform domain + custom domains.
 (sellon_proxy) {
 	encode gzip
+
+	# Strip the client-controlled IP headers before anything upstream can
+	# believe them. Go's chi RealIP trusts True-Client-IP and X-Real-IP
+	# ahead of X-Forwarded-For, so leaving them pass-through would let any
+	# caller forge their own address — which is what the rate limiters and
+	# the download audit log key on. Caddy sets X-Forwarded-For itself.
+	request_header -True-Client-IP
+	request_header -X-Real-IP
+	request_header -X-Client-Ip
+
 	# API + webhooks → api service. SSE streams need unbuffered flushing.
 	@api path /api/* /webhooks/*
 	reverse_proxy @api 127.0.0.1:8080 {

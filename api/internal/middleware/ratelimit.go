@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"strconv"
@@ -76,10 +77,32 @@ func (l *rateLimiter) allow(key string) (time.Duration, bool) {
 	return 0, true
 }
 
+type peerKeyType struct{}
+
+var peerCtxKey peerKeyType
+
+// TrustedPeer records the real TCP peer address before any header-trusting
+// middleware (chi's RealIP) can overwrite RemoteAddr. Mount it FIRST.
+func TrustedPeer(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r.WithContext(
+			context.WithValue(r.Context(), peerCtxKey, hostOf(r.RemoteAddr))))
+	})
+}
+
+// clientIPKey prefers the recorded peer; it falls back to RemoteAddr only if
+// TrustedPeer was not mounted, which would be a wiring mistake.
 func clientIPKey(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if peer, ok := r.Context().Value(peerCtxKey).(string); ok && peer != "" {
+		return peer
+	}
+	return hostOf(r.RemoteAddr)
+}
+
+func hostOf(addr string) string {
+	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
-		return r.RemoteAddr
+		return addr
 	}
 	return host
 }

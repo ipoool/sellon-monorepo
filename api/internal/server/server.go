@@ -153,7 +153,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	)
 	plansHandler := handler.NewPlansHandler(planRepo, logger)
 	adminPlansHandler := handler.NewAdminPlansHandler(planRepo, platformAuditRepo, users, logger)
-	downloadHandler := handler.NewDownloadHandler(downloadTokens, downloadLogs, logger)
+	downloadHandler := handler.NewDownloadHandler(downloadTokens, downloadLogs, storageClient, logger)
 	digitalDownloadHandler := handler.NewDigitalDownloadHandler(downloadTokens, downloadLogs, stores, logger)
 	buyerOTPs := repository.NewBuyerOTPRepo(pool)
 	buyerCourseHandler := handler.NewBuyerCourseHandler(downloadTokens, buyerOTPs, courseVideos, downloadLogs, mailer, jwtSvc, cfg.IsProd(), logger)
@@ -183,6 +183,11 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
+	// BEFORE RealIP: records the true TCP peer so the rate limiters key on
+	// something a client cannot forge. RealIP rewrites RemoteAddr from
+	// client-supplied headers, which would otherwise make every limit
+	// bypassable with one header.
+	r.Use(middleware.TrustedPeer)
 	r.Use(chimw.RealIP)
 	r.Use(middleware.Logger(logger))
 	r.Use(middleware.Recover(logger))
@@ -198,6 +203,13 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/info", handler.Info(cfg, storageClient.IsConfigured()))
+		// Opt-out link from non-transactional email. Public and session-free
+		// by necessity: the recipient is usually not logged in, and a mail
+		// client acting on List-Unsubscribe has no session at all. The HMAC
+		// in the URL is the authorisation.
+		unsubscribeHandler := handler.NewUnsubscribeHandler(users, cfg.JWTSecret, logger)
+		r.Get("/unsubscribe", unsubscribeHandler.Unsubscribe)
+		r.Post("/unsubscribe", unsubscribeHandler.Unsubscribe)
 		// Read-proxy for uploaded assets. Public by necessity: the bucket is
 		// private and a storefront visitor has no session, so this is what
 		// makes product photos loadable at all. Keys carry 8 random bytes and
@@ -213,10 +225,15 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 		r.Group(func(r chi.Router) {
 			r.Use(requireBuyer)
 			r.Get("/download/{token}", downloadHandler.Get)
+			// The deliverable itself, behind the same OTP session as the
+			// delivery info — see FilesHandler for why it is not public.
+			r.Get("/download/{token}/file", downloadHandler.File)
 		})
 		// City autocomplete — public so both buyer checkout and seller
 		// settings can reach it.
-		r.Get("/cities/search", citiesHandler.Search)
+		// Proxies the paid RajaOngkir API — unauthenticated, so it needs a
+		// limit or a loop can burn the platform's quota for every store.
+		r.With(limitCheckout).Get("/cities/search", citiesHandler.Search)
 
 		// Public domain → slug resolution for Next.js middleware.
 		// Must be registered BEFORE /storefront/{slug} so chi resolves
@@ -242,8 +259,10 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 			r.With(limitCheckout).Post("/orders/{number}/payment-link", storefrontHandler.GeneratePaymentLink)
 			r.With(limitCheckout).Post("/orders/{number}/mark-paid", storefrontHandler.MarkPaymentPending)
 			r.With(limitCheckout).Post("/orders/{number}/payment-proof", storefrontHandler.UploadPaymentProof)
-			r.Post("/shipping/quote", storefrontHandler.ShippingQuote)
-			r.Post("/promos/validate", storefrontHandler.ValidatePromo)
+			// Also RajaOngkir-backed; and ValidatePromo is a free promo-code
+			// oracle without a limit.
+			r.With(limitCheckout).Post("/shipping/quote", storefrontHandler.ShippingQuote)
+			r.With(limitCheckout).Post("/promos/validate", storefrontHandler.ValidatePromo)
 			r.Get("/queue", kdsHandler.PublicQueue)
 			// Course viewer: public OTP request/verify, then RequireBuyer-gated
 			// content (which also records the access into download_logs).

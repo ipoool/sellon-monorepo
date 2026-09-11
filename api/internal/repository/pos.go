@@ -16,11 +16,11 @@ import (
 // ─── Errors ──────────────────────────────────────────────────────────────────
 
 var (
-	ErrPOSSessionNotFound = errors.New("sesi kasir tidak ditemukan")
-	ErrPOSSessionNotOpen  = errors.New("sesi kasir sudah ditutup")
-	ErrPOSSessionExists   = errors.New("kamu sudah punya sesi kasir yang aktif — tutup dulu sebelum buka baru")
-	ErrPOSHeldNotFound    = errors.New("transaksi tertahan tidak ditemukan")
-	ErrPOSPaymentShort    = errors.New("total pembayaran kurang dari total transaksi")
+	ErrPOSSessionNotFound  = errors.New("sesi kasir tidak ditemukan")
+	ErrPOSSessionNotOpen   = errors.New("sesi kasir sudah ditutup")
+	ErrPOSSessionExists    = errors.New("kamu sudah punya sesi kasir yang aktif — tutup dulu sebelum buka baru")
+	ErrPOSHeldNotFound     = errors.New("transaksi tertahan tidak ditemukan")
+	ErrPOSPaymentShort     = errors.New("total pembayaran kurang dari total transaksi")
 	ErrPOSOrderNotVoidable = errors.New("transaksi POS tidak bisa di-void")
 	// ErrPOSItemNotFound guards cross-tenant line items. Product/variant UUIDs
 	// are public (they appear in storefront URLs), so every id the client sends
@@ -67,24 +67,24 @@ type POSSessionSummary struct {
 }
 
 type POSCashMovement struct {
-	ID           uuid.UUID
-	SessionID    uuid.UUID
-	StoreID      uuid.UUID
-	UserID       uuid.UUID
-	Type         string // "in" | "out"
-	AmountCents  int64
-	Reason       string
-	CreatedAt    time.Time
+	ID          uuid.UUID
+	SessionID   uuid.UUID
+	StoreID     uuid.UUID
+	UserID      uuid.UUID
+	Type        string // "in" | "out"
+	AmountCents int64
+	Reason      string
+	CreatedAt   time.Time
 }
 
 type POSHeldOrder struct {
-	ID            uuid.UUID
-	StoreID       uuid.UUID
-	SessionID     uuid.UUID
-	HeldBy        uuid.UUID
-	Label         string
-	CartSnapshot  json.RawMessage
-	CreatedAt     time.Time
+	ID           uuid.UUID
+	StoreID      uuid.UUID
+	SessionID    uuid.UUID
+	HeldBy       uuid.UUID
+	Label        string
+	CartSnapshot json.RawMessage
+	CreatedAt    time.Time
 }
 
 type POSPayment struct {
@@ -137,18 +137,18 @@ type CreatePOSOrderInput struct {
 }
 
 type POSOrderResult struct {
-	OrderID          uuid.UUID
-	OrderNumber      string
-	SubtotalCents    int64
-	DiscountCents    int64
-	TaxCents         int64
-	TotalCents       int64
-	PaymentMethod    string // primary or "pos_split"
+	OrderID           uuid.UUID
+	OrderNumber       string
+	SubtotalCents     int64
+	DiscountCents     int64
+	TaxCents          int64
+	TotalCents        int64
+	PaymentMethod     string // primary or "pos_split"
 	ChangeAmountCents int64
-	CreatedAt        time.Time
-	PointsEarned     int
-	PointsRedeemed   int
-	NeedsReview      bool
+	CreatedAt         time.Time
+	PointsEarned      int
+	PointsRedeemed    int
+	NeedsReview       bool
 }
 
 // ─── Repo ────────────────────────────────────────────────────────────────────
@@ -1283,12 +1283,21 @@ func (r *POSRepo) VoidPOSOrder(ctx context.Context, orderID, storeID, actorID uu
 	defer tx.Rollback(ctx)
 
 	// Validate: order is POS, completed, and belongs to an open session.
+	//
+	// FOR UPDATE is load-bearing. Without it two concurrent voids (a
+	// double-clicked button, or a void racing a return) both read
+	// 'completed', both run the reversal, and stock, customer totals and
+	// loyalty are all given back TWICE — the loyalty compensation is written
+	// as 'adjust', which the earn/redeem sum deliberately ignores, so it is
+	// not self-idempotent. Holding the row here serialises the two, and the
+	// status re-check below rejects the loser.
 	var source, status string
 	var sessionID, customerID *uuid.UUID
 	var totalCents int64
 	if err := tx.QueryRow(ctx, `
 		SELECT source, status, pos_session_id, customer_id, total_cents FROM orders
 		WHERE id = $1 AND store_id = $2
+		FOR UPDATE
 	`, orderID, storeID).Scan(&source, &status, &sessionID, &customerID, &totalCents); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrOrderNotFound
@@ -1325,16 +1334,22 @@ func (r *POSRepo) VoidPOSOrder(ctx context.Context, orderID, storeID, actorID uu
 		return err
 	}
 
-	// Mark cancelled.
-	if _, err := tx.Exec(ctx, `
+	// Mark cancelled. The status qual + RowsAffected check is the backstop
+	// for the FOR UPDATE above: if anything else moved this order out of
+	// 'completed' we must not commit a reversal for it.
+	tag, err := tx.Exec(ctx, `
 		UPDATE orders
 		SET status = 'cancelled',
 			cancelled_at = now(),
 			cancellation_reason = $3,
 			updated_at = now()
-		WHERE id = $1 AND store_id = $2
-	`, orderID, storeID, reason); err != nil {
+		WHERE id = $1 AND store_id = $2 AND status = 'completed'
+	`, orderID, storeID, reason)
+	if err != nil {
 		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrPOSOrderNotVoidable
 	}
 	if clamped {
 		if err := flagNeedsReviewTx(ctx, tx, orderID,
@@ -1350,22 +1365,22 @@ func (r *POSRepo) VoidPOSOrder(ctx context.Context, orderID, storeID, actorID uu
 
 // POSSessionOrder is a single transaction row for the session detail page.
 type POSSessionOrder struct {
-	OrderID         uuid.UUID
-	OrderNumber     string
-	Status          string
-	PaymentMethod   string
-	SubtotalCents   int64
-	DiscountCents   int64
-	TotalCents      int64
-	ChangeCents     int64
-	CustomerName    string
-	CustomerWA      string
-	Notes           string
-	CreatedAt       time.Time
-	ItemCount       int
-	Payments        []POSPayment
-	RefundedAt      *time.Time
-	RefundReason    string
+	OrderID       uuid.UUID
+	OrderNumber   string
+	Status        string
+	PaymentMethod string
+	SubtotalCents int64
+	DiscountCents int64
+	TotalCents    int64
+	ChangeCents   int64
+	CustomerName  string
+	CustomerWA    string
+	Notes         string
+	CreatedAt     time.Time
+	ItemCount     int
+	Payments      []POSPayment
+	RefundedAt    *time.Time
+	RefundReason  string
 	// Populated only by the cross-shift ListPOSOrders query (nil/empty for the
 	// per-session ListOrdersBySession view, where the session is already known).
 	SessionID   *uuid.UUID
@@ -1628,12 +1643,15 @@ func (r *POSRepo) ReturnOrder(ctx context.Context, orderID, storeID uuid.UUID, r
 	}
 	defer tx.Rollback(ctx)
 
+	// FOR UPDATE for the same reason as VoidPOSOrder: a return racing a void
+	// (or another return) would otherwise reverse the sale twice.
 	var source, status string
 	var totalCents int64
 	var customerID *uuid.UUID
 	if err := tx.QueryRow(ctx, `
 		SELECT source, status, total_cents, customer_id FROM orders
 		WHERE id = $1 AND store_id = $2
+		FOR UPDATE
 	`, orderID, storeID).Scan(&source, &status, &totalCents, &customerID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrOrderNotFound
@@ -1652,7 +1670,7 @@ func (r *POSRepo) ReturnOrder(ctx context.Context, orderID, storeID uuid.UUID, r
 		return err
 	}
 
-	if _, err := tx.Exec(ctx, `
+	retTag, err := tx.Exec(ctx, `
 		UPDATE orders
 		SET status = 'cancelled',
 			cancelled_at = now(),
@@ -1661,8 +1679,12 @@ func (r *POSRepo) ReturnOrder(ctx context.Context, orderID, storeID uuid.UUID, r
 			refund_reason = $4,
 			cancellation_reason = 'Retur POS',
 			updated_at = now()
-		WHERE id = $1 AND store_id = $2
-	`, orderID, storeID, totalCents, reason); err != nil {
+		WHERE id = $1 AND store_id = $2 AND status = 'completed'
+	`, orderID, storeID, totalCents, reason)
+	if err == nil && retTag.RowsAffected() == 0 {
+		return ErrPOSOrderNotVoidable
+	}
+	if err != nil {
 		return err
 	}
 	if clamped {
@@ -1684,19 +1706,19 @@ type POSReportFilter struct {
 }
 
 type POSReportMetrics struct {
-	OrderCount      int     // non-cancelled
-	TotalGross      int64   // sum total_cents of non-cancelled
-	TotalRefunded   int64   // sum refund_amount_cents
-	AvgTransaction  int64   // gross / count (0 if count=0)
-	TotalCash       int64
-	TotalQRIS       int64
-	TotalTransfer   int64
-	TotalMidtrans   int64
-	TotalEDCDebit   int64
-	TotalEDCKredit  int64
-	DailySeries     []POSReportDailyPoint
-	TopProducts     []POSReportProduct
-	ByCashier       []POSReportCashier
+	OrderCount     int   // non-cancelled
+	TotalGross     int64 // sum total_cents of non-cancelled
+	TotalRefunded  int64 // sum refund_amount_cents
+	AvgTransaction int64 // gross / count (0 if count=0)
+	TotalCash      int64
+	TotalQRIS      int64
+	TotalTransfer  int64
+	TotalMidtrans  int64
+	TotalEDCDebit  int64
+	TotalEDCKredit int64
+	DailySeries    []POSReportDailyPoint
+	TopProducts    []POSReportProduct
+	ByCashier      []POSReportCashier
 }
 
 type POSReportCashier struct {
@@ -1707,9 +1729,9 @@ type POSReportCashier struct {
 }
 
 type POSReportDailyPoint struct {
-	Date         string // YYYY-MM-DD
-	OrderCount   int
-	TotalCents   int64
+	Date       string // YYYY-MM-DD
+	OrderCount int
+	TotalCents int64
 }
 
 type POSReportProduct struct {
@@ -2050,17 +2072,17 @@ func (r *POSRepo) ListSessionsFiltered(ctx context.Context, f ListSessionsFilter
 // ─── Loyalty ─────────────────────────────────────────────────────────────────
 
 type LoyaltyConfig struct {
-	Enabled           bool
-	EarnRateCents     int64 // 1 point earned per X cents spent
-	RedeemRateCents   int64 // 1 point = Y cents discount
+	Enabled         bool
+	EarnRateCents   int64 // 1 point earned per X cents spent
+	RedeemRateCents int64 // 1 point = Y cents discount
 }
 
 type LoyaltyCustomer struct {
-	ID            uuid.UUID
-	Name          string
-	WhatsApp      string
-	LoyaltyPoints int
-	TotalOrders   int
+	ID              uuid.UUID
+	Name            string
+	WhatsApp        string
+	LoyaltyPoints   int
+	TotalOrders     int
 	TotalSpentCents int64
 }
 

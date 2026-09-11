@@ -257,3 +257,66 @@ func TestMultiClientRoutesLegacyURLs(t *testing.T) {
 		t.Error("with neither backend configured, storage must report unconfigured")
 	}
 }
+
+// A key must only ever NAME an object. Before checkKey + url.URL, a key of
+// "?list-type=2" became a query on the bucket root, so the read proxy would
+// sign and return a full ListObjectsV2 of every tenant's objects — payment
+// proofs and paid digital files included. "..' likewise survived into the
+// upstream path.
+func TestObjectKeyCannotChangeRequestShape(t *testing.T) {
+	c := NewS3Client("https://host.example", "kencana", "bucket", "AK", "SK", "https://api.example/api/v1/files")
+
+	hostile := []string{
+		"?list-type=2", "?versions", "?uploads", "?acl",
+		"a/../../b.jpg", "..", "../secret.jpg",
+		"/absolute.jpg", "a//b.jpg", "a\\b.jpg",
+		"x.jpg#frag", "with space.jpg", "",
+	}
+	for _, k := range hostile {
+		if err := checkKey(k); err == nil {
+			t.Errorf("key %q must be rejected", k)
+		}
+		// And the operations must refuse it, not just the validator.
+		if _, err := c.Get(context.Background(), k, ""); err == nil {
+			t.Errorf("Get(%q) must fail", k)
+		}
+	}
+
+	// The keys RandomKey actually produces must pass.
+	for _, k := range []string{
+		"11111111-2222-3333-4444-555555555555/products/20260101-000000-abcdef0123456789.jpg",
+		"11111111-2222-3333-4444-555555555555/commons/logos/20260101-000000-abcdef0123456789.png",
+		"platform/banners/20260101-000000-abcdef0123456789.png",
+	} {
+		if err := checkKey(k); err != nil {
+			t.Errorf("legitimate key %q rejected: %v", k, err)
+		}
+	}
+
+	// Even if a key somehow reached objectURL, it must stay in the path.
+	u := c.objectURL("?list-type=2")
+	if strings.Contains(u, "?list-type") {
+		t.Errorf("key leaked into the query string: %s", u)
+	}
+}
+
+// RandomKey's output must always satisfy the validator, or uploads would
+// start failing the moment the two drift apart.
+func TestRandomKeyIsAlwaysValid(t *testing.T) {
+	for _, prefix := range []string{
+		"11111111-2222-3333-4444-555555555555/products",
+		"11111111-2222-3333-4444-555555555555/commons/logos",
+		"platform/banners",
+		"",
+	} {
+		for i := 0; i < 50; i++ {
+			k, err := RandomKey(prefix, "jpg")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := checkKey(k); err != nil {
+				t.Fatalf("RandomKey produced a key the validator rejects: %q (%v)", k, err)
+			}
+		}
+	}
+}

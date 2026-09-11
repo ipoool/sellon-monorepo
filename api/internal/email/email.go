@@ -66,6 +66,12 @@ type Message struct {
 	// BCC: list email yang dapat salinan tanpa terlihat di header To.
 	// Mailtrap Send API mendukung array `bcc`.
 	BCC []string
+	// UnsubscribeURL turns this into a non-transactional message: it adds
+	// the List-Unsubscribe headers (RFC 2369 + RFC 8058 one-click) so mail
+	// clients can offer a native opt-out and providers can see the message
+	// is permission-based. REQUIRED for anything promotional — sending
+	// marketing without it is what got our domain suspended.
+	UnsubscribeURL string
 }
 
 // Send fires the email asynchronously. Errors are logged but never
@@ -140,6 +146,9 @@ type mailtrapPayload struct {
 	Text     string            `json:"text"`
 	HTML     string            `json:"html,omitempty"`
 	Category string            `json:"category,omitempty"`
+	// Mailtrap passes these through as SMTP headers; used for
+	// List-Unsubscribe on non-transactional mail.
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
 func buildPayload(msg Message, fromEmail, fromName string) mailtrapPayload {
@@ -160,5 +169,19 @@ func buildPayload(msg Message, fromEmail, fromName string) mailtrapPayload {
 		Text:     msg.Text,
 		HTML:     msg.HTML,
 		Category: msg.Category,
+		Headers:  headersFor(msg),
+	}
+}
+
+// headersFor returns the extra SMTP headers for this message. Only
+// non-transactional mail gets List-Unsubscribe; adding it to an order
+// receipt would invite people to opt out of mail they actually need.
+func headersFor(msg Message) map[string]string {
+	if strings.TrimSpace(msg.UnsubscribeURL) == "" {
+		return nil
+	}
+	return map[string]string{
+		"List-Unsubscribe":      "<" + msg.UnsubscribeURL + ">",
+		"List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
 	}
 }
