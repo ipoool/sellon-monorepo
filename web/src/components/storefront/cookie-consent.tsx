@@ -138,3 +138,14 @@ export function CookieConsent({ hasAnalytics = false }: Props) {
     </div>
   );
 }
+
+// Request-body form of the stored consent, sent when an order is created.
+// The backend parks it on the order and skips the server-side Meta Purchase
+// event when it is explicitly false — without this the banner's "Tolak" only
+// stopped the browser pixel while the buyer's email and phone still reached
+// Meta from our own server. `undefined` (no banner shown, or storage blocked)
+// leaves the column NULL and changes nothing.
+export function consentForRequest(): boolean | undefined {
+  const v = readConsent();
+  return v === null ? undefined : v === "accepted";
+}

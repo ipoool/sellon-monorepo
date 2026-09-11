@@ -72,6 +72,16 @@ func (n *Notifier) OnPaymentPaid(ctx context.Context, storeID, orderID uuid.UUID
 	if err != nil {
 		return
 	}
+
+	// Honour the buyer's cookie-banner answer. The browser Pixel is gated
+	// client-side, but this server-side Purchase carries their email and
+	// phone number — so without this check "Tolak" stopped nothing that
+	// actually mattered, and the banner was making a promise the system
+	// did not keep. nil means no banner was shown (POS, kiosk, or an order
+	// placed before the column existed); only an explicit refusal blocks.
+	if order.TrackingConsent != nil && !*order.TrackingConsent {
+		return
+	}
 	// Meta CAPI rejects a Purchase with no user_data identifier. Anonymous
 	// orders (e.g. kiosk) carry neither email nor phone — skip rather than
 	// fire a guaranteed-400 + noisy log. Their browser Pixel event (with

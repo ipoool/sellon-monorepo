@@ -33,6 +33,7 @@ import { cn } from "@/lib/utils";
 import type { CheckoutConfig, CheckoutField } from "@/lib/types";
 import { useCart, cartItemKey } from "./cart-context";
 import { CartNotices } from "./cart-notices";
+import { consentForRequest } from "./cookie-consent";
 import { trackInitiateCheckout } from "@/lib/meta-pixel";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -571,6 +572,9 @@ export function CheckoutWizard({
           courier: courierLabel,
           payment_method: paymentLabel,
           notes: notes.trim(),
+          // Carries the cookie-banner answer so the server can honour a
+          // "Tolak" on its own Meta Purchase event, not just the pixel.
+          tracking_consent: consentForRequest(),
           shipping_cents: shippingCents,
           promo_code: appliedPromo?.code ?? "",
           items: items.map((it) => ({

@@ -686,8 +686,12 @@ type createOrderReq struct {
 	Source string `json:"source"`
 	// IdempotencyKey (optional, client-generated UUID) makes a retried submit
 	// return the original order instead of creating a duplicate.
-	IdempotencyKey string         `json:"idempotency_key"`
-	Items          []orderItemReq `json:"items"`
+	IdempotencyKey string `json:"idempotency_key"`
+	// TrackingConsent carries the buyer's cookie-banner answer. Absent on
+	// channels that show no banner; only an explicit false suppresses the
+	// server-side Meta Purchase event for this order.
+	TrackingConsent *bool          `json:"tracking_consent"`
+	Items           []orderItemReq `json:"items"`
 	// CustomFields: seller-configured field values keyed by field key.
 	CustomFields map[string]any `json:"custom_fields"`
 }
@@ -1160,6 +1164,7 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 		TaxBps:          taxBpsFor(store),
 		TaxInclusive:    store.TaxInclusive,
 		IdempotencyKey:  req.IdempotencyKey,
+		TrackingConsent: req.TrackingConsent,
 	})
 	if err != nil {
 		// Concurrency: another buyer just bought the last unit between our

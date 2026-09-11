@@ -44,19 +44,23 @@ func ComputeTaxCents(base int64, bps int, inclusive bool) int64 {
 }
 
 type Order struct {
-	ID                 uuid.UUID
-	StoreID            uuid.UUID
-	OrderNumber        string
-	Status             string
-	PaymentStatus      string
-	PaymentMethod      string
-	Source             string // "storefront" | "pos" | "whatsapp"
-	SubtotalCents      int64
-	ShippingCents      int64
-	DiscountCents      int64
-	TaxCents           int64
-	TaxBps             int
-	TaxInclusive       bool
+	ID            uuid.UUID
+	StoreID       uuid.UUID
+	OrderNumber   string
+	Status        string
+	PaymentStatus string
+	PaymentMethod string
+	Source        string // "storefront" | "pos" | "whatsapp"
+	SubtotalCents int64
+	ShippingCents int64
+	DiscountCents int64
+	TaxCents      int64
+	TaxBps        int
+	TaxInclusive  bool
+	// TrackingConsent is the buyer's cookie-banner answer; nil when no
+	// banner applies. Only an explicit false suppresses the server-side
+	// Meta Purchase event.
+	TrackingConsent    *bool
 	PromoCode          string
 	TotalCents         int64
 	Courier            string
@@ -166,6 +170,10 @@ type CreateOrderInput struct {
 	// Tax config snapshot. TaxBps=0 → no tax. Tax base = subtotal − discount.
 	TaxBps       int
 	TaxInclusive bool
+	// TrackingConsent is the buyer's cookie-banner answer, nil when the
+	// channel has no banner (POS/kiosk) or it was never recorded. Only an
+	// explicit false suppresses the server-side Meta Purchase event.
+	TrackingConsent *bool
 	// IdempotencyKey (optional, client-generated) makes a retried checkout
 	// return the original order instead of creating a second one. Backed by
 	// the partial unique index on (store_id, idempotency_key) from 0090.
@@ -427,7 +435,7 @@ func (r *OrderRepo) FindByID(ctx context.Context, storeID, id uuid.UUID) (*Order
 		       o.refund_amount_cents, o.refund_reason, o.refunded_at,
 		       o.payment_proof_url, o.payment_proof_note, o.payment_proof_at,
 		       o.loyalty_points_redeemed, o.loyalty_discount_cents,
-		       o.tax_cents, o.tax_bps, o.tax_inclusive,
+		       o.tax_cents, o.tax_bps, o.tax_inclusive, o.tracking_consent,
 		       o.change_amount_cents, o.pos_session_id, COALESCE(u.name, u.email, ''),
 		       o.created_at, o.updated_at
 		FROM orders o
@@ -446,7 +454,7 @@ func (r *OrderRepo) FindByID(ctx context.Context, storeID, id uuid.UUID) (*Order
 		&o.RefundAmountCents, &o.RefundReason, &o.RefundedAt,
 		&o.PaymentProofURL, &o.PaymentProofNote, &o.PaymentProofAt,
 		&o.LoyaltyPointsRedeemed, &o.LoyaltyDiscountCents,
-		&o.TaxCents, &o.TaxBps, &o.TaxInclusive,
+		&o.TaxCents, &o.TaxBps, &o.TaxInclusive, &o.TrackingConsent,
 		&o.ChangeAmountCents, &o.PosSessionID, &o.CashierName,
 		&o.CreatedAt, &o.UpdatedAt,
 	)
@@ -1408,9 +1416,9 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 		                   customer_address, customer_city,
 		                   notes, table_id, serving_type, kitchen_status, queue_number, queue_date,
 		                   custom_fields, source, tax_cents, tax_bps, tax_inclusive,
-		                   idempotency_key)
+		                   idempotency_key, tracking_consent)
 		VALUES ($1, $2, $3, 'pending', 'unpaid', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
-		        $18, $19, $20, $21, $22::date, $23::jsonb, $24, $25, $26, $27, $28)
+		        $18, $19, $20, $21, $22::date, $23::jsonb, $24, $25, $26, $27, $28, $29)
 		RETURNING id, store_id, order_number, status, payment_status, payment_method,
 		          subtotal_cents, shipping_cents, discount_cents, promo_code, total_cents, courier,
 		          customer_name, customer_whatsapp, customer_email, customer_city, created_at,
@@ -1423,7 +1431,7 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 		in.CustomerAddress, in.CustomerCity, in.Notes,
 		in.TableID, servingType, kitchenStatus, queueNum, queueDate,
 		string(customFields), source, taxCents, in.TaxBps, in.TaxInclusive,
-		idemKey,
+		idemKey, in.TrackingConsent,
 	).Scan(
 		&o.ID, &o.StoreID, &o.OrderNumber, &o.Status, &o.PaymentStatus, &o.PaymentMethod,
 		&o.SubtotalCents, &o.ShippingCents, &o.DiscountCents, &o.PromoCode, &o.TotalCents, &o.Courier,
