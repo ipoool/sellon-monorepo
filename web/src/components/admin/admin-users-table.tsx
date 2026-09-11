@@ -2,7 +2,7 @@
 
 import { useState, useTransition, useEffect, useRef, type FormEvent } from "react";
 import { createPortal } from "react-dom";
-import { showError, showSuccess } from "@/lib/toast";
+import { humanizeError, showSuccess } from "@/lib/toast";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -105,6 +105,10 @@ export function AdminUsersTable({ initial, initialQuery }: Props) {
   const [pending, startTransition] = useTransition();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogState>(null);
+  // These dialogs stay open when the action fails, and a <dialog> opened with
+  // showModal() lives in the top layer — a toast fired from here renders behind
+  // it, so the admin saw the spinner stop and nothing else. Surface it inline.
+  const [dialogError, setDialogError] = useState<string | null>(null);
   // top OR bottom is set, never both: `top` anchors below the trigger, `bottom`
   // anchors above it (used when there isn't room below — the menu would
   // otherwise be cut off by the viewport edge for the last rows).
@@ -170,7 +174,7 @@ export function AdminUsersTable({ initial, initialQuery }: Props) {
       );
       setDialog(null);
     } catch (err) {
-      showError(err);
+      setDialogError(humanizeError(err));
     } finally {
       setBusyId(null);
     }
@@ -188,7 +192,7 @@ export function AdminUsersTable({ initial, initialQuery }: Props) {
       // Hard nav so server components re-fetch with the new session cookie.
       window.location.href = "/dashboard";
     } catch (err) {
-      showError(err);
+      setDialogError(humanizeError(err));
       setBusyId(null);
     }
   }
@@ -216,14 +220,22 @@ export function AdminUsersTable({ initial, initialQuery }: Props) {
       setUsers((prev) => prev.filter((u) => u.id !== user.id));
       setDialog(null);
     } catch (err) {
-      showError(err);
+      setDialogError(humanizeError(err));
     } finally {
       setBusyId(null);
     }
   }
 
+  // Open/close both reset the inline error so a stale failure from one action
+  // never greets the admin on the next dialog.
+  function openDialog(next: DialogState) {
+    setDialogError(null);
+    setDialog(next);
+  }
+
   function closeDialog() {
     if (busyId) return; // don't dismiss mid-flight
+    setDialogError(null);
     setDialog(null);
   }
 
@@ -374,7 +386,7 @@ export function AdminUsersTable({ initial, initialQuery }: Props) {
                                 {!isAdmin && !banned && (
                                   <button
                                     type="button"
-                                    onClick={() => { setMenuPos(null); setDialog({ kind: "impersonate", user: u }); }}
+                                    onClick={() => { setMenuPos(null); openDialog({ kind: "impersonate", user: u }); }}
                                     className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50"
                                   >
                                     <UserCog className="size-4 shrink-0 text-neutral-400" aria-hidden />
@@ -384,7 +396,7 @@ export function AdminUsersTable({ initial, initialQuery }: Props) {
                                 {!isAdmin && (
                                   <button
                                     type="button"
-                                    onClick={() => { setMenuPos(null); setDialog({ kind: "ban", user: u }); }}
+                                    onClick={() => { setMenuPos(null); openDialog({ kind: "ban", user: u }); }}
                                     className={cn(
                                       "flex w-full items-center gap-2.5 px-3 py-2 text-sm hover:bg-neutral-50",
                                       banned ? "text-success" : "text-danger",
@@ -401,7 +413,7 @@ export function AdminUsersTable({ initial, initialQuery }: Props) {
                                 {!isAdmin && (
                                   <button
                                     type="button"
-                                    onClick={() => { setMenuPos(null); setDialog({ kind: "delete", user: u }); }}
+                                    onClick={() => { setMenuPos(null); openDialog({ kind: "delete", user: u }); }}
                                     className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-danger hover:bg-neutral-50"
                                   >
                                     <Trash2 className="size-4 shrink-0" aria-hidden />
@@ -455,6 +467,7 @@ export function AdminUsersTable({ initial, initialQuery }: Props) {
         }
         kind={dialog?.user && !!dialog.user.banned_at ? "default" : "danger"}
         busy={!!(dialog?.user && busyId === dialog.user.id)}
+        error={dialogError}
       />
 
       <ConfirmDialog
@@ -474,6 +487,7 @@ export function AdminUsersTable({ initial, initialQuery }: Props) {
         confirmLabel="Ya, mulai"
         kind="warning"
         busy={!!(dialog?.user && busyId === dialog.user.id)}
+        error={dialogError}
       />
 
       <ConfirmDialog
@@ -491,6 +505,7 @@ export function AdminUsersTable({ initial, initialQuery }: Props) {
         confirmIcon={<Trash2 className="size-4" aria-hidden />}
         requireTypedPhrase="DELETE NOW"
         busy={!!(dialog?.user && busyId === dialog.user.id)}
+        error={dialogError}
         description={
           <div className="space-y-2">
             <p>

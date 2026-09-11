@@ -344,8 +344,12 @@ export function ProductRowMenu({
         {(close) => (
           <>
             {extraItems?.(close)}
+            {/* role="menuitem" on every entry: the panel is role="menu", and a
+                menu whose children aren't menuitems is announced as an empty
+                group by screen readers. */}
             <button
               type="button"
+              role="menuitem"
               onClick={() => {
                 handlePreview();
                 close();
@@ -357,6 +361,7 @@ export function ProductRowMenu({
             </button>
             <button
               type="button"
+              role="menuitem"
               onClick={() => {
                 openDuplicateDialog();
                 close();
@@ -373,15 +378,17 @@ export function ProductRowMenu({
             </button>
             <Link
               href={`/products/${productId}`}
+              role="menuitem"
               onClick={close}
               className={itemClass}
             >
               <Edit2 className="size-4" aria-hidden />
               Edit produk
             </Link>
-            <div className="my-1 border-t border-neutral-100" />
+            <div className="my-1 border-t border-neutral-100" role="separator" />
             <button
               type="button"
+              role="menuitem"
               onClick={() => {
                 requestDelete();
                 close();

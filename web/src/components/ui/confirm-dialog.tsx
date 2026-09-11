@@ -63,9 +63,14 @@ type Props = {
   requireTypedPhrase?: string;
   /**
    * Inline error shown just above the footer. Callers that keep the dialog
-   * open after a failed action must use this instead of a toast — the dialog
+   * open after a failed action MUST use this instead of a toast — the dialog
    * is opened with showModal(), so it lives in the top layer and any toast
    * renders *behind* it (invisible and undismissable).
+   *
+   * In use by ProductsTable (bulk delete), AdminUsersTable (ban / impersonate /
+   * hard delete) and PaymentForm (rotate webhook) — every dialog whose action
+   * can fail without closing. Clear it when the dialog is (re)opened so a stale
+   * failure doesn't greet the next action.
    */
   error?: ReactNode;
 };

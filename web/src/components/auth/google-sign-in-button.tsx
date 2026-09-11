@@ -133,12 +133,29 @@ export function GoogleSignInButton({
     // re-initialize the button or the join would post a stale code.
   }, [scriptReady, clientId, apiBase, inviteCode, push, refresh]);
 
+  // Defensive only — the login page resolves the client id server-side and
+  // doesn't mount this button without one. It must never name an env var or a
+  // config file: this page is public, and the old placeholder told any visitor
+  // exactly which variable our deployment was missing. The operator-facing
+  // reason is logged on the server by the login page.
   if (!clientId) {
     return (
-      <div className="rounded-lg border border-warning/40 bg-warning/10 p-4 text-sm text-neutral-800">
-        <p className="font-medium">Google Sign-In belum dikonfigurasi.</p>
-        <p className="mt-1 text-neutral-700">
-          Set <code className="rounded bg-neutral-100 px-1 py-0.5 text-xs">NEXT_PUBLIC_GOOGLE_CLIENT_ID</code> di <code>.env</code> lalu restart container web. Lihat README untuk panduan setup di Google Cloud.
+      <div
+        role="alert"
+        className="rounded-lg border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-700"
+      >
+        <p className="font-medium text-neutral-900">
+          Masuk dengan Google sedang tidak tersedia.
+        </p>
+        <p className="mt-1">
+          Coba lagi beberapa saat lagi, atau hubungi{" "}
+          <a
+            href="mailto:halo@sellon.id"
+            className="font-medium text-brand-600 hover:text-brand-700"
+          >
+            halo@sellon.id
+          </a>
+          .
         </p>
       </div>
     );

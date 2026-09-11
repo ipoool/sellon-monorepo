@@ -16,7 +16,8 @@ import {
   TablePagination,
 } from "@/components/dashboard/table-pagination";
 import { formatRupiah, formatDateID } from "@/lib/format";
-import { showError, showSuccess } from "@/lib/toast";
+import { useMediaQuery } from "@/lib/use-media-query";
+import { humanizeError, showSuccess } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import type { Product } from "@/lib/types";
 
@@ -47,9 +48,21 @@ export function ProductsTable({
   quotaFull,
 }: Props) {
   const router = useRouter();
+  // One "…" menu per product, not two. The mobile card list (md:hidden) and the
+  // desktop table (hidden md:block) are BOTH mounted — Tailwind only hides one —
+  // so rendering ProductRowMenu in each gave every row two independent copies:
+  // two delete dialogs, two preview dialogs, duplicate element ids, and two
+  // state machines racing over the same product. Mount it in the layout the
+  // viewport is actually showing. `md` here mirrors the md:hidden/md:block pair
+  // below; changing one without the other leaves a row with no menu at all.
+  const isDesktop = useMediaQuery("(min-width: 768px)");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showConfirm, setShowConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
+  // A failed bulk-delete leaves the dialog open, and the dialog is opened with
+  // showModal() so it sits in the browser's top layer — a toast fired from here
+  // renders BEHIND it and is invisible. The error has to go inside the dialog.
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // The component instance survives pagination + filter changes (same route,
   // new server props), so a Set kept across them meant "Pilih semua" on page 1
@@ -99,6 +112,7 @@ export function ProductsTable({
 
   async function performDelete() {
     setBusy(true);
+    setDeleteError(null);
     try {
       const ids = Array.from(selected);
       const res = await fetch(`${apiBase}/api/v1/products/bulk-delete`, {
@@ -122,13 +136,16 @@ export function ProductsTable({
             : `${deleted} produk dihapus.`,
         );
       } else {
-        showError("Tidak ada produk yang berhasil dihapus.");
+        // Nothing was deleted — keep the dialog open with the reason rather
+        // than closing it and clearing a selection the seller still needs.
+        setDeleteError("Tidak ada produk yang berhasil dihapus.");
+        return;
       }
       setSelected(new Set());
       setShowConfirm(false);
       router.refresh();
     } catch (err) {
-      showError(err);
+      setDeleteError(humanizeError(err));
     } finally {
       setBusy(false);
     }
@@ -159,7 +176,10 @@ export function ProductsTable({
               type="button"
               size="sm"
               variant="destructive"
-              onClick={() => setShowConfirm(true)}
+              onClick={() => {
+                setDeleteError(null);
+                setShowConfirm(true);
+              }}
               disabled={busy}
             >
               {busy ? (
@@ -245,22 +265,24 @@ export function ProductsTable({
                 </div>
                 {/* Mobile: popover berisi semua actions */}
                 <div className="shrink-0">
-                  <ProductRowMenu
-                    productId={p.id}
-                    productName={p.name}
-                    productType={p.product_type}
-                    storeSlug={storeSlug}
-                    quotaFull={quotaFull}
-                    extraItems={(close) => (
-                      <ShareProductButton
-                        storeSlug={storeSlug}
-                        productSlug={p.slug}
-                        productName={p.name}
-                        asMenu
-                        onAction={close}
-                      />
-                    )}
-                  />
+                  {!isDesktop && (
+                    <ProductRowMenu
+                      productId={p.id}
+                      productName={p.name}
+                      productType={p.product_type}
+                      storeSlug={storeSlug}
+                      quotaFull={quotaFull}
+                      extraItems={(close) => (
+                        <ShareProductButton
+                          storeSlug={storeSlug}
+                          productSlug={p.slug}
+                          productName={p.name}
+                          asMenu
+                          onAction={close}
+                        />
+                      )}
+                    />
+                  )}
                 </div>
               </div>
             );
@@ -359,22 +381,24 @@ export function ProductsTable({
                   <td className="px-5 py-3 text-neutral-600">{formatDateID(p.created_at)}</td>
                   <td className="px-5 py-3">
                     <div className="flex justify-end">
-                      <ProductRowMenu
-                        productId={p.id}
-                        productName={p.name}
-                        productType={p.product_type}
-                        storeSlug={storeSlug}
-                        quotaFull={quotaFull}
-                        extraItems={(close) => (
-                          <ShareProductButton
-                            storeSlug={storeSlug}
-                            productSlug={p.slug}
-                            productName={p.name}
-                            asMenu
-                            onAction={close}
-                          />
-                        )}
-                      />
+                      {isDesktop && (
+                        <ProductRowMenu
+                          productId={p.id}
+                          productName={p.name}
+                          productType={p.product_type}
+                          storeSlug={storeSlug}
+                          quotaFull={quotaFull}
+                          extraItems={(close) => (
+                            <ShareProductButton
+                              storeSlug={storeSlug}
+                              productSlug={p.slug}
+                              productName={p.name}
+                              asMenu
+                              onAction={close}
+                            />
+                          )}
+                        />
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -400,6 +424,7 @@ export function ProductsTable({
         confirmLabel={`Hapus ${selectedCount} produk`}
         cancelLabel="Batal"
         busy={busy}
+        error={deleteError}
         confirmIcon={<Trash2 className="size-4" aria-hidden />}
         requireTypedPhrase="DELETE ALL"
         description={

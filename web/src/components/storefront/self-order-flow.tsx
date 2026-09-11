@@ -13,6 +13,7 @@ import {
   ExternalLink,
   Loader2,
 } from "lucide-react";
+import Link from "next/link";
 import { formatRupiah } from "@/lib/format";
 import { BannerCarousel } from "@/components/storefront/banner-carousel";
 import type { PublicBanner } from "@/lib/types";
@@ -181,6 +182,22 @@ export function SelfOrderFlow({ slug, storeName, tableId, tableLabel, paymentMod
     }
   };
 
+  // The pay screen used to be a one-way door: the only control on it opened
+  // Snap in a new tab, so a buyer who closed that tab, changed their mind, or
+  // hit a failed payment was stranded on a spinner with no link anywhere.
+  // Going back re-arms the menu for a NEW order, which means the current cart
+  // has to be dropped — the order behind it is already created, and
+  // re-submitting the same lines would bill the table twice. The created order
+  // stays reachable (and payable) from its status page.
+  const leavePayScreen = () => {
+    setCart({});
+    setCreated(null);
+    setPayUrl("");
+    setQueueNumber(null);
+    setErr("");
+    setStep("menu");
+  };
+
   // Online mode: poll until Midtrans settles the order (the webhook flips
   // payment_status and queues the kitchen ticket).
   useEffect(() => {
@@ -262,9 +279,26 @@ export function SelfOrderFlow({ slug, storeName, tableId, tableLabel, paymentMod
           <Loader2 className="size-4 animate-spin" aria-hidden />
           Menunggu pembayaran…
         </div>
+        <div className="flex w-full max-w-sm flex-col gap-2">
+          <Link
+            href={`/${slug}/order/${created.order_number}`}
+            className="inline-flex h-12 items-center justify-center rounded-2xl border border-neutral-200 bg-white text-sm font-semibold text-neutral-700 hover:bg-neutral-50"
+          >
+            Cek status pesanan
+          </Link>
+          <button
+            type="button"
+            onClick={leavePayScreen}
+            className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl text-sm font-medium text-neutral-500 hover:text-neutral-800"
+          >
+            <ArrowLeft className="size-4" aria-hidden />
+            Kembali ke menu
+          </button>
+        </div>
         <p className="max-w-sm text-xs text-neutral-400">
-          Nomor pesanan {created.order_number} — jangan pesan ulang. Kalau ada
-          kendala, tunjukkan nomor ini ke staf.
+          Nomor pesanan {created.order_number} — jangan pesan ulang. Kalau kamu
+          kembali ke menu, pesanan ini tetap bisa dibayar lewat &ldquo;Cek
+          status pesanan&rdquo;. Kalau ada kendala, tunjukkan nomor ini ke staf.
         </p>
       </div>
     );

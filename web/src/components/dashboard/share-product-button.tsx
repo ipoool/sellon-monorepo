@@ -49,10 +49,13 @@ export function ShareProductButton({
   );
 
   if (asMenu) {
+    // asMenu renders these as entries of an AnchoredMenu (role="menu"), so they
+    // must carry role="menuitem" — otherwise the panel announces as empty.
     return (
       <>
         <button
           type="button"
+          role="menuitem"
           onClick={() => { copy(); onAction?.(); }}
           className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-neutral-700 hover:bg-neutral-50"
         >
@@ -61,6 +64,7 @@ export function ShareProductButton({
         </button>
         <a
           href={`https://wa.me/?text=${waMessage}`}
+          role="menuitem"
           target="_blank"
           rel="noopener noreferrer"
           onClick={() => onAction?.()}

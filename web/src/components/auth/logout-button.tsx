@@ -1,12 +1,20 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { LogOut, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export function LogoutButton() {
   const { push, refresh } = useRouter();
+  // DashboardShell renders the sidebar TWICE — once in the desktop <aside> and
+  // once inside the mobile drawer <dialog> — so this component mounts twice on
+  // every dashboard page. Hardcoded ids made both dialogs share
+  // "logout-title"/"logout-description": invalid HTML, and aria-labelledby on
+  // each one resolved to whichever node came first in document order, so the
+  // drawer's dialog was labelled by the hidden desktop copy.
+  const titleId = useId();
+  const descId = useId();
   const [pending, setPending] = useState(false);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -54,8 +62,8 @@ export function LogoutButton() {
 
       <dialog
         ref={dialogRef}
-        aria-labelledby="logout-title"
-        aria-describedby="logout-description"
+        aria-labelledby={titleId}
+        aria-describedby={descId}
         className="fixed left-1/2 top-1/2 m-0 -translate-x-1/2 -translate-y-1/2 rounded-xl border border-neutral-200 bg-white p-0 shadow-elevated backdrop:bg-neutral-900/40 backdrop:backdrop-blur-sm"
       >
         <div className="w-[min(92vw,400px)] p-6">
@@ -63,12 +71,12 @@ export function LogoutButton() {
             <LogOut className="size-5" aria-hidden />
           </div>
           <h2
-            id="logout-title"
+            id={titleId}
             className="mt-4 font-display text-lg font-semibold text-neutral-900"
           >
             Keluar dari SellOn?
           </h2>
-          <p id="logout-description" className="mt-2 text-sm text-neutral-600">
+          <p id={descId} className="mt-2 text-sm text-neutral-600">
             Sesi-mu akan diakhiri dan kamu perlu login lagi untuk masuk ke
             dasbor.
           </p>

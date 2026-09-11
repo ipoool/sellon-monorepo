@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { showError, showSuccess } from "@/lib/toast";
+import { humanizeError, showError, showSuccess } from "@/lib/toast";
 import { useRouter } from "next/navigation";
 import {
   Lock,
@@ -55,6 +55,10 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
   const [webhookCopied, setWebhookCopied] = useState(false);
   const [rotating, setRotating] = useState(false);
   const [showRotateConfirm, setShowRotateConfirm] = useState(false);
+  // The rotate dialog stays open when the call fails, and a <dialog> opened via
+  // showModal() sits in the top layer — a toast would render behind it. Keep the
+  // reason inside the dialog the seller is still looking at.
+  const [rotateError, setRotateError] = useState<string | null>(null);
   const [showWebhookGuide, setShowWebhookGuide] = useState(false);
   const webhookGuideRef = useRef<HTMLDialogElement>(null);
 
@@ -151,6 +155,7 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
 
   async function rotateWebhookURL() {
     setRotating(true);
+    setRotateError(null);
     try {
       const res = await fetch(
         `${apiBase}/api/v1/payments/midtrans/rotate-webhook`,
@@ -172,7 +177,7 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
       setShowRotateConfirm(false);
       refresh();
     } catch (err) {
-      showError(err);
+      setRotateError(humanizeError(err));
     } finally {
       setRotating(false);
     }
@@ -388,7 +393,10 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
                   type="button"
                   variant="ghost"
                   size="sm"
-                  onClick={() => setShowRotateConfirm(true)}
+                  onClick={() => {
+                    setRotateError(null);
+                    setShowRotateConfirm(true);
+                  }}
                   disabled={rotating}
                   className="shrink-0 text-danger hover:bg-danger/10"
                 >
@@ -516,6 +524,7 @@ export function PaymentForm({ initial }: { initial: GatewayInfo | null }) {
         confirmLabel="Generate URL baru"
         cancelLabel="Batal"
         busy={rotating}
+        error={rotateError}
         confirmIcon={<RefreshCw className="size-4" aria-hidden />}
         requireTypedPhrase="GENERATE"
         description={

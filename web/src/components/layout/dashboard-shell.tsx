@@ -64,22 +64,25 @@ export function DashboardShell({
               <Menu className="size-5" aria-hidden />
             </button>
 
-            {/* Mobile-only title. On lg+ the in-page header below renders the
-                same title + subtitle, so showing both duplicated the heading
-                ~40px apart on every dashboard page. */}
-            <div className="min-w-0 flex-1 lg:hidden">
-              <h1 className="truncate font-display text-lg font-semibold tracking-tight text-neutral-900">
+            {/* The page's ONE <h1>, for every breakpoint. It is visible here on
+                mobile and screen-reader-only on lg+, where the in-page header
+                below paints the same words — that block used to be the only
+                title at desktop width and it was an <h2>, so a screen reader
+                landed on a dashboard with no top-level heading at all. Keeping
+                a single node (rather than one <h1> per breakpoint) means the
+                document never has two competing top-level headings.
+                The subtitle stays mobile-only: on lg+ the in-page header
+                repeats it right under the heading. */}
+            <div className="min-w-0 flex-1">
+              <h1 className="truncate font-display text-lg font-semibold tracking-tight text-neutral-900 lg:sr-only">
                 {pageTitle}
               </h1>
               {pageSubtitle && (
-                <p className="truncate text-xs text-neutral-500">
+                <p className="truncate text-xs text-neutral-500 lg:hidden">
                   {pageSubtitle}
                 </p>
               )}
             </div>
-            {/* Keeps the topbar controls right-aligned on lg+ where the
-                title block is hidden. */}
-            <div className="hidden flex-1 lg:block" />
 
             {!isAdmin && (
               <form
@@ -129,12 +132,18 @@ export function DashboardShell({
 
         <main className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           <div className="mx-auto max-w-7xl">
-            {/* Page header (desktop only — mobile uses topbar title) */}
+            {/* Page header (desktop only — mobile uses topbar title). The big
+                title is a visual repeat of the topbar <h1>, so it is marked
+                aria-hidden: promoting it to a heading of its own would announce
+                the page name twice in heading navigation. */}
             <div className="hidden items-end justify-between gap-4 pb-6 lg:flex">
               <div>
-                <h2 className="font-display text-2xl font-semibold tracking-tight text-neutral-900">
+                <p
+                  aria-hidden
+                  className="font-display text-2xl font-semibold tracking-tight text-neutral-900"
+                >
                   {pageTitle}
-                </h2>
+                </p>
                 {pageSubtitle && (
                   <p className="mt-1 text-sm text-neutral-600">{pageSubtitle}</p>
                 )}
