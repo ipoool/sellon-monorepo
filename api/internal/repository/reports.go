@@ -28,6 +28,25 @@ type Headline struct {
 	TaxCents        int64 // total PPN/tax collected on paid, non-cancelled orders
 }
 
+// One definition of "this order counts as revenue", shared by every query in
+// this file. Laporan renders these side by side on one page, so any drift
+// between them shows the seller two different answers to the same question —
+// which is exactly what happened: the top-products panel had no paid filter at
+// all and the top-customers panel required 'completed', while the headline and
+// the charts used the rule below.
+//
+// Cancelled orders are excluded even when paid: a seller who cancels after
+// payment has almost always refunded out of band, so counting that money would
+// overstate revenue (BUG-012).
+const revenueFilter = "o.payment_status = 'paid' AND o.status <> 'cancelled'"
+
+// netRevenue is the amount such an order actually earned. A PARTIAL refund
+// leaves payment_status='paid' (the order is still a sale, just a smaller
+// one), so without subtracting what went back the seller's revenue includes
+// money they have already returned. Full refunds flip to 'refunded' and are
+// already excluded by revenueFilter.
+const netRevenue = "(o.total_cents - COALESCE(o.refund_amount_cents, 0))"
+
 func (r *ReportsRepo) Headline(ctx context.Context, storeID uuid.UUID, since, until time.Time) (*Headline, error) {
 	var h Headline
 	// Cancelled orders are excluded from revenue + paid_orders even when
@@ -37,12 +56,12 @@ func (r *ReportsRepo) Headline(ctx context.Context, storeID uuid.UUID, since, un
 	err := r.pool.QueryRow(ctx, `
 		SELECT
 		    COUNT(*) AS orders_total,
-		    COUNT(*) FILTER (WHERE status = 'cancelled') AS orders_cancelled,
-		    COALESCE(SUM(total_cents) FILTER (WHERE payment_status = 'paid' AND status <> 'cancelled'), 0) AS revenue_cents,
-		    COUNT(*) FILTER (WHERE payment_status = 'paid' AND status <> 'cancelled') AS paid_orders,
-		    COALESCE(SUM(tax_cents) FILTER (WHERE payment_status = 'paid' AND status <> 'cancelled'), 0) AS tax_cents
-		FROM orders
-		WHERE store_id = $1 AND created_at >= $2 AND created_at < $3
+		    COUNT(*) FILTER (WHERE o.status = 'cancelled') AS orders_cancelled,
+		    COALESCE(SUM(`+netRevenue+`) FILTER (WHERE `+revenueFilter+`), 0) AS revenue_cents,
+		    COUNT(*) FILTER (WHERE `+revenueFilter+`) AS paid_orders,
+		    COALESCE(SUM(o.tax_cents) FILTER (WHERE `+revenueFilter+`), 0) AS tax_cents
+		FROM orders o
+		WHERE o.store_id = $1 AND o.created_at >= $2 AND o.created_at < $3
 	`, storeID, since, until).Scan(&h.OrdersTotal, &h.OrdersCancelled, &h.RevenueCents, &h.PaidOrders, &h.TaxCents)
 	if err != nil {
 		return nil, err
@@ -77,7 +96,7 @@ func (r *ReportsRepo) SalesByDay(ctx context.Context, storeID uuid.UUID, since, 
 		)
 		SELECT d.d::date AS bucket,
 		       COUNT(o.id) AS orders,
-		       COALESCE(SUM(o.total_cents) FILTER (WHERE o.payment_status = 'paid' AND o.status <> 'cancelled'), 0) AS revenue
+		       COALESCE(SUM(`+netRevenue+`) FILTER (WHERE `+revenueFilter+`), 0) AS revenue
 		FROM days d
 		LEFT JOIN orders o
 		    ON o.store_id = $1
@@ -123,7 +142,7 @@ func (r *ReportsRepo) SalesByWeek(ctx context.Context, storeID uuid.UUID, since,
 		SELECT w.w AS week_start,
 		       w.w + interval '6 days' AS week_end,
 		       COUNT(o.id) AS orders,
-		       COALESCE(SUM(o.total_cents) FILTER (WHERE o.payment_status = 'paid' AND o.status <> 'cancelled'), 0) AS revenue
+		       COALESCE(SUM(`+netRevenue+`) FILTER (WHERE `+revenueFilter+`), 0) AS revenue
 		FROM weeks w
 		LEFT JOIN orders o
 		    ON o.store_id = $1
@@ -167,7 +186,7 @@ func (r *ReportsRepo) SalesByMonth(ctx context.Context, storeID uuid.UUID, since
 		)
 		SELECT m.m AS month_start,
 		       COUNT(o.id) AS orders,
-		       COALESCE(SUM(o.total_cents) FILTER (WHERE o.payment_status = 'paid' AND o.status <> 'cancelled'), 0) AS revenue
+		       COALESCE(SUM(`+netRevenue+`) FILTER (WHERE `+revenueFilter+`), 0) AS revenue
 		FROM months m
 		LEFT JOIN orders o
 		    ON o.store_id = $1
@@ -202,6 +221,15 @@ func (r *ReportsRepo) TopProducts(ctx context.Context, storeID uuid.UUID, since,
 	if limit <= 0 || limit > 100 {
 		limit = 10
 	}
+	// Same revenue rule as every other panel. Without the paid filter this
+	// ranked products by orders nobody had paid for — an abandoned cart of 50
+	// units outranked a real best-seller, and the money column sat next to a
+	// headline computed on a stricter rule.
+	//
+	// Line revenue is the sum of line subtotals, so it intentionally does not
+	// equal the headline total: that one also carries shipping, order-level
+	// discount and tax. Partial refunds are not netted here either — a refund
+	// is recorded against the order, not against a specific line.
 	rows, err := r.pool.Query(ctx, `
 		SELECT oi.product_id, oi.product_name,
 		       SUM(oi.quantity)::int AS qty,
@@ -210,7 +238,7 @@ func (r *ReportsRepo) TopProducts(ctx context.Context, storeID uuid.UUID, since,
 		JOIN orders o ON o.id = oi.order_id
 		WHERE o.store_id = $1
 		  AND o.created_at >= $2 AND o.created_at < $3
-		  AND o.status <> 'cancelled'
+		  AND `+revenueFilter+`
 		GROUP BY oi.product_id, oi.product_name
 		ORDER BY qty DESC, revenue DESC
 		LIMIT $4
@@ -242,15 +270,21 @@ func (r *ReportsRepo) TopCustomers(ctx context.Context, storeID uuid.UUID, since
 	if limit <= 0 || limit > 100 {
 		limit = 10
 	}
+	// Two bugs lived in the old WHERE clause. It required status='completed',
+	// so a paid order still being packed or shipped contributed nothing —
+	// a customer's spend here was lower than the same customer's contribution
+	// to the headline above it. And the order COUNT had no payment filter at
+	// all while the spend SUM did, so a single row could read "3 pesanan,
+	// Rp 0". One rule now drives both columns.
 	rows, err := r.pool.Query(ctx, `
 		SELECT c.id, c.name, c.whatsapp_number,
 		       COUNT(o.id)::int AS order_count,
-		       COALESCE(SUM(o.total_cents) FILTER (WHERE o.payment_status = 'paid'), 0)::bigint AS spent
+		       COALESCE(SUM(`+netRevenue+`), 0)::bigint AS spent
 		FROM orders o
 		JOIN customers c ON c.id = o.customer_id
 		WHERE o.store_id = $1
 		  AND o.created_at >= $2 AND o.created_at < $3
-		  AND o.status = 'completed'
+		  AND `+revenueFilter+`
 		GROUP BY c.id, c.name, c.whatsapp_number
 		ORDER BY spent DESC, order_count DESC
 		LIMIT $4
