@@ -31,7 +31,14 @@ func optionIDsFromSnaps(snaps []OptionSnapshot) []uuid.UUID {
 // multiplied by line quantity. A material appearing in several places is
 // summed. Returns an empty slice (not an error) when there's no recipe — a
 // config gap must never break checkout.
-func resolveConsumptionTx(ctx context.Context, tx pgx.Tx, productID uuid.UUID, optionIDs []uuid.UUID, lineQty int) ([]consumeRow, error) {
+// storeID is load-bearing, not decoration. Modifier option ids arrive straight
+// from the client and were not being validated against the store, so a crafted
+// order could resolve ANOTHER tenant's material_ids through the option recipe
+// join — and applyConsumptionTx would then decrement that tenant's stock and
+// write a material_movements row pairing this store with their material,
+// corrupting both stores' consumption reports and COGS. Every join below is
+// anchored to the store so a foreign id resolves to no rows instead.
+func resolveConsumptionTx(ctx context.Context, tx pgx.Tx, storeID, productID uuid.UUID, optionIDs []uuid.UUID, lineQty int) ([]consumeRow, error) {
 	if lineQty <= 0 {
 		return nil, nil
 	}
@@ -41,9 +48,10 @@ func resolveConsumptionTx(ctx context.Context, tx pgx.Tx, productID uuid.UUID, o
 	baseRows, err := tx.Query(ctx, `
 		SELECT pri.material_id, pri.quantity, m.cost_cents
 		FROM product_recipe_items pri
-		JOIN materials m ON m.id = pri.material_id
+		JOIN materials m ON m.id = pri.material_id AND m.store_id = $2
+		JOIN products  p ON p.id = pri.product_id  AND p.store_id = $2
 		WHERE pri.product_id = $1
-	`, productID)
+	`, productID, storeID)
 	if err != nil {
 		return nil, err
 	}
@@ -66,9 +74,9 @@ func resolveConsumptionTx(ctx context.Context, tx pgx.Tx, productID uuid.UUID, o
 		optRows, err := tx.Query(ctx, `
 			SELECT ori.material_id, ori.quantity, m.cost_cents
 			FROM option_recipe_items ori
-			JOIN materials m ON m.id = ori.material_id
+			JOIN materials m ON m.id = ori.material_id AND m.store_id = $2
 			WHERE ori.option_id = ANY($1)
-		`, optionIDs)
+		`, optionIDs, storeID)
 		if err != nil {
 			return nil, err
 		}
@@ -133,9 +141,13 @@ func applyConsumptionTx(ctx context.Context, tx pgx.Tx, storeID, orderID, orderI
 		if c.Quantity <= 0 {
 			continue
 		}
+		// Scoped to the store, matching reverseConsumptionTx. The pair was
+		// asymmetric: the restore was guarded and the decrement was not, so
+		// the only unguarded half was the one that destroys stock.
 		if _, err := tx.Exec(ctx, `
-			UPDATE materials SET stock = stock - $2, updated_at = now() WHERE id = $1
-		`, c.MaterialID, c.Quantity); err != nil {
+			UPDATE materials SET stock = stock - $2, updated_at = now()
+			WHERE id = $1 AND store_id = $3
+		`, c.MaterialID, c.Quantity, storeID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `

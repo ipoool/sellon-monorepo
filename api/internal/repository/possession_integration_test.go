@@ -12,6 +12,7 @@ package repository_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -357,5 +358,109 @@ func TestPOSChangeOnlyAppliesToTheCashTendered(t *testing.T) {
 	}
 	if summary.ExpectedCash != openingCents+10000000 {
 		t.Fatalf("expected cash = %d, want %d", summary.ExpectedCash, openingCents+10000000)
+	}
+}
+
+// An offline sale replays whenever connectivity comes back, which is routinely
+// after the shift it belongs to was closed. Rejecting it made the browser sync
+// engine mark the order permanently failed, and a sale the cashier had already
+// taken cash for disappeared from the books. It must record and flag instead —
+// the same "conflict is flagged, not blocked" rule the rest of the offline
+// path follows.
+func TestLateOfflineSaleIsRecordedNotLost(t *testing.T) {
+	pool := testPool(t)
+	defer pool.Close()
+	ctx := context.Background()
+	storeID, cashierID, productID, sessionID := seedPOSShift(t, pool, 0)
+	repo := repository.NewPOSRepo(pool)
+
+	if _, err := pool.Exec(ctx,
+		`UPDATE pos_sessions SET status = 'closed', closed_at = now() WHERE id = $1`,
+		sessionID); err != nil {
+		t.Fatalf("close shift: %v", err)
+	}
+
+	// An ONLINE sale on a closed shift is still refused — the cashier is at
+	// the terminal and can open a new one.
+	if _, err := repo.CreatePOSOrder(ctx,
+		posSale(storeID, sessionID, cashierID, productID, 2500000, cash(2500000))); err != repository.ErrPOSSessionNotOpen {
+		t.Fatalf("online sale on a closed shift: want ErrPOSSessionNotOpen, got %v", err)
+	}
+
+	// The queued offline sale lands, and carries a flag saying why.
+	in := posSale(storeID, sessionID, cashierID, productID, 2500000, cash(2500000))
+	in.Offline = true
+	in.IdempotencyKey = "late-" + randSuffix()
+	res, err := repo.CreatePOSOrder(ctx, in)
+	if err != nil {
+		t.Fatalf("late offline sale must be recorded, got: %v", err)
+	}
+	if !res.NeedsReview {
+		t.Error("a sale landing after its shift closed must be flagged for the seller")
+	}
+
+	var reason string
+	if err := pool.QueryRow(ctx,
+		`SELECT COALESCE(review_reason, '') FROM orders WHERE id = $1`, res.OrderID).Scan(&reason); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(reason, "shift ditutup") {
+		t.Errorf("review reason should say the shift had closed, got %q", reason)
+	}
+}
+
+// Cash movements feed expected_cash_cents directly, so one landing after the
+// close was counted is money in the drawer the rekap does not know about.
+func TestCashMovementCannotLandOnAClosingShift(t *testing.T) {
+	pool := testPool(t)
+	defer pool.Close()
+	ctx := context.Background()
+	storeID, cashierID, _, sessionID := seedPOSShift(t, pool, 0)
+	repo := repository.NewPOSRepo(pool)
+
+	// Park a close in exactly the window between the check and the insert.
+	closeTx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeTx.Rollback(ctx)
+	var status string
+	if err := closeTx.QueryRow(ctx,
+		`SELECT status FROM pos_sessions WHERE id = $1 FOR UPDATE`, sessionID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := closeTx.Exec(ctx,
+		`UPDATE pos_sessions SET status = 'closed', closed_at = now() WHERE id = $1`, sessionID); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, mErr := repo.AddCashMovement(ctx, sessionID, storeID, cashierID, "in", 5000000, "setor modal")
+		done <- mErr
+	}()
+
+	// The movement must still be blocked on the session lock, not already
+	// committed against a shift that is closing.
+	select {
+	case mErr := <-done:
+		t.Fatalf("cash movement completed before the close committed (err=%v) — it was not serialised", mErr)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	if err := closeTx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if mErr := <-done; mErr != repository.ErrPOSSessionNotOpen {
+		t.Fatalf("after the close committed: want ErrPOSSessionNotOpen, got %v", mErr)
+	}
+
+	var n int
+	if err := pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM pos_cash_movements WHERE pos_session_id = $1`, sessionID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("%d cash movement(s) landed on a closed shift", n)
 	}
 }

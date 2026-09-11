@@ -449,9 +449,26 @@ func (r *POSRepo) CloseSession(ctx context.Context, sessionID, storeID, closedBy
 // open. Without it a client could post cash movements or held carts against
 // another tenant's session id, or against a shift already closed and counted.
 func (r *POSRepo) assertOpenSession(ctx context.Context, sessionID, storeID uuid.UUID) error {
+	return assertOpenSessionTx(ctx, r.pool, sessionID, storeID)
+}
+
+// queryRower is satisfied by both *pgxpool.Pool and pgx.Tx, so the session
+// check can run either standalone or inside a caller's transaction.
+type queryRower interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// assertOpenSessionTx checks the shift is open and holds it that way for the
+// rest of the caller's transaction. FOR SHARE conflicts with CloseSession's
+// FOR UPDATE but not with other readers, so it serialises this write against a
+// close without serialising cashiers against each other. Called outside a
+// transaction the lock is released immediately and this degrades to a plain
+// read — which is why every writer that must not be lost (cash movements)
+// passes its own tx.
+func assertOpenSessionTx(ctx context.Context, q queryRower, sessionID, storeID uuid.UUID) error {
 	var status string
-	err := r.pool.QueryRow(ctx,
-		`SELECT status FROM pos_sessions WHERE id = $1 AND store_id = $2`,
+	err := q.QueryRow(ctx,
+		`SELECT status FROM pos_sessions WHERE id = $1 AND store_id = $2 FOR SHARE`,
 		sessionID, storeID,
 	).Scan(&status)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -473,19 +490,31 @@ func (r *POSRepo) AddCashMovement(ctx context.Context, sessionID, storeID, userI
 	if amountCents <= 0 {
 		return nil, errors.New("jumlah harus lebih besar dari nol")
 	}
-	if err := r.assertOpenSession(ctx, sessionID, storeID); err != nil {
+	// One transaction, so the shift cannot close between the check and the
+	// insert. Cash movements feed expected_cash_cents directly: a kas-masuk
+	// landing after the close was counted was money in the drawer the rekap
+	// did not know about.
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	if err := assertOpenSessionTx(ctx, tx, sessionID, storeID); err != nil {
 		return nil, err
 	}
 
 	var m POSCashMovement
-	err := r.pool.QueryRow(ctx, `
+	if err := tx.QueryRow(ctx, `
 		INSERT INTO pos_cash_movements (pos_session_id, store_id, user_id, type, amount_cents, reason)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id, pos_session_id, store_id, user_id, type, amount_cents, reason, created_at
 	`, sessionID, storeID, userID, kind, amountCents, strings.TrimSpace(reason)).Scan(
 		&m.ID, &m.SessionID, &m.StoreID, &m.UserID, &m.Type, &m.AmountCents, &m.Reason, &m.CreatedAt,
-	)
-	if err != nil {
+	); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
 	return &m, nil
@@ -646,7 +675,17 @@ func (r *POSRepo) CreatePOSOrder(ctx context.Context, in CreatePOSOrderInput) (*
 		}
 		return nil, err
 	}
-	if sessStatus != "open" {
+	// An OFFLINE replay is the one case a closed shift must not reject. That
+	// sale already happened: the cashier took the money, handed over the
+	// goods, and printed a receipt while the internet was down. The queue
+	// replays whenever connectivity returns, which is routinely after the
+	// shift was closed. Refusing it made the sync engine mark the order
+	// permanently failed and the sale vanished from the books entirely —
+	// strictly worse than recording it against a shift that has already been
+	// reconciled. Same rule as everywhere else in the offline path: a
+	// conflict is flagged, not blocked.
+	lateOfflineSale := sessStatus != "open" && in.Offline
+	if sessStatus != "open" && !lateOfflineSale {
 		return nil, ErrPOSSessionNotOpen
 	}
 	if sessOwner != in.CashierID {
@@ -990,7 +1029,7 @@ func (r *POSRepo) CreatePOSOrder(ctx context.Context, in CreatePOSOrderInput) (*
 		// consumes its linked material directly (1 × qty).
 		var consume []consumeRow
 		if it.ProductID != nil {
-			c, err := resolveConsumptionTx(ctx, tx, *it.ProductID, optionIDsFromSnaps(it.Modifiers), it.Quantity)
+			c, err := resolveConsumptionTx(ctx, tx, in.StoreID, *it.ProductID, optionIDsFromSnaps(it.Modifiers), it.Quantity)
 			if err != nil {
 				return nil, fmt.Errorf("resolve consumption: %w", err)
 			}
@@ -1068,13 +1107,18 @@ func (r *POSRepo) CreatePOSOrder(ctx context.Context, in CreatePOSOrderInput) (*
 
 	// Flag the order if an offline sale had to overdraw stock or came up short on
 	// payment after a config change. Either way the seller reconciles manually.
-	if needsReview || paymentShort {
+	if needsReview || paymentShort || lateOfflineSale {
 		reason := "stok tidak cukup saat sync offline"
 		switch {
 		case needsReview && paymentShort:
 			reason = "stok kurang & pembayaran kurang dari total saat sync offline"
 		case paymentShort:
 			reason = "pembayaran kurang dari total saat sync offline"
+		case !needsReview:
+			reason = "transaksi offline masuk setelah shift ditutup — cek kas shift itu"
+		}
+		if lateOfflineSale && (needsReview || paymentShort) {
+			reason += " (masuk setelah shift ditutup)"
 		}
 		if _, err := tx.Exec(ctx,
 			`UPDATE orders SET needs_review = true, review_reason = $2 WHERE id = $1`,
@@ -2314,15 +2358,22 @@ func (r *POSRepo) ListLoyaltyTransactions(ctx context.Context, customerID, store
 // points is signed — positive for earn, negative for redeem.
 func applyLoyaltyTx(ctx context.Context, tx pgx.Tx, storeID, customerID uuid.UUID, orderID *uuid.UUID, points int, kind, reason string) error {
 	// Atomic update with guard against negative balance for redeems.
+	//
+	// Both branches re-assert store_id. Every current caller derives
+	// customerID from a store-scoped statement, so there is no live
+	// cross-tenant path — but this function writes loyalty points from an id
+	// passed in as an argument, and the neighbouring customer UPDATEs are
+	// already scoped. An unscoped write here is the kind of thing a future
+	// caller silently inherits.
 	var newBalance int
 	if points < 0 {
 		// Redeem: require sufficient balance.
 		if err := tx.QueryRow(ctx, `
 			UPDATE customers
 			SET loyalty_points = loyalty_points + $2
-			WHERE id = $1 AND loyalty_points >= $3
+			WHERE id = $1 AND store_id = $4 AND loyalty_points >= $3
 			RETURNING loyalty_points
-		`, customerID, points, -points).Scan(&newBalance); err != nil {
+		`, customerID, points, -points, storeID).Scan(&newBalance); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrInsufficientPoints
 			}
@@ -2332,9 +2383,15 @@ func applyLoyaltyTx(ctx context.Context, tx pgx.Tx, storeID, customerID uuid.UUI
 		if err := tx.QueryRow(ctx, `
 			UPDATE customers
 			SET loyalty_points = loyalty_points + $2
-			WHERE id = $1
+			WHERE id = $1 AND store_id = $3
 			RETURNING loyalty_points
-		`, customerID, points).Scan(&newBalance); err != nil {
+		`, customerID, points, storeID).Scan(&newBalance); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				// The customer does not belong to this store. Silently
+				// crediting nothing would leave the ledger row below claiming
+				// a balance that was never written.
+				return ErrPOSItemNotFound
+			}
 			return err
 		}
 	}

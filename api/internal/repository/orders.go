@@ -1551,12 +1551,20 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 		nonPhysical := it.ProductType != "physical"
 		if !nonPhysical {
 			var rowsAffected int64
+			// store_id is re-asserted on both writes. The handler resolves
+			// every product from this store's catalog, so nothing reaches
+			// here cross-tenant today — but this is the one statement that
+			// DESTROYS stock, its POS counterpart is already scoped, and a
+			// future caller that trusts a client id would otherwise silently
+			// drain another seller's shelves.
 			if it.VariantID != nil {
 				tag, err := tx.Exec(ctx, `
-					UPDATE product_variants
-					SET stock = stock - $2
-					WHERE id = $1 AND stock >= $2
-				`, *it.VariantID, it.Quantity)
+					UPDATE product_variants pv
+					SET stock = pv.stock - $2
+					FROM products p
+					WHERE pv.id = $1 AND pv.stock >= $2
+					  AND p.id = pv.product_id AND p.store_id = $3
+				`, *it.VariantID, it.Quantity, in.StoreID)
 				if err != nil {
 					return nil, fmt.Errorf("decrement variant stock: %w", err)
 				}
@@ -1565,8 +1573,8 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 				tag, err := tx.Exec(ctx, `
 					UPDATE products
 					SET stock = stock - $2, updated_at = now()
-					WHERE id = $1 AND stock >= $2
-				`, it.ProductID, it.Quantity)
+					WHERE id = $1 AND stock >= $2 AND store_id = $3
+				`, it.ProductID, it.Quantity, in.StoreID)
 				if err != nil {
 					return nil, fmt.Errorf("decrement product stock: %w", err)
 				}
@@ -1612,7 +1620,7 @@ func (r *OrderRepo) Create(ctx context.Context, in CreateOrderInput) (*Order, er
 
 		// Record raw-material consumption (base recipe + selected option
 		// recipes, × qty). Soft: a config gap / shortage never blocks the order.
-		consume, err := resolveConsumptionTx(ctx, tx, it.ProductID, optionIDsFromSnaps(it.Modifiers), it.Quantity)
+		consume, err := resolveConsumptionTx(ctx, tx, in.StoreID, it.ProductID, optionIDsFromSnaps(it.Modifiers), it.Quantity)
 		if err != nil {
 			return nil, fmt.Errorf("resolve consumption: %w", err)
 		}
