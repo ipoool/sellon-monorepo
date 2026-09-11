@@ -14,7 +14,7 @@ import { serverApi } from "@/lib/server-api";
 import { formatRupiah, daysAgoWIB, todayWIB } from "@/lib/format";
 import type { Material, MaterialMovement, MaterialMovementPoint } from "@/lib/types";
 
-export const metadata = { title: "Riwayat Bahan — SellOn" };
+export const metadata = { title: "Riwayat Bahan" };
 
 const PAGE_SIZE = 30;
 

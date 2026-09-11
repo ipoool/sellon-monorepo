@@ -6,7 +6,7 @@ import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import type { StockTake } from "@/lib/types";
 
-export const metadata = { title: "Stok Opname — SellOn" };
+export const metadata = { title: "Stok Opname" };
 
 export default async function StockTakesPage() {
   const me = await getMe();

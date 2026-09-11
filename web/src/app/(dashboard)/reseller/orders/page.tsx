@@ -7,7 +7,7 @@ import { serverApi } from "@/lib/server-api";
 import { DropshipOrdersTable } from "@/components/dashboard/dropship-orders-table";
 import type { DropshipOrderItem } from "@/lib/types";
 
-export const metadata = { title: "Order Dropship — SellOn" };
+export const metadata = { title: "Order Dropship" };
 
 export default async function SupplierOrdersPage() {
   const me = await getMe();

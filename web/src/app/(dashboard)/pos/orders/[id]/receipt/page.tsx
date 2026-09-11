@@ -14,7 +14,7 @@ type PrinterConfig = {
 };
 
 export const metadata = {
-  title: "Struk Kasir — SellOn",
+  title: "Struk Kasir",
   robots: { index: false, follow: false },
 };
 

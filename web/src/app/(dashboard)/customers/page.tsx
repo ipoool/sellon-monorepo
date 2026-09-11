@@ -9,7 +9,7 @@ import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import type { Customer } from "@/lib/types";
 
-export const metadata = { title: "Pelanggan - SellOn" };
+export const metadata = { title: "Pelanggan" };
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 

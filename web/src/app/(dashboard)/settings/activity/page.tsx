@@ -2,7 +2,7 @@ import { ActivityLog } from "@/components/dashboard/activity-log";
 import { serverApi } from "@/lib/server-api";
 import type { AuditEntry } from "@/lib/types";
 
-export const metadata = { title: "Aktivitas — SellOn" };
+export const metadata = { title: "Aktivitas" };
 
 type SearchParams = Promise<{
   since?: string;

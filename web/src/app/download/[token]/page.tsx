@@ -9,7 +9,7 @@ import { getMe } from "@/lib/server-auth";
 type Params = Promise<{ token: string }>;
 
 export const metadata: Metadata = {
-  title: "Download Pesanan - SellOn",
+  title: "Download Pesanan",
   description: "Halaman akses produk digital kamu.",
 };
 

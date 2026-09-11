@@ -3,7 +3,7 @@ import { getPlan } from "@/lib/server-auth";
 import { MetaSettingsForm, type MetaConfig } from "@/components/dashboard/meta-settings-form";
 import { UpgradePrompt } from "@/components/ui/upgrade-prompt";
 
-export const metadata = { title: "Integrasi Meta — SellOn" };
+export const metadata = { title: "Integrasi Meta" };
 
 export default async function MetaSettingsPage() {
   // Pro+ feature — only Free is blocked.

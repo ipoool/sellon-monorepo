@@ -30,7 +30,7 @@ import { formatRupiah, formatDateTimeID } from "@/lib/format";
 import { paymentMethodLabel } from "@/lib/payment";
 import type { OrderDetail, PaymentGatewayStatus, Store } from "@/lib/types";
 
-export const metadata = { title: "Detail Pesanan — SellOn" };
+export const metadata = { title: "Detail Pesanan" };
 
 const statusBadge: Record<
   OrderDetail["status"],

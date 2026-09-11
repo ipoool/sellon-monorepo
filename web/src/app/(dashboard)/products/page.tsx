@@ -13,7 +13,7 @@ import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import type { Product, Store, Subscription } from "@/lib/types";
 
-export const metadata = { title: "Produk — SellOn" };
+export const metadata = { title: "Produk" };
 
 const PAGE_SIZE = 25;
 

@@ -3,7 +3,7 @@ import type { Store, Subscription } from "@/lib/types";
 import { WhatsAppNotificationForm } from "@/components/dashboard/wa-notification-form";
 import { WhatsAppTemplatesForm } from "@/components/dashboard/wa-templates-form";
 
-export const metadata = { title: "WhatsApp — SellOn" };
+export const metadata = { title: "WhatsApp" };
 
 export default async function PengaturanWhatsAppPage() {
   // Subscription gates the notification form (Free tier doesn't get

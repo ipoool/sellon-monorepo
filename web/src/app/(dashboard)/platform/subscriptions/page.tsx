@@ -6,7 +6,7 @@ import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import type { AdminSubscriptionInvoice } from "@/lib/types";
 
-export const metadata = { title: "Transaksi — SellOn" };
+export const metadata = { title: "Transaksi" };
 
 const PAGE_SIZE = 25;
 

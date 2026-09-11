@@ -8,7 +8,7 @@ import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import type { ResellerMembership, ResellerProgram } from "@/lib/types";
 
-export const metadata = { title: "Reseller di Program — SellOn" };
+export const metadata = { title: "Reseller di Program" };
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString("id-ID", {

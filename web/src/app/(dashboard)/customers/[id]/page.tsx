@@ -43,7 +43,7 @@ function resolveTier(tiers: MembershipTier[], totalSpentCents: number): Membersh
   return best;
 }
 
-export const metadata = { title: "Detail Pelanggan — SellOn" };
+export const metadata = { title: "Detail Pelanggan" };
 
 const orderStatusLabel: Record<OrderStatus, string> = {
   pending: "Menunggu",

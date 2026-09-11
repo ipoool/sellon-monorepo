@@ -13,7 +13,7 @@ import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import type { Order, Subscription } from "@/lib/types";
 
-export const metadata = { title: "Pesanan — SellOn" };
+export const metadata = { title: "Pesanan" };
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 

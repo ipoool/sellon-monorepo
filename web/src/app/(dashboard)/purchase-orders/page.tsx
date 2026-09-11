@@ -6,7 +6,7 @@ import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import type { PurchaseOrder, Supplier, Material } from "@/lib/types";
 
-export const metadata = { title: "Pembelian — SellOn" };
+export const metadata = { title: "Pembelian" };
 
 export default async function PurchaseOrdersPage() {
   const me = await getMe();

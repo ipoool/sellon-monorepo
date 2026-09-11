@@ -6,7 +6,7 @@ import { BarcodeSheet } from "@/components/dashboard/barcode-sheet";
 import type { Product } from "@/lib/types";
 
 export const metadata = {
-  title: "Barcode Produk — SellOn",
+  title: "Barcode Produk",
   robots: { index: false, follow: false },
 };
 

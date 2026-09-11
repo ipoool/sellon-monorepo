@@ -3,7 +3,7 @@ import { getPlan } from "@/lib/server-auth";
 import { PrinterSettingsForm } from "@/components/dashboard/printer-settings-form";
 import { UpgradePrompt } from "@/components/ui/upgrade-prompt";
 
-export const metadata = { title: "Pengaturan Printer — SellOn" };
+export const metadata = { title: "Pengaturan Printer" };
 
 type PrinterConfig = {
   method: "browser" | "bluetooth" | string;

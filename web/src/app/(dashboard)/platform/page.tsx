@@ -21,7 +21,7 @@ import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import { formatRupiah } from "@/lib/format";
 
-export const metadata = { title: "Ringkasan Platform — SellOn" };
+export const metadata = { title: "Ringkasan Platform" };
 
 type AdminStats = {
   total_users: number;

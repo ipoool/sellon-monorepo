@@ -4,7 +4,7 @@ import { SelfOrderFlow } from "@/components/storefront/self-order-flow";
 import { themeStyleForHue } from "@/lib/storefront-theme";
 import type { PublicBanner } from "@/lib/types";
 
-export const metadata = { title: "Pesan — SellOn" };
+export const metadata = { title: "Pesan" };
 
 const apiBase =
   process.env.API_INTERNAL_URL ||

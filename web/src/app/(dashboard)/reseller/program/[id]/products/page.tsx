@@ -8,7 +8,7 @@ import { serverApi } from "@/lib/server-api";
 import { ProgramProductsForm } from "@/components/dashboard/program-products-form";
 import type { Product, ProgramProduct, ResellerProgram } from "@/lib/types";
 
-export const metadata = { title: "Kelola Produk Program — SellOn" };
+export const metadata = { title: "Kelola Produk Program" };
 
 export default async function ProgramProductsPage({
   params,

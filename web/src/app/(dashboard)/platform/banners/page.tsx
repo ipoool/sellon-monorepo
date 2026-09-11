@@ -6,7 +6,7 @@ import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import type { PlatformBanner } from "@/lib/types";
 
-export const metadata = { title: "Banner — SellOn" };
+export const metadata = { title: "Banner" };
 
 export default async function PlatformBannersPage() {
   const me = await getMe();

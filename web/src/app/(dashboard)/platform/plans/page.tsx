@@ -6,7 +6,7 @@ import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import type { PublicPlan } from "@/lib/types";
 
-export const metadata = { title: "Harga Paket — SellOn" };
+export const metadata = { title: "Harga Paket" };
 
 export default async function PlatformPaketPage() {
   const me = await getMe();

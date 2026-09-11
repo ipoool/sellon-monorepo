@@ -7,7 +7,7 @@ import { serverApi } from "@/lib/server-api";
 import { POSApp } from "@/components/pos/pos-app";
 import type { Product, Category, Subscription, POSSession } from "@/lib/types";
 
-export const metadata = { title: "Kasir POS — SellOn" };
+export const metadata = { title: "Kasir POS" };
 
 // The POS catalog must hold EVERY active product: a single 200-row page hid the
 // rest of the menu from the cashier and left it out of the offline cache too.

@@ -4,7 +4,7 @@ import { CheckoutFieldsManager } from "@/components/dashboard/checkout-fields-ma
 import { UpgradePrompt } from "@/components/ui/upgrade-prompt";
 import type { CheckoutConfig, Store } from "@/lib/types";
 
-export const metadata = { title: "Field Checkout — SellOn" };
+export const metadata = { title: "Field Checkout" };
 
 const DEFAULT_CONFIG: CheckoutConfig = { email_mode: "optional", fields: [] };
 

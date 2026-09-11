@@ -5,7 +5,7 @@ import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import type { Subscription } from "@/lib/types";
 
-export const metadata = { title: "Tambah Produk — SellOn" };
+export const metadata = { title: "Tambah Produk" };
 
 export default async function ProdukBaruPage() {
   const me = await getMe();

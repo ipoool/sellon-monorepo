@@ -4,7 +4,7 @@ import { MembershipSettingsForm } from "@/components/dashboard/membership-settin
 import { UpgradePrompt } from "@/components/ui/upgrade-prompt";
 import type { MembershipTier } from "@/lib/types";
 
-export const metadata = { title: "Pengaturan Membership — SellOn" };
+export const metadata = { title: "Pengaturan Membership" };
 
 export default async function MembershipSettingsPage() {
   if ((await getPlan()) !== "bisnis") {

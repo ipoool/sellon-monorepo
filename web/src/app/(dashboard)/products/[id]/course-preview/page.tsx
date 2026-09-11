@@ -8,7 +8,7 @@ import { serverApi } from "@/lib/server-api";
 import type { Product } from "@/lib/types";
 
 export const metadata = {
-  title: "Preview Kursus — SellOn",
+  title: "Preview Kursus",
   robots: { index: false, follow: false },
 };
 

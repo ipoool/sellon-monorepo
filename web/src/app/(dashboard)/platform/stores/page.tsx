@@ -13,7 +13,7 @@ import { serverApi } from "@/lib/server-api";
 import { formatRupiah } from "@/lib/format";
 import type { AdminStoreSummary } from "@/lib/types";
 
-export const metadata = { title: "Toko Platform — SellOn" };
+export const metadata = { title: "Toko Platform" };
 
 type SearchParams = Promise<{ q?: string }>;
 

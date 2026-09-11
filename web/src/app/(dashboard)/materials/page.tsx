@@ -13,7 +13,7 @@ import type { Material } from "@/lib/types";
 
 type Summary = { item_count: number; total_value_cents: number; low_stock_count: number };
 
-export const metadata = { title: "Bahan Baku — SellOn" };
+export const metadata = { title: "Bahan Baku" };
 
 const PAGE_SIZE = 20;
 const SORTS = ["name", "stock_asc", "stock_desc"];

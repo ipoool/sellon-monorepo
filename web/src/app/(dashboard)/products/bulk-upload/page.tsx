@@ -5,7 +5,7 @@ import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import type { Subscription } from "@/lib/types";
 
-export const metadata = { title: "Upload Massal Produk — SellOn" };
+export const metadata = { title: "Upload Massal Produk" };
 
 export default async function BulkUploadPage() {
   const me = await getMe();

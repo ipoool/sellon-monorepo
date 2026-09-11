@@ -12,7 +12,7 @@ import type {
   SubscriptionInvoice,
 } from "@/lib/types";
 
-export const metadata = { title: "Berlangganan — SellOn" };
+export const metadata = { title: "Berlangganan" };
 
 const planLabel: Record<Subscription["plan"], string> = {
   free: "Gratis",

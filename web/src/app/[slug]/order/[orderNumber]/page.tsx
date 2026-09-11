@@ -94,7 +94,7 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { orderNumber } = await params;
   return {
-    title: `Pesanan ${orderNumber} — SellOn`,
+    title: `Pesanan ${orderNumber}`,
     robots: { index: false, follow: false },
   };
 }

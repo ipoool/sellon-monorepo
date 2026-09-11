@@ -10,7 +10,7 @@ import { ResellerCatalogView } from "@/components/dashboard/reseller-catalog-vie
 import { JoinResellerDialog } from "@/components/dashboard/join-reseller-dialog";
 import type { ResellerCatalogEntry, ResellerMembership, Subscription } from "@/lib/types";
 
-export const metadata = { title: "Katalog Reseller — SellOn" };
+export const metadata = { title: "Katalog Reseller" };
 
 export default async function ResellerCatalogPage({
   searchParams,

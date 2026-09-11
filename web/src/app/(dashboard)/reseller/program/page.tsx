@@ -9,7 +9,7 @@ import { ResellerProgramList } from "@/components/dashboard/reseller-program-lis
 import { CreateProgramDialog } from "@/components/dashboard/create-program-dialog";
 import type { ResellerProgram, Subscription } from "@/lib/types";
 
-export const metadata = { title: "Program Reseller Supplier — SellOn" };
+export const metadata = { title: "Program Reseller Supplier" };
 
 export default async function ResellerProgramPage() {
   const me = await getMe();

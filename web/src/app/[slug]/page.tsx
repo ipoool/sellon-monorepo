@@ -161,9 +161,9 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { slug } = await params;
   const data = await fetchStorefront(slug);
-  if (!data) return { title: "Toko tidak ditemukan — SellOn" };
+  if (!data) return { title: "Toko tidak ditemukan" };
   return pageMetadata({
-    title: `${data.store.name} — SellOn`,
+    title: data.store.name,
     description:
       data.store.description ||
       `Belanja produk ${data.store.name}${data.store.city ? ` di ${data.store.city}` : ""} — katalog & checkout via SellOn.`,

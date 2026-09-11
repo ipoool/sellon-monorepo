@@ -8,7 +8,7 @@ import { formatRupiah, formatDateTimeID } from "@/lib/format";
 import { paymentMethodLabel } from "@/lib/payment";
 import type { OrderDetail, Store } from "@/lib/types";
 
-export const metadata = { title: "Cetak Nota - SellOn" };
+export const metadata = { title: "Cetak Nota" };
 
 const statusLabel: Record<OrderDetail["status"], string> = {
   pending: "Menunggu",

@@ -12,7 +12,7 @@ import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import type { DigitalDownloadLink } from "@/lib/types";
 
-export const metadata = { title: "Unduhan Digital — SellOn" };
+export const metadata = { title: "Unduhan Digital" };
 
 const PAGE_SIZE = 25;
 

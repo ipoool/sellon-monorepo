@@ -11,7 +11,7 @@ import { UpgradePrompt } from "@/components/ui/upgrade-prompt";
 import { SessionOrdersTable } from "@/components/pos/session-orders-table";
 import type { POSSessionSummary, POSCashMovement, POSSessionOrder } from "@/lib/types";
 
-export const metadata = { title: "Detail Shift — SellOn" };
+export const metadata = { title: "Detail Shift" };
 
 function formatDateTime(iso: string) {
   return new Date(iso).toLocaleString("id-ID", {

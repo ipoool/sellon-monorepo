@@ -8,7 +8,7 @@ import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import type { Product } from "@/lib/types";
 
-export const metadata = { title: "Edit Produk — SellOn" };
+export const metadata = { title: "Edit Produk" };
 
 export default async function ProdukEditPage({
   params,

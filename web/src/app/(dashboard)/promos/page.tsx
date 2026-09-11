@@ -9,7 +9,7 @@ import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import type { Promo } from "@/lib/types";
 
-export const metadata = { title: "Promo — SellOn" };
+export const metadata = { title: "Promo" };
 
 const PAGE_SIZE = 25;
 

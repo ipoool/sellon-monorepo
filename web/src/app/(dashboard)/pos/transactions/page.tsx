@@ -13,7 +13,7 @@ import { formatRupiah } from "@/lib/format";
 import { UpgradePrompt } from "@/components/ui/upgrade-prompt";
 import type { POSSessionOrder, POSCashier } from "@/lib/types";
 
-export const metadata = { title: "Riwayat Transaksi POS — SellOn" };
+export const metadata = { title: "Riwayat Transaksi POS" };
 
 const PAGE_SIZE = 30;
 

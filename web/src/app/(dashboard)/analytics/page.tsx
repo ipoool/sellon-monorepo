@@ -16,7 +16,7 @@ import type {
   Subscription,
 } from "@/lib/types";
 
-export const metadata = { title: "Laporan & Analytics — SellOn" };
+export const metadata = { title: "Laporan & Analytics" };
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 

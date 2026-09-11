@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { CourseViewer } from "@/components/storefront/course-viewer";
 
 export const metadata: Metadata = {
-  title: "Akses Kelas — SellOn",
+  title: "Akses Kelas",
   // Private buyer page — never index.
   robots: { index: false, follow: false },
 };

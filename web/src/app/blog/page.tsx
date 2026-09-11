@@ -11,7 +11,7 @@ import { blogPosts } from "@/lib/blog-posts";
 import { pageMetadata } from "@/lib/seo";
 
 export const metadata = pageMetadata({
-  title: "Blog SellOn — Tips Jualan Online untuk UMKM Indonesia",
+  title: "Blog — Tips Jualan Online untuk UMKM Indonesia",
   description:
     "Artikel praktis seputar jualan WhatsApp, pembayaran QRIS, strategi UMKM, dan tips toko online untuk seller Indonesia.",
   path: "/blog",

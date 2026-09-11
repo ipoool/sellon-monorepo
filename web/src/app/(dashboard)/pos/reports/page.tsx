@@ -13,7 +13,7 @@ import { formatRupiah } from "@/lib/format";
 import { UpgradePrompt } from "@/components/ui/upgrade-prompt";
 import type { POSReport, POSCashier } from "@/lib/types";
 
-export const metadata = { title: "Laporan POS — SellOn" };
+export const metadata = { title: "Laporan POS" };
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 

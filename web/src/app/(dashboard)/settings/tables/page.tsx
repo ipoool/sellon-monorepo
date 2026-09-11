@@ -4,7 +4,7 @@ import { TablesManager } from "@/components/dashboard/tables-manager";
 import { UpgradePrompt } from "@/components/ui/upgrade-prompt";
 import type { RestaurantTable, DineInSettings, Store } from "@/lib/types";
 
-export const metadata = { title: "Meja & QR — SellOn" };
+export const metadata = { title: "Meja & QR" };
 
 export default async function TablesSettingsPage() {
   if ((await getPlan()) !== "bisnis") {

@@ -3,7 +3,7 @@ import { getPlan } from "@/lib/server-auth";
 import { LoyaltySettingsForm } from "@/components/dashboard/loyalty-settings-form";
 import { UpgradePrompt } from "@/components/ui/upgrade-prompt";
 
-export const metadata = { title: "Pengaturan Loyalty — SellOn" };
+export const metadata = { title: "Pengaturan Loyalty" };
 
 type LoyaltyConfig = {
   enabled: boolean;

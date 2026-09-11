@@ -2,7 +2,7 @@ import { StaffManager } from "@/components/dashboard/staff-manager";
 import { serverApi } from "@/lib/server-api";
 import type { StaffData } from "@/lib/types";
 
-export const metadata = { title: "Tim — SellOn" };
+export const metadata = { title: "Tim" };
 
 export default async function PengaturanTimPage() {
   const data = await serverApi<StaffData>("/api/v1/staff");

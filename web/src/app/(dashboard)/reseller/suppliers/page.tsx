@@ -9,7 +9,7 @@ import { serverApi } from "@/lib/server-api";
 import { JoinResellerDialog } from "@/components/dashboard/join-reseller-dialog";
 import type { ResellerMembership, Subscription } from "@/lib/types";
 
-export const metadata = { title: "Supplier Saya — SellOn" };
+export const metadata = { title: "Supplier Saya" };
 
 export default async function MySuppliersPage() {
   const me = await getMe();

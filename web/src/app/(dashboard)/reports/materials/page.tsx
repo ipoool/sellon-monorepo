@@ -13,7 +13,7 @@ import { serverApi } from "@/lib/server-api";
 import { formatRupiah, daysAgoWIB, todayWIB } from "@/lib/format";
 import type { Subscription } from "@/lib/types";
 
-export const metadata = { title: "Laporan Bahan — SellOn" };
+export const metadata = { title: "Laporan Bahan" };
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 

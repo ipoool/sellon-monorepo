@@ -6,7 +6,7 @@ import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import type { AdminUser } from "@/lib/types";
 
-export const metadata = { title: "Pengguna — SellOn" };
+export const metadata = { title: "Pengguna" };
 
 type SearchParams = Promise<{ q?: string }>;
 

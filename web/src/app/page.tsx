@@ -20,8 +20,13 @@ import { publicServerApi } from "@/lib/server-api";
 import type { PublicPlan } from "@/lib/types";
 import { faqJsonLd, pageMetadata } from "@/lib/seo";
 
+// The brand is spelled out here rather than left to the root layout's
+// title.template: per Next's metadata rules the template applies to CHILD
+// route segments only, never to a page.js in the segment where it is defined.
+// So the landing page — the one title most likely to be seen in search — was
+// rendering with no brand in it at all.
 export const metadata = pageMetadata({
-  title: "Platform Jualan Online & Offline All-in-One untuk UMKM",
+  title: "SellOn — Platform Jualan Online & Offline All-in-One untuk UMKM",
   description:
     "Satu aplikasi untuk seluruh tokomu: jualan online (link katalog + checkout), kasir POS, QR meja & dapur (KDS), stok & bahan baku, membership pelanggan, sampai pembayaran QRIS/Midtrans — tanpa potongan per transaksi. Gratis untuk UMKM Indonesia.",
   path: "/",

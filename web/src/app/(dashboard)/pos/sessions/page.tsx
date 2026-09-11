@@ -14,7 +14,7 @@ import { formatRupiah } from "@/lib/format";
 import { UpgradePrompt } from "@/components/ui/upgrade-prompt";
 import type { POSSession, POSCashier } from "@/lib/types";
 
-export const metadata = { title: "Riwayat Shift Kasir — SellOn" };
+export const metadata = { title: "Riwayat Shift Kasir" };
 
 function formatDateTime(iso: string) {
   return new Date(iso).toLocaleString("id-ID", {

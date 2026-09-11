@@ -5,7 +5,7 @@ import { getMe, getPlan } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import type { DineInSettings, KitchenOrder } from "@/lib/types";
 
-export const metadata = { title: "Kitchen Display — SellOn" };
+export const metadata = { title: "Kitchen Display" };
 
 // KDS is a fullscreen board — no dashboard chrome.
 export default async function KDSPage() {

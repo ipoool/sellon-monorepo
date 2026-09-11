@@ -8,7 +8,7 @@ import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import type { Promo } from "@/lib/types";
 
-export const metadata = { title: "Edit Promo — SellOn" };
+export const metadata = { title: "Edit Promo" };
 
 export default async function PromoDetailPage({
   params,

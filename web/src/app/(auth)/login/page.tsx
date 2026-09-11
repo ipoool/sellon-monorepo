@@ -11,7 +11,7 @@ import { getMe } from "@/lib/server-auth";
 import { pageMetadata } from "@/lib/seo";
 
 export const metadata = pageMetadata({
-  title: "Masuk ke SellOn",
+  title: "Masuk",
   description: "Login ke dasbor SellOn untuk kelola toko online & offline kamu.",
   path: "/login",
   noindex: true,
@@ -45,28 +45,52 @@ function benefitsFor(emailPassword: boolean) {
  * Which sign-in options to offer. Read at request time from the API rather
  * than baked into the bundle, so closing email signup (when outbound mail is
  * down) or rotating the Google client id is a server env change, not a web
- * rebuild + redeploy. Falls back to email-only if the API can't be reached,
- * which is the pre-existing behaviour.
+ * rebuild + redeploy.
+ *
+ * Anything that goes wrong here is logged on the SERVER and nowhere else. The
+ * page used to render a card naming the missing env var, which handed every
+ * anonymous visitor a readout of our configuration; the operator reads the
+ * container log instead.
  */
 async function signInOptions(): Promise<{
   google: boolean;
   emailPassword: boolean;
   googleClientId?: string;
 }> {
+  // Readable on the server too, and the value the browser bundle would have
+  // used — so it is the right fallback when /info carries no id.
+  const envClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "";
   try {
     const base = process.env.API_INTERNAL_URL || process.env.NEXT_PUBLIC_API_URL;
     const res = await fetch(`${base}/api/v1/info`, { cache: "no-store" });
-    if (!res.ok) throw new Error(String(res.status));
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
+    const clientId: string = data?.google_client_id || envClientId;
+    const googleEnabled = !!data?.features?.google_signin;
+    if (googleEnabled && !clientId) {
+      // Offering a Google button with no client id renders an empty box, so
+      // drop the option instead — and say why where only we can read it.
+      console.error(
+        "[login] google_signin is enabled but no Google client id is available; hiding the Google option",
+      );
+    }
     return {
-      google: !!data?.features?.google_signin,
+      google: googleEnabled && !!clientId,
       emailPassword: data?.features?.email_password !== false,
-      googleClientId: data?.google_client_id,
+      googleClientId: clientId || undefined,
     };
-  } catch {
-    // API unreachable: fall back to the email form rather than rendering a
-    // page with no way in at all.
-    return { google: false, emailPassword: true };
+  } catch (err) {
+    console.error("[login] GET /api/v1/info failed:", err);
+    // API unreachable. Offer the path that is actually configured rather than
+    // the email form: email+password ships DISABLED, so falling back to it
+    // painted a full sign-in/register form whose every endpoint answers 503.
+    // With no Google client id anywhere the backend's no-lockout guard forces
+    // the email path open, so that is the only case where it is the fallback.
+    return {
+      google: !!envClientId,
+      emailPassword: !envClientId,
+      googleClientId: envClientId || undefined,
+    };
   }
 }
 
@@ -149,6 +173,30 @@ export default async function MasukPage({
                     </li>
                   ))}
                 </ul>
+              )}
+
+              {/* Every sign-in path is closed. Say so plainly — no env names,
+                  no "belum dikonfigurasi": a visitor learns nothing about our
+                  setup, and the real reason is already in the server log. */}
+              {!options.google && !options.emailPassword && (
+                <div
+                  role="alert"
+                  className="rounded-lg border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-700"
+                >
+                  <p className="font-medium text-neutral-900">
+                    Masuk sedang tidak tersedia.
+                  </p>
+                  <p className="mt-1">
+                    Coba lagi beberapa saat lagi, atau hubungi{" "}
+                    <a
+                      href="mailto:halo@sellon.id"
+                      className="font-medium text-brand-600 hover:text-brand-700"
+                    >
+                      halo@sellon.id
+                    </a>
+                    .
+                  </p>
+                </div>
               )}
 
               {options.google && (

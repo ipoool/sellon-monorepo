@@ -4,7 +4,7 @@ import { serverApi } from "@/lib/server-api";
 import type { Store, Subscription } from "@/lib/types";
 import { CustomDomainForm } from "@/components/dashboard/custom-domain-form";
 
-export const metadata = { title: "Custom Domain — SellOn" };
+export const metadata = { title: "Custom Domain" };
 
 export default async function DomainSettingsPage() {
   const [storeData, subData] = await Promise.all([
