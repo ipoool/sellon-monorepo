@@ -185,10 +185,10 @@ Don't introduce hard-coded colors or shadows — always use theme tokens so the 
 
 Two distinct shells. Don't mix them:
 
-- **Marketing pages** (landing, /tentang, /roadmap, /bantuan, /panduan, /status, /syarat-ketentuan, /kebijakan-privasi, /kebijakan-cookie): `<Header me={me} />` + `<main>` + `<Footer />`. Header has `variant="marketing"` (default) showing Fitur / Cara Kerja / Harga / FAQ links.
-- **App pages** (/dasbor and any future authenticated pages): wrap in `<DashboardShell me={me} pageTitle="…" pageSubtitle="…" actions={…}>`. Provides sidebar + sticky topbar + responsive mobile drawer (`<dialog>`-based, no extra deps). Sidebar nav highlights active route via `usePathname`.
+- **Marketing pages** (landing, /about, /roadmap, /help, /guides, /blog, /status, /terms, /privacy, /cookies): `<Header me={me} />` + `<main>` + `<Footer />`. Header has `variant="marketing"` (default) showing Fitur / Cara Kerja / Harga / FAQ links.
+- **App pages** (/dashboard and everything else under the `(dashboard)` route group): wrap in `<DashboardShell me={me} pageTitle="…" pageSubtitle="…" actions={…}>`. Provides sidebar + sticky topbar + responsive mobile drawer (`<dialog>`-based, no extra deps). Sidebar nav highlights active route via `usePathname`.
 
-The marketing `/masuk` page is a hybrid: split-screen layout, no Header/Footer, redirects to `/dasbor` if `getMe()` returns a user.
+The `/login` page is a hybrid: split-screen layout, no Header/Footer, redirects to `/dashboard` if `getMe()` returns a user.
 
 ### Offline-first POS (local-first cashier)
 
@@ -215,55 +215,69 @@ Three `products.product_type`: `physical` | `digital` | `course`. Non-physical h
 
 ### Routes
 
+Verified against `web/src/app` — 86 `page.tsx` files. Public page paths are
+ENGLISH (`/about`, `/help`, `/guides`, `/terms`, `/privacy`, `/cookies`); only
+the copy inside them is Indonesian. Earlier revisions of this file listed
+Indonesian paths (`/tentang`, `/bantuan`, `/panduan`, `/syarat-ketentuan`)
+that have never existed as routes.
+
 Marketing + auth + storefront (public):
 ```
 /                         landing (Hero+TrustBar+Features+HowItWorks+Pricing+Testimonials+Faq+CtaBanner+Footer)
-/login                    Google SSO (split-screen lg+, redirect → /dashboard if authed)
+/login                    sign-in (Google by default; email+password behind AUTH_EMAIL_PASSWORD_ENABLED)
 /setup                    first-time onboarding (create store)
+/about /roadmap /status   company + transparency pages
+/help  /help/{slug}       help centre
+/guides /guides/{slug} /guides/topik/{slug}   panduan articles + topic index
+/blog  /blog/{slug}       blog
+/terms /privacy /cookies  legal docs
 /{slug}                   public storefront (catalog, layout per seller's product_layout)
 /{slug}/product/{slug}    product detail page
 /{slug}/cart              buyer cart
 /{slug}/checkout          buyer checkout wizard (identitas → pengiriman → pembayaran)
 /{slug}/order/{number}    buyer order status page (with payment proof upload)
-/syarat-ketentuan, /kebijakan-privasi, /kebijakan-cookie  legal docs
-/bantuan, /panduan, /status, /tentang, /roadmap            content pages
+/{slug}/course/{token}    OTP-gated course viewer
+/download/{token}         OTP-gated digital delivery
+/t/{token}                dine-in self-order (table QR)
+/q/{slug}                 queue display
 ```
 
-Authenticated seller dashboard (under `(dashboard)` route group):
+Authenticated seller dashboard (under the `(dashboard)` route group):
 ```
 /dashboard                stats overview
-/orders                   pesanan list (filter + export CSV)
-/orders/{id}              order detail (status actions, WA send, notes, payment proof view)
+/analytics                traffic + conversion
+/orders /orders/{id}      pesanan list + detail; /orders/{id}/print for the invoice
 /products                 produk list (bulk select + delete, share link)
-/products/new             create product
-/products/{id}            edit product
+/products/new /products/{id}                 create / edit
 /products/bulk-upload     XLSX bulk import (async job + SSE progress)
-/customers                pelanggan list (segments, WA contact)
-/customers/{id}           customer detail
-/promos, /promos/{id}     promo list / detail
-/reports                  laporan (overview, top products, top customers — locked for Free)
-/settings/toko            profil toko + jam buka
-/settings/storefront      tampilan storefront (logo, banner, theme hue, product layout)
-/settings/payment         midtrans (production-only, "Connect" Snap-popup verify) + bank accounts (manual transfer + QRIS statis)
-/settings/domain          custom domain (CNAME → cname.sellon.id, "Verifikasi DNS", Bisnis-only)
-/settings/shipping        pengiriman + origin city + free shipping threshold
-/settings/whatsapp        WA templates + notification number (new-order notif section temporarily disabled via NOTIFICATIONS_DISABLED flag)
-/settings/offline         Mode Offline POS toggle (Bisnis-only)
-/settings/subscription    plan + invoices + upgrade dialog
-/settings/team            staff + invites
-/settings/activity        audit log (action filter + detail accordion)
-/settings/category        kategori produk
+/products/{id}/barcode /products/{id}/course-preview
+/customers /customers/{id}
+/promos /promos/{id}
+/digital-downloads        seller audit of token access
+/reports/materials        material usage; revenue reports live under /analytics
+/settings/…               store, storefront, payment, domain, shipping, whatsapp,
+                          offline, subscription, team, activity, categories, menu,
+                          banners, checkout, tax, loyalty, membership, meta,
+                          printer, tables
+```
+
+POS, kitchen, inventory and reseller (Bisnis-tier areas):
+```
+/pos                      cashier (route group `(kasir)`)
+/pos/sessions /pos/sessions/{id} /pos/transactions /pos/reports
+/pos/orders/{id}/receipt  reprint
+/kds                      kitchen display
+/materials /materials/{id}   raw materials (BOM)
+/purchase-orders /stock-takes
+/reseller/program /reseller/program/{id}/members /reseller/program/{id}/products
+/reseller/catalog /reseller/orders /reseller/suppliers
 ```
 
 Platform admin (under `/platform/*`):
 ```
 /platform                 admin overview
-/platform/users           list + impersonate + ban + hard-delete (typed "DELETE NOW")
-/platform/users/{id}      user detail + per-user audit
-/platform/stores          list semua toko
-/platform/subscriptions   approve manual-transfer invoices
-/platform/plans           plan pricing + marketing meta editor
-/platform/audit           platform-wide audit log
+/platform/users /platform/users/{id}   impersonate + ban + hard-delete (typed "DELETE NOW")
+/platform/stores /platform/subscriptions /platform/plans /platform/banners
 ```
 
 API summary (current — full list di `internal/server/server.go`):
@@ -313,7 +327,7 @@ Environment is loaded by both apps via the root `.env` (see `.env.example`). Not
 
 The codebase ships with **placeholder content** that's intentionally not production-ready. Do not silently remove the warning banners or convert them into real claims:
 
-- **Legal docs** (`/syarat-ketentuan`, `/kebijakan-privasi`, `/kebijakan-cookie`): the yellow "draft awal" banners were removed by founder request on 2026-05-10. Real lawyer review is still required before launch — do not treat their absence as endorsement.
+- **Legal docs** (`/terms`, `/privacy`, `/cookies`): the yellow "draft awal" banners were removed by founder request on 2026-05-10. Real lawyer review is still required before launch — do not treat their absence as endorsement.
 - **About + Roadmap**: team names (Andi/Citra/Bayu/Dewi), timeline, vote counts, stats ("1.000+ UMKM", "27 provinsi") are illustrative placeholders.
 
 (Sidebar nav is now live for all routes. Help center, Panduan, and Status page placeholders have since been replaced with real content / live probes.)
