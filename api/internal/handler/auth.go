@@ -174,6 +174,14 @@ type registerReq struct {
 // pre-existing account, including legacy Google-only rows and the seeded
 // platform admin, by POSTing an email + a password of their choosing.
 // No session cookie is issued until VerifyEmail.
+//
+// Re-registering an address that already has a LIVE pending claim does not
+// replace that claim — RequestCode holds it (see the comment there). This
+// endpoint must answer identically either way, so repeatedly registering a
+// stranger's address reveals nothing and, more importantly, can no longer
+// keep overwriting the password the real owner is in the middle of proving.
+// Never branch the status/body on whether the claim was taken or held: that
+// turns register into an account-existence oracle.
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	if !h.emailFlowsOpen(w) {
 		return

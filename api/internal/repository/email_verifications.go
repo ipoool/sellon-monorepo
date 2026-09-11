@@ -84,6 +84,23 @@ func hashVerifyCode(userID uuid.UUID, code string) string {
 // purpose is unchanged, an existing pending claim is preserved so a
 // login-triggered resend doesn't wipe the password the email owner is in
 // the middle of proving. Switching purpose always clears it.
+//
+// A LIVE claim (same purpose, unconsumed, unexpired, non-empty hash) is never
+// replaced, even by a caller supplying a new one. Without that hold, anyone
+// could POST /auth/register for a stranger's address on repeat: each call
+// overwrote the parked password with one of the attacker's choosing, so the
+// real owner — who receives every code, since the mail goes to their mailbox —
+// could never finish their own signup, because the password they type no
+// longer matches the hash parked for them. The hold makes a re-claim a plain
+// code resend instead: the owner still gets a working code, and the first
+// claim stands.
+//
+// The hold is bounded by the claim's own 15-minute TTL and by the existing
+// 5-sends-per-hour quota above (each allowed send extends the live claim), so
+// a squatter who claims an address first cannot sit on it indefinitely — the
+// real owner re-registers once the claim lapses and their password wins, as
+// migration 0097 intends. Callers must not vary their response on this: the
+// endpoint would otherwise become an account-existence oracle.
 func (r *EmailVerificationRepo) RequestCode(ctx context.Context, userID uuid.UUID, purpose VerificationPurpose, pending *PendingClaim) (string, error) {
 	var lastSent *time.Time
 	var resend int
@@ -123,12 +140,25 @@ func (r *EmailVerificationRepo) RequestCode(ctx context.Context, userID uuid.UUI
 			code_hash    = EXCLUDED.code_hash,
 			expires_at   = EXCLUDED.expires_at,
 			purpose      = EXCLUDED.purpose,
+			-- The first branch is the anti-griefing hold: a live claim wins over
+			-- an incoming one. Evaluated against the pre-UPDATE row, so it is
+			-- race-free even when two registers land at once.
 			pending_password_hash = CASE
+				WHEN email_verifications.purpose = EXCLUDED.purpose
+				     AND email_verifications.consumed_at IS NULL
+				     AND email_verifications.expires_at > now()
+				     AND email_verifications.pending_password_hash <> ''
+					THEN email_verifications.pending_password_hash
 				WHEN EXCLUDED.pending_password_hash <> '' THEN EXCLUDED.pending_password_hash
 				WHEN email_verifications.purpose = EXCLUDED.purpose THEN email_verifications.pending_password_hash
 				ELSE ''
 			END,
 			pending_name = CASE
+				WHEN email_verifications.purpose = EXCLUDED.purpose
+				     AND email_verifications.consumed_at IS NULL
+				     AND email_verifications.expires_at > now()
+				     AND email_verifications.pending_password_hash <> ''
+					THEN email_verifications.pending_name
 				WHEN EXCLUDED.pending_password_hash <> '' THEN EXCLUDED.pending_name
 				WHEN email_verifications.purpose = EXCLUDED.purpose THEN email_verifications.pending_name
 				ELSE ''
@@ -147,14 +177,25 @@ func (r *EmailVerificationRepo) RequestCode(ctx context.Context, userID uuid.UUI
 }
 
 // Consume validates a submitted code for the given purpose and, on success,
-// runs apply inside the same transaction (marking the row consumed only if
-// apply succeeds). The attempt counter is bumped atomically in the same
-// UPDATE that selects the row, so concurrent guesses can't slip past the
-// 5-attempt lock the way a read-then-write would allow.
+// runs apply in a transaction that also marks the row consumed.
 //
-// apply receives the parked claim (empty fields when there is none). Wrong
-// codes keep their attempt bump; an apply failure rolls the whole thing back
-// so the code stays usable.
+// The attempt counter is bumped atomically by the same UPDATE that selects
+// the row, so concurrent guesses can't slip past the 5-attempt lock the way a
+// read-then-write would allow.
+//
+// That bump runs on its OWN connection and is committed before the code is
+// compared or apply runs. It used to share a transaction with apply, which
+// meant any apply failure rolled the counter back: VerifyEmail's apply
+// rejects a password that doesn't match the parked claim, so a caller
+// holding a code could guess the registrant's password without limit while
+// the code stayed alive and the counter stayed at zero.
+//
+// Counting an attempt that a transient DB error later wasted is the safe
+// default. A legitimate user loses one of five tries and can always ask for
+// a fresh code; an uncounted attempt is an unbounded oracle with no recovery
+// path. The code itself is NOT burned when apply fails — that half stays
+// inside the transaction and rolls back — so a genuine blip costs an attempt,
+// not the whole verification.
 func (r *EmailVerificationRepo) Consume(
 	ctx context.Context,
 	userID uuid.UUID,
@@ -162,15 +203,9 @@ func (r *EmailVerificationRepo) Consume(
 	code string,
 	apply func(ctx context.Context, tx pgx.Tx, claim PendingClaim) error,
 ) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-
 	var hash string
 	var claim PendingClaim
-	err = tx.QueryRow(ctx, `
+	err := r.pool.QueryRow(ctx, `
 		UPDATE email_verifications
 		SET attempt_count = attempt_count + 1
 		WHERE user_id = $1 AND purpose = $2
@@ -184,7 +219,7 @@ func (r *EmailVerificationRepo) Consume(
 		var consumed *time.Time
 		var expires time.Time
 		var rowPurpose string
-		if e := tx.QueryRow(ctx,
+		if e := r.pool.QueryRow(ctx,
 			`SELECT attempt_count, consumed_at, expires_at, purpose FROM email_verifications WHERE user_id=$1`,
 			userID).Scan(&attempts, &consumed, &expires, &rowPurpose); e == nil &&
 			rowPurpose == string(purpose) && consumed == nil && time.Now().Before(expires) &&
@@ -198,14 +233,18 @@ func (r *EmailVerificationRepo) Consume(
 	}
 
 	if subtle.ConstantTimeCompare([]byte(hash), []byte(hashVerifyCode(userID, code))) != 1 {
-		// Keep the attempt bump.
-		if err := tx.Commit(ctx); err != nil {
-			return err
-		}
 		return ErrVerificationInvalid
 	}
 
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
 	if apply != nil {
+		// Rolls back on failure, so the code survives a transient error —
+		// but the attempt above is already durable and cannot be replayed.
 		if err := apply(ctx, tx, claim); err != nil {
 			return err
 		}

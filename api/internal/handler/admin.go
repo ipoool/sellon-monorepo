@@ -445,10 +445,19 @@ func (h *AdminHandler) Impersonate(w http.ResponseWriter, r *http.Request) {
 //
 //   - The imp claim was server-set + JWT-signed during /impersonate, so
 //     the impID we read here can't be forged client-side.
-//   - We re-verify the user still exists, has role='admin', and isn't
-//     banned. If any check fails (admin revoked, account banned), we
-//     fall back to clearing the cookie entirely so the caller has to
-//     log in fresh.
+//   - We re-verify the user still exists, has role='admin', isn't
+//     banned, and that their own sessions have not been revoked since
+//     this cookie was issued. If any check fails, we fall back to
+//     clearing the cookie entirely so the caller has to log in fresh.
+//
+// The revocation check is the non-obvious one. RequireAuth compares the
+// token's iat against the IMPERSONATED user's sessions_valid_after — the
+// admin's own row is never consulted while the impersonation cookie is in
+// play. So an admin whose sessions were revoked mid-impersonation (password
+// reset after a compromise, or a demotion) still reaches this handler, and
+// without the check below would walk out with a brand-new full-TTL admin
+// session: a revocation bypass reachable by anyone holding the stolen
+// impersonation cookie.
 func (h *AdminHandler) ExitImpersonation(w http.ResponseWriter, r *http.Request) {
 	impID, ok := auth.ImpersonatorIDFromContext(r.Context())
 	if !ok {
@@ -478,9 +487,22 @@ func (h *AdminHandler) ExitImpersonation(w http.ResponseWriter, r *http.Request)
 		_ = h.platformAudit.Log(r.Context(), in)
 	}
 
-	// If the original admin is gone / no longer admin / banned, fall
-	// back to clearing the cookie. The caller will land on /login.
-	if admin == nil || admin.Role != "admin" || admin.IsBanned() {
+	// Anchor the revocation check to the moment THIS cookie was minted —
+	// i.e. when the impersonation started. RequireAuth already parsed and
+	// verified it; re-reading is cheap and keeps the check self-contained.
+	// A token with no iat is treated as issued at the zero time, so it fails
+	// against any sessions_valid_after rather than silently bypassing it.
+	var sessionIssuedAt time.Time
+	if c, cerr := r.Cookie(auth.SessionCookieName); cerr == nil {
+		if claims, verr := h.jwt.Verify(c.Value); verr == nil && claims.IssuedAt != nil {
+			sessionIssuedAt = claims.IssuedAt.Time
+		}
+	}
+
+	// If the original admin is gone / no longer admin / banned / revoked,
+	// fall back to clearing the cookie. The caller will land on /login.
+	if admin == nil || admin.Role != "admin" || admin.IsBanned() ||
+		!admin.SessionIssuedAtValid(sessionIssuedAt) {
 		http.SetCookie(w, &http.Cookie{
 			Name:     auth.SessionCookieName,
 			Value:    "",
