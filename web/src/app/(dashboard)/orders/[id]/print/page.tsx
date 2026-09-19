@@ -176,6 +176,17 @@ export default async function NotaCetakPage({
                         {it.variant_name}
                       </p>
                     )}
+                    {/* The printed struk is what goes in the parcel, so the
+                        chosen options (Ukuran, Warna…) matter most here. */}
+                    {it.modifiers?.map((m, mi) => (
+                      <p
+                        key={`${m.group_name}-${m.option_name}-${mi}`}
+                        className="text-xs text-neutral-500"
+                      >
+                        {m.group_name ? `${m.group_name}: ` : ""}
+                        {m.option_name}
+                      </p>
+                    ))}
                   </td>
                   <td className="py-3 text-right text-neutral-700">
                     {it.quantity}

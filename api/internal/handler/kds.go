@@ -36,7 +36,13 @@ func (h *KDSHandler) requireStore(r *http.Request) (*repository.Store, error) {
 func kitchenOrderDTO(k repository.KitchenOrder) map[string]any {
 	items := make([]map[string]any, 0, len(k.Items))
 	for _, it := range k.Items {
-		items = append(items, map[string]any{"name": it.Name, "quantity": it.Quantity})
+		opts := it.Options
+		if opts == nil {
+			opts = []string{}
+		}
+		items = append(items, map[string]any{
+			"name": it.Name, "quantity": it.Quantity, "options": opts,
+		})
 	}
 	return map[string]any{
 		"order_id":       k.OrderID.String(),

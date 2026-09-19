@@ -110,9 +110,22 @@ export function KitchenBoard({ initial }: { initial: KitchenOrder[] }) {
                     </div>
                     <ul className="mt-2 space-y-0.5 text-sm">
                       {o.items.map((it, i) => (
-                        <li key={i} className="flex justify-between">
-                          <span>{it.name}</span>
-                          <span className="text-white/60">×{it.quantity}</span>
+                        <li key={i}>
+                          <div className="flex justify-between">
+                            <span>{it.name}</span>
+                            <span className="text-white/60">×{it.quantity}</span>
+                          </div>
+                          {/* Chosen options. Without these the kitchen sees
+                              only a product name and cannot tell a Large from
+                              a Small, or which topping was ordered. */}
+                          {it.options?.map((o, oi) => (
+                            <div
+                              key={oi}
+                              className="pl-3 text-xs text-brand-300"
+                            >
+                              {o}
+                            </div>
+                          ))}
                         </li>
                       ))}
                     </ul>

@@ -34,6 +34,11 @@ type KitchenOrder struct {
 type KitchenItem struct {
 	Name     string
 	Quantity int
+	// Options are the chosen modifier options for this line, already
+	// formatted ("Ukuran: L", "Topping: Boba"). The kitchen cannot make the
+	// right drink from a product name alone, and this board showed nothing
+	// else — the options were recorded at checkout and simply never read.
+	Options []string
 }
 
 type KitchenRepo struct {
@@ -92,8 +97,25 @@ func (r *KitchenRepo) ListActive(ctx context.Context, storeID uuid.UUID) ([]Kitc
 		return out, nil
 	}
 	// Batch-load line items.
+	// The options are aggregated in SQL rather than fetched per line: the
+	// board polls, so a second round-trip per item would scale with the
+	// lunch rush. ORDER BY inside the aggregate keeps groups in the order
+	// the buyer picked them.
 	irows, err := r.pool.Query(ctx, `
-		SELECT order_id, product_name, quantity FROM order_items WHERE order_id = ANY($1)
+		SELECT oi.order_id, oi.product_name, oi.quantity,
+		       COALESCE(
+		           ARRAY(
+		               SELECT CASE WHEN COALESCE(oim.group_name, '') <> ''
+		                           THEN oim.group_name || ': ' || oim.option_name
+		                           ELSE oim.option_name END
+		               FROM order_item_modifiers oim
+		               WHERE oim.order_item_id = oi.id
+		               ORDER BY oim.created_at ASC
+		           ),
+		           ARRAY[]::text[]
+		       ) AS options
+		FROM order_items oi
+		WHERE oi.order_id = ANY($1)
 	`, ids)
 	if err != nil {
 		return nil, err
@@ -103,11 +125,12 @@ func (r *KitchenRepo) ListActive(ctx context.Context, storeID uuid.UUID) ([]Kitc
 		var oid uuid.UUID
 		var name string
 		var qty int
-		if err := irows.Scan(&oid, &name, &qty); err != nil {
+		var opts []string
+		if err := irows.Scan(&oid, &name, &qty, &opts); err != nil {
 			return nil, err
 		}
 		if i, ok := idx[oid]; ok {
-			out[i].Items = append(out[i].Items, KitchenItem{Name: name, Quantity: qty})
+			out[i].Items = append(out[i].Items, KitchenItem{Name: name, Quantity: qty, Options: opts})
 		}
 	}
 	return out, irows.Err()

@@ -187,6 +187,18 @@ export default async function OrderDetailPage({
                         Varian: {it.variant_name}
                       </p>
                     )}
+                    {/* Chosen options (Ukuran, Warna, Topping…). Recorded at
+                        checkout but never shown here, so a seller packing a
+                        shirt order had no size to pack against. */}
+                    {it.modifiers?.map((m, mi) => (
+                      <p
+                        key={`${m.group_name}-${m.option_name}-${mi}`}
+                        className="text-xs text-neutral-500"
+                      >
+                        {m.group_name ? `${m.group_name}: ` : ""}
+                        {m.option_name}
+                      </p>
+                    ))}
                     <p className="mt-0.5 text-xs text-neutral-600">
                       {it.quantity} × {formatRupiah(it.unit_price_cents)}
                     </p>

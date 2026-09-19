@@ -235,7 +235,7 @@ export type KitchenOrder = {
   table_label: string;
   customer_name: string;
   created_at: string;
-  items: { name: string; quantity: number }[];
+  items: { name: string; quantity: number; options?: string[] }[];
 };
 
 // Seller-configurable checkout fields.

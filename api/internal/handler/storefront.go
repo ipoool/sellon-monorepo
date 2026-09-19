@@ -1297,16 +1297,6 @@ func (h *StorefrontHandler) emailNewOrderToSeller(
 		return
 	}
 
-	// One-line-per-item summary: "2× Kaos M (Hitam) — Rp 200.000".
-	var sb strings.Builder
-	for _, it := range items {
-		name := it.ProductName
-		if it.VariantName != "" {
-			name += " (" + it.VariantName + ")"
-		}
-		fmtLine(&sb, it.Quantity, name, it.UnitCents*int64(it.Quantity))
-	}
-
 	dashURL := strings.TrimRight(h.webOrigin, "/") + "/dashboard/orders"
 
 	subject, text, htmlBody := email.RenderNewOrder(email.NewOrderData{
@@ -1315,7 +1305,7 @@ func (h *StorefrontHandler) emailNewOrderToSeller(
 		CustomerName:      order.CustomerName,
 		CustomerWA:        order.CustomerWhatsApp,
 		TotalCents:        order.TotalCents,
-		ItemSummary:       sb.String(),
+		ItemSummary:       orderItemLines(items),
 		PaymentMethod:     order.PaymentMethod,
 		OrderDashboardURL: dashURL,
 	})
@@ -1341,16 +1331,6 @@ func (h *StorefrontHandler) emailOrderCreatedToBuyer(
 		return
 	}
 
-	// One-line-per-item summary, same formatting as the seller email.
-	var sb strings.Builder
-	for _, it := range items {
-		name := it.ProductName
-		if it.VariantName != "" {
-			name += " (" + it.VariantName + ")"
-		}
-		fmtLine(&sb, it.Quantity, name, it.UnitCents*int64(it.Quantity))
-	}
-
 	orderURL := strings.TrimRight(h.webOrigin, "/") + "/" + store.Slug + "/order/" + order.OrderNumber
 
 	subject, text, htmlBody := email.RenderOrderCreated(email.OrderCreatedData{
@@ -1358,7 +1338,7 @@ func (h *StorefrontHandler) emailOrderCreatedToBuyer(
 		OrderNumber:   order.OrderNumber,
 		CustomerName:  order.CustomerName,
 		TotalCents:    order.TotalCents,
-		ItemSummary:   sb.String(),
+		ItemSummary:   orderItemLines(items),
 		PaymentMethod: order.PaymentMethod,
 		OrderURL:      orderURL,
 	})
@@ -1370,6 +1350,37 @@ func (h *StorefrontHandler) emailOrderCreatedToBuyer(
 		HTML:     htmlBody,
 		Category: "order_created_buyer",
 	})
+}
+
+// orderItemLines renders the per-item block both order emails embed.
+//
+// The chosen modifier options go on their own indented line. They used to be
+// dropped entirely: a seller selling shirts made "Ukuran" a required option,
+// and every order mail still read "1x Aceh Sabit - Rp 139.000" with no size
+// on it, so the one thing needed to pack the parcel was the one thing missing.
+// The data was always recorded (order_item_options) — nothing on this path
+// read it. Kept as a single helper because the seller and buyer mails must
+// describe the same order the same way.
+func orderItemLines(items []repository.OrderItemInput) string {
+	var sb strings.Builder
+	for _, it := range items {
+		name := it.ProductName
+		if it.VariantName != "" {
+			name += " (" + it.VariantName + ")"
+		}
+		fmtLine(&sb, it.Quantity, name, it.UnitCents*int64(it.Quantity))
+		for _, m := range it.Modifiers {
+			// "   Ukuran: L" — indented so it reads as a detail of the line
+			// above rather than a second product.
+			sb.WriteString("\n   ")
+			if m.GroupName != "" {
+				sb.WriteString(m.GroupName)
+				sb.WriteString(": ")
+			}
+			sb.WriteString(m.OptionName)
+		}
+	}
+	return sb.String()
 }
 
 func fmtLine(sb *strings.Builder, qty int, name string, total int64) {
