@@ -107,6 +107,9 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	// PrimaryWebOrigin: single canonical URL untuk link email/notif.
 	// WebOrigin (raw, comma-separated) tetap dipakai oleh CORS middleware.
 	publicWebURL := cfg.PrimaryWebOrigin()
+	// The email shell loads the wordmark from the web app's own /public, so it
+	// has to know where that app lives. Set before anything can send.
+	email.SetLogoBase(publicWebURL)
 	fulfiller := fulfillment.New(orders, stores, downloadTokens, mailer, publicWebURL, logger)
 	// Meta (Facebook) Conversions API — server-side Purchase events at the paid
 	// chokepoint. No-op per store until the seller enables Meta in settings.

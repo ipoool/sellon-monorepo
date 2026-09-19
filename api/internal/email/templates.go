@@ -412,6 +412,26 @@ func WrapHTML(body string) string { return wrapHTML(body) }
 
 // table backgrounds, no JS, inline styles only. Tested-in-the-wild
 // across Gmail, Outlook web, and Apple Mail.
+// logoURL is where the email shell loads the SellOn wordmark from. It is set
+// once at startup by SetLogoBase; the default keeps production correct even
+// if that call is ever dropped.
+//
+// It points at the WEB app's own /public asset rather than object storage on
+// purpose. The previous value was a hardcoded Supabase URL, and when that
+// project went away the host stopped resolving (NXDOMAIN) — so every
+// transactional email we sent rendered with a broken image at the top, with
+// nothing in our logs to say so. The web app ships this file with the deploy,
+// so the logo cannot outlive the thing serving it.
+var logoURL = "https://sellon.id/sellon-logo.png"
+
+// SetLogoBase points the email shell at a given web origin. Called once from
+// server construction, before any mail can be sent.
+func SetLogoBase(webOrigin string) {
+	if o := strings.TrimRight(strings.TrimSpace(webOrigin), "/"); o != "" {
+		logoURL = o + "/sellon-logo.png"
+	}
+}
+
 func wrapHTML(body string) string {
 	return `<!doctype html>
 <html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
@@ -420,7 +440,7 @@ func wrapHTML(body string) string {
     <tr><td align="center">
       <table role="presentation" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;max-width:560px;width:100%;padding:32px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
         <tr><td style="padding-bottom:16px;border-bottom:1px solid #e2e8f0;">
-          <img src="https://wcnvffkbarjtfmckznaj.supabase.co/storage/v1/object/public/commons/assets/sellon-logo.png" alt="SellOn" height="28" style="display:block;height:28px;width:auto;border:0;" />
+          <img src="` + logoURL + `" alt="SellOn" height="28" style="display:block;height:28px;width:auto;border:0;" />
         </td></tr>
         <tr><td style="padding-top:24px;padding-bottom:28px;">
           ` + body + `
