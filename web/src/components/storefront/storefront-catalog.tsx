@@ -6,6 +6,7 @@ import Image from "next/image";
 import { Search, Package, Star, Sparkles, RotateCcw, ShoppingBag, ShoppingCart, Plus, Minus } from "lucide-react";
 
 import { formatRupiah } from "@/lib/format";
+import { ProductPrice } from "./product-price";
 import { cn } from "@/lib/utils";
 import { useOptionalCart, cartItemKey } from "@/components/storefront/cart-context";
 import { KioskSplash } from "@/components/storefront/kiosk-splash";
@@ -20,6 +21,7 @@ type StorefrontProduct = {
   slug: string;
   description: string;
   price_cents: number;
+  compare_at_price_cents?: number;
   stock: number;
   photo_urls: string[];
   is_featured: boolean;
@@ -475,9 +477,12 @@ function ProductCard({
         <p className="line-clamp-2 text-sm font-medium text-neutral-900">
           {p.name}
         </p>
-        <p className="font-display text-base font-semibold text-neutral-900">
-          {formatRupiah(p.price_cents)}
-        </p>
+        <ProductPrice
+          priceCents={p.price_cents}
+          compareAtCents={p.compare_at_price_cents}
+          className="text-base text-neutral-900"
+          showBadge
+        />
         {!shouldHideStock(p) && (
           <p className="mt-1 text-xs text-neutral-500">
             {p.stock > 0 ? `${stockWord(p)}: ${p.stock}` : `${stockWord(p)} habis`}
@@ -721,9 +726,12 @@ function ProductListItem({
           </p>
         )}
         <div className="mt-auto flex items-baseline justify-between gap-2">
-          <p className="font-display text-base font-semibold text-neutral-900 sm:text-lg">
-            {formatRupiah(p.price_cents)}
-          </p>
+          <ProductPrice
+            priceCents={p.price_cents}
+            compareAtCents={p.compare_at_price_cents}
+            className="text-base text-neutral-900 sm:text-lg"
+            showBadge
+          />
           {!shouldHideStock(p) && (
             <p className="text-xs text-neutral-500">
               {p.stock > 0 ? `${stockWord(p)}: ${p.stock}` : `${stockWord(p)} habis`}
@@ -799,14 +807,12 @@ function ProductHeroCard({
             {p.name}
           </p>
           <div className="flex items-baseline justify-between gap-3">
-            <p
-              className={cn(
-                "font-display font-semibold",
-                forceMobile ? "text-sm" : "text-lg sm:text-2xl",
-              )}
-            >
-              {formatRupiah(p.price_cents)}
-            </p>
+            <ProductPrice
+              priceCents={p.price_cents}
+              compareAtCents={p.compare_at_price_cents}
+              className={forceMobile ? "text-sm" : "text-lg sm:text-2xl"}
+              showBadge
+            />
             {!shouldHideStock(p) && p.stock > 0 && (
               <p
                 className={cn(
@@ -865,9 +871,11 @@ function ProductCompactCard({
         <p className="line-clamp-1 text-xs font-medium text-neutral-800">
           {p.name}
         </p>
-        <p className="font-display text-sm font-semibold text-neutral-900">
-          {formatRupiah(p.price_cents)}
-        </p>
+        <ProductPrice
+          priceCents={p.price_cents}
+          compareAtCents={p.compare_at_price_cents}
+          className="text-sm text-neutral-900"
+        />
       </div>
     </Link>
   );
@@ -944,14 +952,11 @@ function ProductMagazineCard({
             >
               {p.name}
             </p>
-            <p
-              className={cn(
-                "font-display font-semibold",
-                forceMobile ? "text-sm" : "text-base sm:text-lg",
-              )}
-            >
-              {formatRupiah(p.price_cents)}
-            </p>
+            <ProductPrice
+              priceCents={p.price_cents}
+              compareAtCents={p.compare_at_price_cents}
+              className={forceMobile ? "text-sm" : "text-base sm:text-lg"}
+            />
           </div>
         </div>
       </Link>
@@ -982,9 +987,11 @@ function ProductMagazineCard({
         <p className="line-clamp-2 text-sm font-medium text-neutral-900">
           {p.name}
         </p>
-        <p className="font-display text-sm font-semibold text-neutral-900">
-          {formatRupiah(p.price_cents)}
-        </p>
+        <ProductPrice
+          priceCents={p.price_cents}
+          compareAtCents={p.compare_at_price_cents}
+          className="text-sm text-neutral-900"
+        />
       </div>
     </Link>
   );

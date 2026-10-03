@@ -12,13 +12,17 @@ import (
 )
 
 type Product struct {
-	ID                  uuid.UUID
-	StoreID             uuid.UUID
-	CategoryID          *uuid.UUID
-	Name                string
-	Slug                string
-	Description         string
-	PriceCents          int64
+	ID          uuid.UUID
+	StoreID     uuid.UUID
+	CategoryID  *uuid.UUID
+	Name        string
+	Slug        string
+	Description string
+	PriceCents  int64
+	// CompareAtPriceCents is the "harga coret" — the pre-discount price shown
+	// struck through beside the real one. 0 = no discount shown. Display
+	// only: orders are always priced from PriceCents / the variant price.
+	CompareAtPriceCents int64
 	Stock               int
 	LowStockThreshold   int
 	WeightG             int
@@ -73,7 +77,8 @@ func NewProductRepo(pool *pgxpool.Pool) *ProductRepo {
 
 var ErrProductNotFound = errors.New("product not found")
 
-const productColumns = `id, store_id, category_id, name, slug, description, price_cents, stock,
+const productColumns = `id, store_id, category_id, name, slug, description, price_cents,
+	compare_at_price_cents, stock,
 	low_stock_threshold, weight_g, length_cm, width_cm, height_cm,
 	status, photo_urls, has_variants, is_featured,
 	product_type, digital_delivery_url, digital_file_url, digital_instructions, gtin,
@@ -85,7 +90,7 @@ const productColumns = `id, store_id, category_id, name, slug, description, pric
 func scanProduct(row pgx.Row, p *Product) error {
 	return row.Scan(
 		&p.ID, &p.StoreID, &p.CategoryID, &p.Name, &p.Slug, &p.Description,
-		&p.PriceCents, &p.Stock, &p.LowStockThreshold,
+		&p.PriceCents, &p.CompareAtPriceCents, &p.Stock, &p.LowStockThreshold,
 		&p.WeightG, &p.LengthCm, &p.WidthCm, &p.HeightCm,
 		&p.Status, &p.PhotoURLs, &p.HasVariants, &p.IsFeatured,
 		&p.ProductType, &p.DigitalDeliveryURL, &p.DigitalFileURL, &p.DigitalInstructions, &p.GTIN,
@@ -243,12 +248,15 @@ func (r *ProductRepo) FindByID(ctx context.Context, storeID, id uuid.UUID) (*Pro
 }
 
 type SaveProductInput struct {
-	StoreID             uuid.UUID
-	CategoryID          *uuid.UUID
-	Name                string
-	Slug                string
-	Description         string
-	PriceCents          int64
+	StoreID     uuid.UUID
+	CategoryID  *uuid.UUID
+	Name        string
+	Slug        string
+	Description string
+	PriceCents  int64
+	// CompareAtPriceCents: "harga coret". 0 = off. Validated at the handler
+	// (must exceed PriceCents), display-only everywhere downstream.
+	CompareAtPriceCents int64
 	Stock               int
 	LowStockThreshold   int
 	WeightG             int
@@ -279,9 +287,10 @@ func (r *ProductRepo) Create(ctx context.Context, in SaveProductInput) (*Product
 		                     weight_g, length_cm, width_cm, height_cm, status, photo_urls, is_featured,
 		                     product_type, digital_delivery_url, digital_file_url, digital_instructions, gtin,
 		                     takeaway_enabled, takeaway_charge_cents, takeaway_material_id,
-		                     access_validity_value, access_validity_unit, digital_stock_limit)
+		                     access_validity_value, access_validity_unit, digital_stock_limit,
+		                     compare_at_price_cents)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-		        $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
+		        $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
 		RETURNING ` + productColumns
 	var p Product
 	if err := scanProduct(r.pool.QueryRow(ctx, q,
@@ -292,6 +301,7 @@ func (r *ProductRepo) Create(ctx context.Context, in SaveProductInput) (*Product
 		in.TakeawayEnabled, in.TakeawayChargeCents, in.TakeawayMaterialID,
 		in.AccessValidityValue, in.AccessValidityUnit,
 		in.DigitalStockLimit,
+		in.CompareAtPriceCents,
 	), &p); err != nil {
 		return nil, err
 	}
@@ -318,6 +328,7 @@ func (r *ProductRepo) Update(ctx context.Context, id uuid.UUID, in SaveProductIn
 		    access_validity_value = $25,
 		    access_validity_unit = $26,
 		    digital_stock_limit = $27,
+		    compare_at_price_cents = $28,
 		    updated_at = now()
 		WHERE id = $1 AND store_id = $2
 		RETURNING ` + productColumns
@@ -330,6 +341,7 @@ func (r *ProductRepo) Update(ctx context.Context, id uuid.UUID, in SaveProductIn
 		in.TakeawayEnabled, in.TakeawayChargeCents, in.TakeawayMaterialID,
 		in.AccessValidityValue, in.AccessValidityUnit,
 		in.DigitalStockLimit,
+		in.CompareAtPriceCents,
 	), &p); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrProductNotFound

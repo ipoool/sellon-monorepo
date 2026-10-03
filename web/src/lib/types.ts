@@ -111,6 +111,9 @@ export type Product = {
   slug: string;
   description: string;
   price_cents: number;
+  // "Harga coret" shown struck through on the storefront. 0 = no discount.
+  // Display only — never used to price an order.
+  compare_at_price_cents: number;
   stock: number;
   low_stock_threshold: number;
   weight_g: number;

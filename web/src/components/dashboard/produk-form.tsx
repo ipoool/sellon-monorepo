@@ -70,6 +70,21 @@ export function ProdukForm({ initial }: Props) {
   const [deleting, setDeleting] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
   const [categoryId, setCategoryId] = useState<string>(initial?.category_id ?? "");
+  // Mirrored in state (not just read on submit) so the seller sees the
+  // discount percentage, and the "must exceed the real price" warning, while
+  // typing instead of after a round-trip to the API.
+  const [priceInput, setPriceInput] = useState<number>(
+    initial ? Math.round(initial.price_cents / 100) : 0,
+  );
+  const [compareAtInput, setCompareAtInput] = useState<number>(
+    initial?.compare_at_price_cents
+      ? Math.round(initial.compare_at_price_cents / 100)
+      : 0,
+  );
+  const discountPercent =
+    compareAtInput > priceInput && compareAtInput > 0
+      ? Math.round(((compareAtInput - priceInput) / compareAtInput) * 100)
+      : 0;
   const [variants, setVariants] = useState<VariantDraft[]>(() =>
     (initial?.variants ?? []).map((v: Variant) => ({
       id: v.id,
@@ -215,6 +230,10 @@ export function ProdukForm({ initial }: Props) {
       slug: String(fd.get("slug") ?? ""),
       description: String(fd.get("description") ?? ""),
       price_cents: priceCents,
+      compare_at_price_cents: Math.max(
+        0,
+        Number(fd.get("compare_at_price") ?? 0),
+      ) * 100,
       stock: isPhysical ? stock : 0,
       low_stock_threshold: isPhysical
         ? Math.max(0, Number(fd.get("low_stock_threshold") ?? 0))
@@ -492,7 +511,60 @@ export function ProdukForm({ initial }: Props) {
               step={1}
               defaultValue={initial ? Math.round(initial.price_cents / 100) : ""}
               placeholder={hasVariants ? "Otomatis dari varian" : "35000"}
+              onChange={(e) => setPriceInput(Number(e.target.value))}
             />
+          </div>
+          {/* Harga coret. Optional, and deliberately sitting right next to the
+              real price so the relationship between the two is obvious. */}
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center gap-1.5">
+              <Label htmlFor="compare_at_price">Harga sebelum diskon (Rp)</Label>
+              <span className="group relative inline-flex">
+                <Info
+                  className="size-3.5 cursor-help text-neutral-400 hover:text-neutral-600"
+                  aria-hidden
+                />
+                <span
+                  role="tooltip"
+                  className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-64 -translate-x-1/2 rounded-lg bg-neutral-900 px-3 py-2.5 text-xs leading-relaxed text-white opacity-0 shadow-popout transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
+                >
+                  <p className="font-semibold text-white">Harga coret di storefront</p>
+                  <p className="mt-1 text-neutral-200">
+                    Muncul dicoret kecil di samping harga jual, misal{" "}
+                    <strong>Rp 90.000</strong> dengan <s>Rp 100.000</s> di sebelahnya.
+                  </p>
+                  <p className="mt-1 text-neutral-200">
+                    Isi hanya kalau produk ini memang sedang diskon. Harga yang
+                    dibayar pembeli tetap harga jual di sebelah kiri.
+                  </p>
+                </span>
+              </span>
+            </div>
+            <Input
+              id="compare_at_price"
+              name="compare_at_price"
+              type="number"
+              min={0}
+              step={1}
+              defaultValue={
+                initial?.compare_at_price_cents
+                  ? Math.round(initial.compare_at_price_cents / 100)
+                  : ""
+              }
+              placeholder="Kosongkan kalau tidak diskon"
+              onChange={(e) => setCompareAtInput(Number(e.target.value))}
+            />
+            {compareAtInput > 0 && compareAtInput <= priceInput && (
+              <p role="alert" className="text-xs font-medium text-danger">
+                Harus lebih besar dari harga jual, kalau tidak coretannya bukan
+                diskon.
+              </p>
+            )}
+            {discountPercent > 0 && (
+              <p className="text-xs text-success">
+                Pembeli lihat hemat {discountPercent}%
+              </p>
+            )}
           </div>
           {isPhysical && (
             <div className="flex flex-col gap-1.5">

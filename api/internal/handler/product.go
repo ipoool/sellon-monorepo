@@ -132,6 +132,7 @@ type productDTO struct {
 	Slug                 string       `json:"slug"`
 	Description          string       `json:"description"`
 	PriceCents           int64        `json:"price_cents"`
+	CompareAtPriceCents  int64        `json:"compare_at_price_cents"`
 	Stock                int          `json:"stock"`
 	LowStockThreshold    int          `json:"low_stock_threshold"`
 	WeightG              int          `json:"weight_g"`
@@ -240,7 +241,7 @@ func toProductDTO(p *repository.Product, variants []repository.Variant) productD
 	return productDTO{
 		ID: p.ID.String(), CategoryID: categoryID,
 		Name: p.Name, Slug: p.Slug, Description: p.Description,
-		PriceCents: p.PriceCents, Stock: p.Stock,
+		PriceCents: p.PriceCents, CompareAtPriceCents: p.CompareAtPriceCents, Stock: p.Stock,
 		LowStockThreshold: p.LowStockThreshold,
 		WeightG:           p.WeightG, LengthCm: p.LengthCm, WidthCm: p.WidthCm, HeightCm: p.HeightCm,
 		Status: p.Status, PhotoURLs: p.PhotoURLs, HasVariants: p.HasVariants,
@@ -599,6 +600,7 @@ type productInput struct {
 	Slug                string             `json:"slug"`
 	Description         string             `json:"description"`
 	PriceCents          int64              `json:"price_cents"`
+	CompareAtPriceCents int64              `json:"compare_at_price_cents"`
 	Stock               int                `json:"stock"`
 	LowStockThreshold   int                `json:"low_stock_threshold"`
 	WeightG             int                `json:"weight_g"`
@@ -703,6 +705,18 @@ func (in productInput) sanitize() (repository.SaveProductInput, error) {
 	}
 	if in.PriceCents < 0 || in.Stock < 0 {
 		return repository.SaveProductInput{}, errors.New("harga dan stok tidak boleh negatif")
+	}
+	// Harga coret. 0 turns it off; anything else has to be an actual
+	// discount. Storing a value at or below the real price would render a
+	// struck-through number that is not a saving — misleading to the buyer
+	// and confusing to the seller, who would see their input silently
+	// ignored by the display rule.
+	if in.CompareAtPriceCents < 0 {
+		return repository.SaveProductInput{}, errors.New("harga sebelum diskon tidak boleh negatif")
+	}
+	if in.CompareAtPriceCents > 0 && in.CompareAtPriceCents <= in.PriceCents {
+		return repository.SaveProductInput{},
+			errors.New("harga sebelum diskon harus lebih besar dari harga jual")
 	}
 	if in.Status == "" {
 		in.Status = "active"
@@ -850,7 +864,7 @@ func (in productInput) sanitize() (repository.SaveProductInput, error) {
 	return repository.SaveProductInput{
 		CategoryID: categoryID,
 		Name:       in.Name, Slug: in.Slug, Description: in.Description,
-		PriceCents: in.PriceCents, Stock: in.Stock,
+		PriceCents: in.PriceCents, CompareAtPriceCents: in.CompareAtPriceCents, Stock: in.Stock,
 		LowStockThreshold: in.LowStockThreshold,
 		WeightG:           in.WeightG, LengthCm: in.LengthCm, WidthCm: in.WidthCm, HeightCm: in.HeightCm,
 		Status: in.Status, PhotoURLs: in.PhotoURLs,
@@ -1293,19 +1307,20 @@ func (h *ProductHandler) Duplicate(w http.ResponseWriter, r *http.Request) {
 	// before publishing. Stock is preserved; the seller usually wants the
 	// same baseline.
 	copyIn := repository.SaveProductInput{
-		StoreID:           store.ID,
-		CategoryID:        src.CategoryID,
-		Name:              copyName,
-		Slug:              newSlug,
-		Description:       src.Description,
-		PriceCents:        src.PriceCents,
-		Stock:             src.Stock,
-		LowStockThreshold: src.LowStockThreshold,
-		WeightG:           src.WeightG,
-		LengthCm:          src.LengthCm,
-		WidthCm:           src.WidthCm,
-		HeightCm:          src.HeightCm,
-		Status:            "inactive",
+		StoreID:             store.ID,
+		CategoryID:          src.CategoryID,
+		Name:                copyName,
+		Slug:                newSlug,
+		Description:         src.Description,
+		PriceCents:          src.PriceCents,
+		CompareAtPriceCents: src.CompareAtPriceCents,
+		Stock:               src.Stock,
+		LowStockThreshold:   src.LowStockThreshold,
+		WeightG:             src.WeightG,
+		LengthCm:            src.LengthCm,
+		WidthCm:             src.WidthCm,
+		HeightCm:            src.HeightCm,
+		Status:              "inactive",
 		// Force a non-nil slice so the NOT NULL photo_urls column accepts
 		// the INSERT even when the source had no photos.
 		PhotoURLs:           append([]string{}, src.PhotoURLs...),

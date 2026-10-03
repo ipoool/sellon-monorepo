@@ -165,6 +165,8 @@ export function NonPhysicalProductForm({
       slug: String(fd.get("slug") ?? ""),
       description: String(fd.get("description") ?? ""),
       price_cents: Math.round(Number(fd.get("price") ?? 0)) * 100,
+      compare_at_price_cents:
+        Math.max(0, Number(fd.get("compare_at_price") ?? 0)) * 100,
       // Non-physical: no stock, dimensions, variants, takeaway, or barcode.
       stock: 0,
       low_stock_threshold: 0,
@@ -341,6 +343,28 @@ export function NonPhysicalProductForm({
               defaultValue={initial ? Math.round(initial.price_cents / 100) : ""}
               placeholder="49000"
             />
+          </div>
+          {/* Same "harga coret" as the physical form — an ebook or course goes
+              on sale just as often as a shirt. */}
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="compare_at_price">Harga sebelum diskon (Rp)</Label>
+            <Input
+              id="compare_at_price"
+              name="compare_at_price"
+              type="number"
+              min={0}
+              step={1}
+              defaultValue={
+                initial?.compare_at_price_cents
+                  ? Math.round(initial.compare_at_price_cents / 100)
+                  : ""
+              }
+              placeholder="Kosongkan kalau tidak diskon"
+            />
+            <p className="text-xs text-neutral-500">
+              Tampil dicoret di samping harga jual. Harus lebih besar dari
+              harga jual.
+            </p>
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="status">Status</Label>

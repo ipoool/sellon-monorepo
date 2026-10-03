@@ -188,17 +188,20 @@ type publicStoreDTO struct {
 }
 
 type publicProductDTO struct {
-	ID          string   `json:"id"`
-	CategoryID  string   `json:"category_id"`
-	Name        string   `json:"name"`
-	Slug        string   `json:"slug"`
-	Description string   `json:"description"`
-	PriceCents  int64    `json:"price_cents"`
-	Stock       int      `json:"stock"`
-	PhotoURLs   []string `json:"photo_urls"`
-	IsFeatured  bool     `json:"is_featured"`
-	HasVariants bool     `json:"has_variants"`
-	ProductType string   `json:"product_type"` // "physical" | "digital"
+	ID          string `json:"id"`
+	CategoryID  string `json:"category_id"`
+	Name        string `json:"name"`
+	Slug        string `json:"slug"`
+	Description string `json:"description"`
+	PriceCents  int64  `json:"price_cents"`
+	// CompareAtPriceCents drives the struck-through "harga coret" on the
+	// storefront. 0 = none. Display only — checkout re-prices from the DB.
+	CompareAtPriceCents int64    `json:"compare_at_price_cents"`
+	Stock               int      `json:"stock"`
+	PhotoURLs           []string `json:"photo_urls"`
+	IsFeatured          bool     `json:"is_featured"`
+	HasVariants         bool     `json:"has_variants"`
+	ProductType         string   `json:"product_type"` // "physical" | "digital"
 	// TrackStock = the product enforces a finite quantity (Stock is meaningful):
 	// always true for physical; for non-physical only when the seller set a sales
 	// cap (digital_stock_limit). When false, Stock is unlimited and ignored. This
@@ -490,7 +493,8 @@ func toPublicProduct(p *repository.Product) publicProductDTO {
 	return publicProductDTO{
 		ID: p.ID.String(), CategoryID: categoryID,
 		Name: p.Name, Slug: p.Slug, Description: p.Description,
-		PriceCents: p.PriceCents, Stock: stockOut, PhotoURLs: p.PhotoURLs,
+		PriceCents: p.PriceCents, CompareAtPriceCents: p.CompareAtPriceCents,
+		Stock: stockOut, PhotoURLs: p.PhotoURLs,
 		IsFeatured: p.IsFeatured, HasVariants: p.HasVariants,
 		ProductType: productType,
 		TrackStock:  trackStock,

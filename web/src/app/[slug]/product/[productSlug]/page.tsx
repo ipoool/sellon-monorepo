@@ -11,6 +11,7 @@ import { MetaViewContent } from "@/components/storefront/meta-view-content";
 import { BuyerShareButton } from "@/components/storefront/buyer-share-button";
 import { ProductPhotoGallery } from "@/components/storefront/product-photo-gallery";
 import { formatRupiah } from "@/lib/format";
+import { ProductPrice } from "@/components/storefront/product-price";
 import { themeStyleForHue } from "@/lib/storefront-theme";
 import { pageMetadata } from "@/lib/seo";
 import type { ModifierGroup } from "@/lib/types";
@@ -35,6 +36,7 @@ type Product = {
   slug: string;
   description: string;
   price_cents: number;
+  compare_at_price_cents?: number;
   stock: number;
   photo_urls: string[];
   has_variants: boolean;
@@ -189,11 +191,22 @@ export default async function ProductDetailPage({
                 <h1 className="font-display text-2xl font-semibold tracking-tight text-neutral-900">
                   {product.name}
                 </h1>
-                <p className="mt-3 font-display text-3xl font-semibold text-neutral-900">
-                  {product.has_variants && variants.length > 1
-                    ? `Mulai ${formatRupiah(minPrice)}`
-                    : formatRupiah(minPrice)}
-                </p>
+                {/* Compared against the price actually shown (the cheapest
+                    variant when there are several), so the struck number is
+                    always the "before" of the number beside it. */}
+                <div className="mt-3">
+                  <ProductPrice
+                    priceCents={minPrice}
+                    compareAtCents={product.compare_at_price_cents}
+                    className="text-3xl text-neutral-900"
+                    prefix={
+                      product.has_variants && variants.length > 1
+                        ? "Mulai"
+                        : undefined
+                    }
+                    showBadge
+                  />
+                </div>
                 <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
                   <div className="flex flex-wrap items-center gap-2">
                     {!hideStockBadge &&
