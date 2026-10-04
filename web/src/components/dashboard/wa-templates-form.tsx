@@ -8,6 +8,7 @@ import { Save, Info, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { WA_TEMPLATE_DEFAULTS } from "@/lib/wa-templates";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
@@ -32,14 +33,7 @@ const templates: TemplateSpec[] = [
     title: "Alert Pesanan Baru (Owner)",
     description:
       "Otomatis dikirim ke nomor notifikasi di atas setiap kali ada order masuk via storefront. Placeholder pakai {{kurawal_dobel}} karena sistem yang mengisi otomatis.",
-    defaultBody: `🛒 *Pesanan baru!*
-
-No: *{{order_number}}*
-Dari: {{customer_name}} ({{customer_whatsapp}})
-Total: *Rp {{total}}*
-Metode bayar: {{payment_method}}
-
-Lihat detail: {{order_link}}`,
+    defaultBody: WA_TEMPLATE_DEFAULTS.new_order_alert,
     placeholders: [
       "order_number",
       "customer_name",
@@ -60,17 +54,7 @@ Lihat detail: {{order_link}}`,
     title: "Konfirmasi Pesanan (buyer)",
     description:
       "Dipakai saat seller klik \"Konfirmasi Pesanan\" di halaman detail pesanan. WhatsApp terbuka dengan pesan sudah terisi, tinggal kirim.",
-    defaultBody: `Hai {{nama_pembeli}}! 👋
-
-Pesananmu sudah masuk:
-
-📦 Pesanan: {{nomor_pesanan}}
-{{ringkasan_produk}}
-
-💰 Total: {{total}}
-🚚 Kurir: {{kurir}}
-
-Terima kasih sudah pesan di {{nama_toko}}.`,
+    defaultBody: WA_TEMPLATE_DEFAULTS.order_confirmation,
     placeholders: [
       "nama_pembeli",
       "nama_toko",
@@ -78,6 +62,7 @@ Terima kasih sudah pesan di {{nama_toko}}.`,
       "ringkasan_produk",
       "total",
       "kurir",
+      "order_link",
     ],
     tier: "free",
   },
@@ -86,16 +71,13 @@ Terima kasih sudah pesan di {{nama_toko}}.`,
     title: "Kirim Link Pembayaran (buyer)",
     description:
       "Dipakai saat seller klik \"Kirim Link Pembayaran\" di halaman detail pesanan.",
-    defaultBody: `Halo {{nama_pembeli}}, ini link pembayaran untuk pesanan {{nomor_pesanan}}:
-
-{{link_pembayaran}}
-
-Total: {{total}}`,
+    defaultBody: WA_TEMPLATE_DEFAULTS.payment_link,
     placeholders: [
       "nama_pembeli",
       "nomor_pesanan",
       "link_pembayaran",
       "total",
+      "order_link",
     ],
     tier: "free",
   },
@@ -104,17 +86,13 @@ Total: {{total}}`,
     title: "Update Resi (buyer)",
     description:
       "Dipakai saat seller klik \"Kirim Update Resi\" di halaman detail pesanan setelah input nomor resi.",
-    defaultBody: `Halo {{nama_pembeli}}! Pesananmu {{nomor_pesanan}} sudah saya kirim. 📦
-
-🚚 Kurir: {{kurir}}
-📋 Nomor Resi: {{nomor_resi}}
-
-Estimasi sampai 2-4 hari. Makasih! 🙏`,
+    defaultBody: WA_TEMPLATE_DEFAULTS.shipping_update,
     placeholders: [
       "nama_pembeli",
       "nomor_pesanan",
       "kurir",
       "nomor_resi",
+      "order_link",
     ],
     tier: "free",
   },

@@ -439,6 +439,7 @@ export default async function OrderDetailPage({
           <OrderQuickWA
             order={order}
             storeName={store?.name ?? "Toko"}
+            storeSlug={store?.slug ?? ""}
             templates={templatesRes?.templates ?? {}}
           />
 

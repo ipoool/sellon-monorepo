@@ -8,9 +8,15 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { fillTemplate, waLink } from "@/lib/whatsapp";
 import { formatRupiah } from "@/lib/format";
+import { WA_TEMPLATE_DEFAULTS } from "@/lib/wa-templates";
 import type { OrderDetail } from "@/lib/types";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+// The buyer-facing origin, not the API one — {{order_link}} is a link the
+// BUYER opens, so it has to point at the storefront.
+const siteUrl = (
+  process.env.NEXT_PUBLIC_SITE_URL || "https://sellon.id"
+).replace(/\/$/, "");
 
 type TemplateKey = "order_confirmation" | "payment_link" | "shipping_update";
 
@@ -29,38 +35,16 @@ type PendingSend = {
 type Props = {
   order: OrderDetail;
   storeName: string;
+  // Needed to build {{order_link}} — the public order page lives at
+  // /{slug}/order/{number}.
+  storeSlug: string;
   // Seller's custom WA templates from the whatsapp_templates table.
-  // Per-key: empty / missing → we use the hardcoded fallback below.
-  // Edited via Pengaturan → WhatsApp.
+  // Per-key: empty / missing → WA_TEMPLATE_DEFAULTS, the same text the
+  // Pengaturan → WhatsApp editor shows.
   templates: Record<string, string>;
 };
 
-const fallbackOrderConfirmation = `Hai {{nama_pembeli}}! 👋
-
-Pesananmu sudah masuk:
-
-📦 Pesanan: {{nomor_pesanan}}
-{{ringkasan_produk}}
-
-💰 Total: {{total}}
-🚚 Kurir: {{kurir}}
-
-Terima kasih sudah pesan di {{nama_toko}}.`;
-
-const fallbackPaymentLink = `Halo {{nama_pembeli}}, ini link pembayaran untuk pesanan {{nomor_pesanan}}:
-
-{{link_pembayaran}}
-
-Total: {{total}}`;
-
-const fallbackShippingUpdate = `Halo {{nama_pembeli}}! Pesananmu {{nomor_pesanan}} sudah saya kirim. 📦
-
-🚚 Kurir: {{kurir}}
-📋 Nomor Resi: {{nomor_resi}}
-
-Estimasi sampai 2-4 hari. Makasih! 🙏`;
-
-export function OrderQuickWA({ order, storeName, templates }: Props) {
+export function OrderQuickWA({ order, storeName, storeSlug, templates }: Props) {
   const [pending, setPending] = useState<PendingSend | null>(null);
 
   // Pick the seller's customized body if they set one, else fallback.
@@ -86,6 +70,15 @@ export function OrderQuickWA({ order, storeName, templates }: Props) {
     kurir: order.courier || "—",
     nomor_resi: order.tracking_number || "—",
     link_pembayaran: order.payment_url || "(belum tersedia)",
+    // Public order page: the buyer checks status, uploads payment proof and
+    // tracks delivery there without needing an account. Built on the platform
+    // origin rather than a custom domain so it works for every store.
+    // Same "(belum tersedia)" convention as link_pembayaran above: an empty
+    // string would leave the seller's message with a dangling "Cek status
+    // pesanan di sini:" and nothing after it.
+    order_link: storeSlug
+      ? `${siteUrl}/${storeSlug}/order/${order.order_number}`
+      : "(belum tersedia)",
     batas_waktu: "24 jam",
     link_tracking: order.tracking_number
       ? `https://cekresi.com/?noresi=${order.tracking_number}`
@@ -152,7 +145,7 @@ export function OrderQuickWA({ order, storeName, templates }: Props) {
           onClick={() =>
             stage(
               "order_confirmation",
-              bodyFor("order_confirmation", fallbackOrderConfirmation),
+              bodyFor("order_confirmation", WA_TEMPLATE_DEFAULTS.order_confirmation),
             )
           }
         >
@@ -166,7 +159,7 @@ export function OrderQuickWA({ order, storeName, templates }: Props) {
           className="justify-start"
           disabled={!canSendPayment}
           onClick={() =>
-            stage("payment_link", bodyFor("payment_link", fallbackPaymentLink))
+            stage("payment_link", bodyFor("payment_link", WA_TEMPLATE_DEFAULTS.payment_link))
           }
         >
           <Receipt className="size-4" aria-hidden />
@@ -186,7 +179,7 @@ export function OrderQuickWA({ order, storeName, templates }: Props) {
           onClick={() =>
             stage(
               "shipping_update",
-              bodyFor("shipping_update", fallbackShippingUpdate),
+              bodyFor("shipping_update", WA_TEMPLATE_DEFAULTS.shipping_update),
             )
           }
         >
