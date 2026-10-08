@@ -14,7 +14,7 @@ import { KioskCheckout, useKioskCheckout } from "@/components/storefront/kiosk/k
 import type { KioskModifierGroup, KioskVariant, PublicPayment } from "@/components/storefront/kiosk/types";
 import type { LayoutConfig } from "@/lib/types";
 
-type StorefrontProduct = {
+export type StorefrontProduct = {
   id: string;
   category_id: string;
   name: string;
@@ -73,7 +73,8 @@ export type ProductLayout =
   | "feed"
   | "kiosk"
   | "katalog"
-  | "poster";
+  | "poster"
+  | "landing";
 
 type Props = {
   storeSlug: string;
@@ -432,7 +433,7 @@ export function StorefrontCatalog({
   return body;
 }
 
-function ProductCard({
+export function ProductCard({
   p,
   storeSlug,
   featured = false,

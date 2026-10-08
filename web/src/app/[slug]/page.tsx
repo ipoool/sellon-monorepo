@@ -16,6 +16,8 @@ import { Avatar } from "@/components/ui/avatar";
 import { StorefrontCatalog } from "@/components/storefront/storefront-catalog";
 import { StoreHoursPopup } from "@/components/storefront/store-hours-popup";
 import { BannerCarousel } from "@/components/storefront/banner-carousel";
+import { AnnouncementBar, LandingStorefront } from "@/components/storefront/landing-storefront";
+import { normalizeLandingConfig } from "@/lib/landing-config";
 import { waLink } from "@/lib/whatsapp";
 import { themeStyleForHue } from "@/lib/storefront-theme";
 import { pageMetadata } from "@/lib/seo";
@@ -53,7 +55,8 @@ type StorefrontStore = {
     | "feed"
     | "kiosk"
     | "katalog"
-    | "poster";
+    | "poster"
+  | "landing";
   show_hours_public?: boolean;
   show_social_public?: boolean;
   footer_text?: string;
@@ -192,6 +195,13 @@ export default async function StorefrontPage({
   const showHours = store.show_hours_public !== false; // default true
   const showSocial = store.show_social_public !== false;
 
+  // Landing template config, read once through the normalizer so a stale or
+  // hand-edited blob can never take the public page down.
+  const landing =
+    store.product_layout === "landing"
+      ? normalizeLandingConfig(store.layout_config?.landing)
+      : null;
+
   return (
     <div
       className="min-h-svh bg-neutral-50"
@@ -209,6 +219,9 @@ export default async function StorefrontPage({
         </div>
       )}
 
+      {landing?.announcement.enabled && landing.announcement.text && (
+        <AnnouncementBar text={landing.announcement.text} linkUrl={landing.announcement.link_url} />
+      )}
       <header className="border-b border-neutral-200 bg-white">
         <Container>
           <div className="flex flex-col gap-5 py-8 sm:flex-row sm:items-center sm:gap-6">
@@ -321,7 +334,7 @@ export default async function StorefrontPage({
 
       <main className="py-8 lg:py-12">
         <Container>
-          {banners.length > 0 && (
+          {banners.length > 0 && store.product_layout !== "landing" && (
             <BannerCarousel banners={banners} className="mb-6" />
           )}
           {orderLimitReached ? (
@@ -357,17 +370,29 @@ export default async function StorefrontPage({
             </div>
           ) : null}
 
-          <StorefrontCatalog
-            storeSlug={slug}
-            products={products}
-            categories={categories}
-            layout={store.product_layout ?? "grid"}
-            layoutConfig={store.layout_config}
-            storeName={store.name}
-            payment={payment}
-            acceptingOrders={store.accepting_orders}
-            acceptingOrdersReason={store.accepting_orders_reason}
-          />
+          {store.product_layout === "landing" ? (
+            // Section-based home page (slider / product rows / banners),
+            // composed by the seller in Pengaturan → Storefront. The chrome
+            // above and below is shared with every other layout.
+            <LandingStorefront
+              storeSlug={slug}
+              config={landing!}
+              products={products}
+              categories={categories}
+            />
+          ) : (
+            <StorefrontCatalog
+              storeSlug={slug}
+              products={products}
+              categories={categories}
+              layout={store.product_layout ?? "grid"}
+              layoutConfig={store.layout_config}
+              storeName={store.name}
+              payment={payment}
+              acceptingOrders={store.accepting_orders}
+              acceptingOrdersReason={store.accepting_orders_reason}
+            />
+          )}
         </Container>
       </main>
 

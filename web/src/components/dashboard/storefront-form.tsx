@@ -21,6 +21,7 @@ import {
   MonitorSmartphone,
   BookOpen,
   RectangleVertical,
+  LayoutTemplate,
   Settings2,
   Plus,
   Trash2,
@@ -35,6 +36,8 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { ImageUploadInput } from "@/components/dashboard/image-upload-input";
 import { LayoutPreviewDialog } from "@/components/dashboard/layout-preview-dialog";
+import { LandingConfigDialog } from "@/components/dashboard/landing-config-dialog";
+import { landingImageUrls, normalizeLandingConfig } from "@/lib/landing-config";
 import { usePlan } from "@/components/dashboard/plan-context";
 import { cn } from "@/lib/utils";
 import type { Store, LayoutConfig } from "@/lib/types";
@@ -78,6 +81,17 @@ export function StorefrontForm({ initial }: { initial: Store }) {
   );
   const [pending, setPending] = useState(false);
   const [kioskConfigOpen, setKioskConfigOpen] = useState(false);
+  const [landingConfigOpen, setLandingConfigOpen] = useState(false);
+  // Categories feed the "per kategori" product row in the landing editor.
+  // Loaded once, lazily, the first time that editor opens.
+  const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => {
+    if (!landingConfigOpen || categories.length > 0) return;
+    fetch(`${apiBase}/api/v1/categories`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : { categories: [] }))
+      .then((d: { categories?: { id: string; name: string }[] }) => setCategories(d.categories ?? []))
+      .catch(() => {});
+  }, [landingConfigOpen, categories.length]);
   // Refs tracking URL gambar yang sudah benar-benar ter-save di server.
   // Pakai untuk hapus file lama di object storage saat seller ganti
   // logo / banner. Tidak pakai initial.{logo,banner}_url langsung karena
@@ -85,9 +99,12 @@ export function StorefrontForm({ initial }: { initial: Store }) {
   // di-mount-saat-load.
   const savedLogoRef = useRef<string>(initial.logo_url ?? "");
   const savedBannerRef = useRef<string>(initial.banner_url ?? "");
-  const savedSlidesRef = useRef<string[]>(
-    (initial.layout_config?.kiosk?.banner_slides ?? []).map((s) => s.image_url),
-  );
+  const savedSlidesRef = useRef<string[]>([
+    ...(initial.layout_config?.kiosk?.banner_slides ?? []).map((s) => s.image_url),
+    ...(initial.layout_config?.landing
+      ? landingImageUrls(normalizeLandingConfig(initial.layout_config.landing))
+      : []),
+  ]);
 
   // Single source of truth untuk PUT storefront. onSubmit + onApply
   // layout sama-sama panggil ini, beda hanya nilai product_layout
@@ -125,8 +142,12 @@ export function StorefrontForm({ initial }: { initial: Store }) {
     savedLogoRef.current = logoUrl;
     savedBannerRef.current = bannerUrl;
 
-    const currentSlides =
-      layoutConfig.kiosk?.banner_slides?.map((s) => s.image_url) ?? [];
+    const currentSlides = [
+      ...(layoutConfig.kiosk?.banner_slides?.map((s) => s.image_url) ?? []),
+      ...(layoutConfig.landing
+        ? landingImageUrls(normalizeLandingConfig(layoutConfig.landing))
+        : []),
+    ];
     for (const oldUrl of savedSlidesRef.current) {
       if (oldUrl && !currentSlides.includes(oldUrl)) {
         void deleteUploaded(oldUrl);
@@ -315,7 +336,17 @@ export function StorefrontForm({ initial }: { initial: Store }) {
         value={productLayout}
         onChange={applyLayout}
         onPreview={setPreviewLayout}
-        onConfigClick={() => setKioskConfigOpen(true)}
+        onConfigClick={(key) =>
+          key === "landing" ? setLandingConfigOpen(true) : setKioskConfigOpen(true)
+        }
+      />
+
+      <LandingConfigDialog
+        open={landingConfigOpen}
+        onClose={() => setLandingConfigOpen(false)}
+        config={normalizeLandingConfig(layoutConfig.landing)}
+        onChange={(landing) => setLayoutConfig((prev) => ({ ...prev, landing }))}
+        categories={categories}
       />
 
       <KioskConfigDialog
@@ -330,6 +361,7 @@ export function StorefrontForm({ initial }: { initial: Store }) {
           storeSlug={initial.slug}
           initialLayout={previewLayout}
           currentLayout={productLayout}
+          layoutConfig={layoutConfig}
           onClose={() => setPreviewLayout(null)}
           onApply={applyLayout}
         />
@@ -423,7 +455,8 @@ type LayoutKey =
   | "feed"
   | "kiosk"
   | "katalog"
-  | "poster";
+  | "poster"
+  | "landing";
 
 // Label bahasa Indonesia untuk tiap layout — dipakai di toast dan
 // tempat lain yang menampilkan nama layout ke seller. Harus tetap
@@ -438,6 +471,7 @@ const layoutLabels: Record<LayoutKey, string> = {
   kiosk: "Kiosk",
   katalog: "Katalog",
   poster: "Poster",
+  landing: "Landing",
 };
 
 const LAYOUTS: Array<{
@@ -508,6 +542,13 @@ const LAYOUTS: Array<{
       "Foto portrait besar full-width dengan teks overlay. Cocok untuk fashion, lifestyle, atau produk premium.",
     icon: RectangleVertical,
   },
+  {
+    key: "landing",
+    label: "Landing",
+    description:
+      "Halaman depan ala toko online: bar promo, slider, baris \"Best Seller\", banner, dan section yang bisa kamu susun sendiri.",
+    icon: LayoutTemplate,
+  },
 ];
 
 function ProductLayoutCard({
@@ -521,7 +562,7 @@ function ProductLayoutCard({
   value: LayoutKey;
   onChange: (key: LayoutKey) => void;
   onPreview: (key: LayoutKey) => void;
-  onConfigClick?: () => void;
+  onConfigClick?: (key: LayoutKey) => void;
 }) {
   return (
     <Card className={cn(locked && "border-warning/40 bg-warning/5")}>
@@ -613,12 +654,12 @@ function ProductLayoutCard({
 
               {/* Actions */}
               <div className="mt-auto flex gap-2">
-                {opt.key === "kiosk" && active && onConfigClick && (
+                {(opt.key === "kiosk" || opt.key === "landing") && active && onConfigClick && (
                   <button
                     type="button"
-                    onClick={onConfigClick}
-                    title="Konfigurasi Kiosk"
-                    aria-label="Konfigurasi Kiosk"
+                    onClick={() => onConfigClick(opt.key)}
+                    title={opt.key === "landing" ? "Susun halaman" : "Konfigurasi Kiosk"}
+                    aria-label={opt.key === "landing" ? "Susun halaman" : "Konfigurasi Kiosk"}
                     className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-neutral-200 bg-white text-neutral-600 transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-brand-700"
                   >
                     <Settings2 className="size-3.5" aria-hidden />

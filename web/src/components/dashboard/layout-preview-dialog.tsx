@@ -16,6 +16,7 @@ import {
   MonitorSmartphone,
   BookOpen,
   RectangleVertical,
+  LayoutTemplate,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,9 @@ import {
   type ProductLayout,
 } from "@/components/storefront/storefront-catalog";
 import { showError } from "@/lib/toast";
+import { LandingStorefront } from "@/components/storefront/landing-storefront";
+import { normalizeLandingConfig } from "@/lib/landing-config";
+import type { LayoutConfig } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -43,6 +47,7 @@ const LAYOUTS: Array<{
   { key: "kiosk", label: "Kiosk", icon: MonitorSmartphone },
   { key: "katalog", label: "Katalog", icon: BookOpen },
   { key: "poster", label: "Poster", icon: RectangleVertical },
+  { key: "landing", label: "Landing", icon: LayoutTemplate },
 ];
 
 type DeviceFrame = "desktop" | "mobile";
@@ -71,6 +76,9 @@ type StorefrontHeaderPreview = {
 
 type Props = {
   storeSlug: string;
+  // Unsaved form state, so previewing the landing template shows the
+  // sections the seller is editing rather than the last saved version.
+  layoutConfig?: LayoutConfig;
   // Layout yang sedang di-preview (boleh beda dari yang ter-save).
   initialLayout: ProductLayout;
   // Layout yang sedang ter-save di state form parent — dipakai untuk
@@ -82,6 +90,7 @@ type Props = {
 
 export function LayoutPreviewDialog({
   storeSlug,
+  layoutConfig,
   initialLayout,
   currentLayout,
   onClose,
@@ -269,13 +278,23 @@ export function LayoutPreviewDialog({
             )}
 
             <div className={cn(device === "mobile" ? "p-3" : "p-0 pt-4")}>
-              <StorefrontCatalog
-                storeSlug={storeSlug}
-                products={products}
-                categories={[]}
-                layout={previewLayout}
-                forceMobile={device === "mobile"}
-              />
+              {previewLayout === "landing" ? (
+                <LandingStorefront
+                  storeSlug={storeSlug}
+                  config={normalizeLandingConfig(layoutConfig?.landing)}
+                  products={products}
+                  categories={[]}
+                  forceMobile={device === "mobile"}
+                />
+              ) : (
+                <StorefrontCatalog
+                  storeSlug={storeSlug}
+                  products={products}
+                  categories={[]}
+                  layout={previewLayout}
+                  forceMobile={device === "mobile"}
+                />
+              )}
             </div>
           </div>
         )}

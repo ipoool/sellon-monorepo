@@ -11,6 +11,9 @@ export type KioskLayoutConfig = {
 
 export type LayoutConfig = {
   kiosk?: KioskLayoutConfig;
+  // "Landing" template: sections, background, announcement. Shape owned by
+  // lib/landing-config.ts; stored raw, always read through normalizeLandingConfig.
+  landing?: import("./landing-config").LandingConfig;
 };
 
 export type Store = {
