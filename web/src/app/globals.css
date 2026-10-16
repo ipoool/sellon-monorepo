@@ -83,6 +83,32 @@
     background-size: 24px 24px;
   }
 
+  /* Soft, low-contrast patterns for tinted panels. Tint by setting
+     --pattern-color on the element; the fallback is a faint brand ink. */
+  .bg-soft-dots {
+    background-image: radial-gradient(
+      circle at 1px 1px,
+      var(--pattern-color, oklch(0.55 0.09 145 / 0.14)) 1.5px,
+      transparent 0
+    );
+    background-size: 22px 22px;
+  }
+
+  .bg-soft-grid {
+    background-image:
+      linear-gradient(
+        to right,
+        var(--pattern-color, oklch(0.55 0.09 145 / 0.09)) 1px,
+        transparent 1px
+      ),
+      linear-gradient(
+        to bottom,
+        var(--pattern-color, oklch(0.55 0.09 145 / 0.09)) 1px,
+        transparent 1px
+      );
+    background-size: 34px 34px;
+  }
+
   /* Soft brand gradient untuk CTA banner / hero accents. */
   .bg-gradient-brand-soft {
     background-image: linear-gradient(

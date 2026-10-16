@@ -1,20 +1,15 @@
 import { Header } from "@/components/layout/header";
 import { Footer } from "@/components/layout/footer";
 import { Hero } from "@/components/home/hero";
-import { Features } from "@/components/home/features";
 import { Pricing } from "@/components/home/pricing";
-import { TrustBar } from "@/components/marketing/trust-bar";
+import { StoreShowcase, type ShowcaseStore } from "@/components/home/store-showcase";
+import { Highlights } from "@/components/home/highlights";
+import { FeatureExplorer } from "@/components/home/feature-explorer";
+import { MobileApp } from "@/components/home/mobile-app";
 import { HowItWorks } from "@/components/marketing/how-it-works";
-import { Testimonials } from "@/components/marketing/testimonials";
-import { Faq } from "@/components/marketing/faq";
+import { Faq, FAQ_ITEMS } from "@/components/marketing/faq";
 import { CtaBanner } from "@/components/marketing/cta-banner";
 import { BlogPreview } from "@/components/marketing/blog-preview";
-import { ResellerSection } from "@/components/marketing/reseller-section";
-import { BeforeAfter } from "@/components/marketing/before-after";
-import { CourseSection } from "@/components/marketing/course-section";
-import { PosSection } from "@/components/marketing/pos-section";
-import { OfflineSection } from "@/components/marketing/offline-section";
-import { MetaSection } from "@/components/marketing/meta-section";
 import { getMe } from "@/lib/server-auth";
 import { publicServerApi } from "@/lib/server-api";
 import type { PublicPlan } from "@/lib/types";
@@ -32,30 +27,13 @@ export const metadata = pageMetadata({
   path: "/",
 });
 
-// FAQ items mirror what's rendered in <Faq /> below — wired here for
-// JSON-LD so Google can show rich answers in search.
-const landingFaqItems = [
-  {
-    question: "Apakah SellOn benar-benar gratis?",
-    answer:
-      "Ya, tier Gratis tidak ada biaya bulanan. Kamu hanya bayar ke Midtrans (jika pakai pembayaran online) sesuai tarif resmi mereka. SellOn tidak memotong uang dari setiap transaksi.",
-  },
-  {
-    question: "Apakah pembeli harus install aplikasi?",
-    answer:
-      "Tidak. Pembeli buka link katalog di browser HP, pilih produk, lalu konfirmasi via WhatsApp atau bayar online. Tidak perlu install apa pun.",
-  },
-  {
-    question: "Bagaimana dengan rekening pembayaran?",
-    answer:
-      "Uang dari pembeli langsung masuk ke rekening Midtrans atau bank kamu sendiri. SellOn tidak menahan dana - kamu pegang kontrol penuh.",
-  },
-  {
-    question: "Bisa pakai untuk produk digital?",
-    answer:
-      "Bisa. Upload file atau link akses, pembeli otomatis dapat link download setelah pembayaran lunas. Tidak perlu kirim manual.",
-  },
-];
+// The first six questions <Faq /> renders, as JSON-LD so Google can show rich
+// answers in search. Read from the component's own array so the structured
+// data can never drift from the copy on the page.
+const landingFaqItems = FAQ_ITEMS.slice(0, 6).map(({ q, a }) => ({
+  question: q,
+  answer: a,
+}));
 
 // Hardcoded fallback so the landing page still renders if the API is
 // unreachable during SSR. Mirrors the seed values in migration 0018.
@@ -130,11 +108,17 @@ const fallbackPlans: PublicPlan[] = [
 ];
 
 export default async function Home() {
-  const [me, plansRes] = await Promise.all([
+  const [me, plansRes, showcaseRes] = await Promise.all([
     getMe(),
     publicServerApi<{ plans: PublicPlan[] }>("/api/v1/plans"),
+    publicServerApi<{ stores: ShowcaseStore[] }>(
+      "/api/v1/storefront/showcase?limit=4",
+    ),
   ]);
   const plans = plansRes?.plans?.length ? plansRes.plans : fallbackPlans;
+  // No fallback here on purpose: an unreachable API hides the proof section
+  // rather than inventing stores to fill it.
+  const showcase = showcaseRes?.stores ?? [];
 
   return (
     <div>
@@ -148,17 +132,15 @@ export default async function Home() {
       <Header me={me} />
       <main>
         <Hero />
-        <TrustBar />
-        <BeforeAfter />
-        <Features />
-        <CourseSection />
-        <PosSection />
-        <OfflineSection />
-        <ResellerSection />
-        <MetaSection />
+        {/* Real stores, not testimonials: every card links to a live
+            storefront the visitor can check. See PRODUCT.md on why the old
+            invented statistics and quotes are gone. */}
+        <StoreShowcase stores={showcase} />
+        <Highlights />
+        <FeatureExplorer />
+        <MobileApp />
         <HowItWorks />
         <Pricing plans={plans} />
-        <Testimonials />
         <Faq />
         <BlogPreview />
         <CtaBanner />

@@ -8,13 +8,23 @@ export function CtaBanner() {
     <div className="py-16 lg:py-20">
       <Container>
         <div className="relative overflow-hidden rounded-2xl bg-gradient-brand px-8 py-14 text-center shadow-popout sm:px-14 sm:py-16">
+          {/* Soft pattern, not a hard dot screen: a wide diagonal weave plus
+              one off-centre glow, so the band reads as texture rather than
+              as a visible grid of dots over the headline. */}
           <div
-            className="absolute inset-0 opacity-20"
+            className="absolute inset-0"
             aria-hidden
             style={{
               backgroundImage:
-                "radial-gradient(circle, rgba(255,255,255,0.4) 1px, transparent 1px)",
-              backgroundSize: "20px 20px",
+                "repeating-linear-gradient(135deg, rgba(255,255,255,0.07) 0 2px, transparent 2px 22px)",
+            }}
+          />
+          <div
+            className="absolute inset-0"
+            aria-hidden
+            style={{
+              backgroundImage:
+                "radial-gradient(60% 90% at 18% 0%, rgba(255,255,255,0.22) 0%, transparent 70%)",
             }}
           />
           <div className="relative mx-auto max-w-3xl">
