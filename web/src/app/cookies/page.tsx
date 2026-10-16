@@ -164,10 +164,10 @@ export default async function CookiePage() {
                 <p>
                   Pertanyaan tentang cookie? Email{" "}
                   <a
-                    href="mailto:privasi@sellon.id"
+                    href="mailto:halo@sellon.id"
                     className="font-medium text-brand-600 hover:text-brand-700"
                   >
-                    privasi@sellon.id
+                    halo@sellon.id
                   </a>
                   . Untuk konteks lebih luas tentang data, lihat{" "}
                   <Link

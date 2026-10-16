@@ -267,10 +267,10 @@ export default async function PrivasiPage() {
                   <p className="mt-3">
                     Permintaan dapat dikirim ke{" "}
                     <a
-                      href="mailto:privasi@sellon.id"
+                      href="mailto:halo@sellon.id"
                       className="font-medium text-brand-600 hover:text-brand-700"
                     >
-                      privasi@sellon.id
+                      halo@sellon.id
                     </a>{" "}
                     dan akan diproses dalam waktu maksimal 30 hari kerja.
                   </p>
@@ -294,7 +294,7 @@ export default async function PrivasiPage() {
                     SellOn ditujukan untuk pengguna berusia 17 tahun ke atas.
                     Kami tidak secara sengaja mengumpulkan data dari anak di
                     bawah umur. Kalau Anda tahu ada akun yang dibuat oleh anak
-                    di bawah umur, mohon laporkan ke privasi@sellon.id supaya
+                    di bawah umur, mohon laporkan ke halo@sellon.id supaya
                     kami bisa hapus.
                   </p>
                 </Article>
@@ -319,10 +319,10 @@ export default async function PrivasiPage() {
                     <p className="mt-1 text-neutral-600">
                       Email:{" "}
                       <a
-                        href="mailto:privasi@sellon.id"
+                        href="mailto:halo@sellon.id"
                         className="font-medium text-brand-600"
                       >
-                        privasi@sellon.id
+                        halo@sellon.id
                       </a>
                     </p>
                   </div>
