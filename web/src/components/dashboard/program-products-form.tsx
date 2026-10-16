@@ -164,6 +164,8 @@ export function ProgramProductsForm({
                         <img
                           src={product.photo_urls[0]}
                           alt={product.name}
+                          loading="lazy"
+                          decoding="async"
                           className="size-10 shrink-0 rounded-md border border-neutral-200 object-cover"
                         />
                       ) : (

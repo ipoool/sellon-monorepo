@@ -17,8 +17,6 @@ import {
 import { Container } from "@/components/layout/container";
 import { Header } from "@/components/layout/header";
 import { Footer } from "@/components/layout/footer";
-import { Section } from "@/components/layout/section";
-import { Badge } from "@/components/ui/badge";
 import { getMe } from "@/lib/server-auth";
 import { articles, categorySlug } from "@/lib/guides-articles";
 import { pageMetadata } from "@/lib/seo";
@@ -106,20 +104,26 @@ export default async function PanduanPage() {
     <>
       <Header me={me} />
       <main>
-        {/* Hero */}
-        <section className="relative overflow-hidden py-16 lg:py-24">
+        {/* Hero — same wash and type scale as the home and About heroes. */}
+        <section className="relative overflow-hidden">
           <div
             aria-hidden
-            className="bg-dot-grid pointer-events-none absolute inset-x-0 bottom-0 top-0 -z-10 opacity-50 [mask-image:radial-gradient(ellipse_60%_50%_at_50%_30%,black,transparent_80%)]"
+            className="pointer-events-none absolute left-1/2 top-[-320px] h-[700px] w-[1500px] -translate-x-1/2"
+            style={{
+              background:
+                "radial-gradient(ellipse at center, oklch(0.94 0.06 145 / 0.55) 0%, oklch(0.97 0.025 145 / 0.45) 45%, oklch(1 0 0 / 0) 72%)",
+            }}
           />
           <Container>
-            <div className="mx-auto max-w-2xl text-center">
-              <Badge variant="brand">Panduan UMKM</Badge>
-              <h1 className="mt-4 font-display text-4xl font-semibold tracking-tight text-neutral-900 sm:text-5xl lg:text-6xl">
+            <div className="relative mx-auto max-w-[58ch] pb-10 pt-12 text-center lg:pt-14">
+              <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-brand-700">
+                Panduan UMKM
+              </p>
+              <h1 className="mt-3 font-display text-[34px] font-bold leading-[1.1] tracking-[-0.02em] text-neutral-900 sm:text-5xl lg:text-[52px] lg:tracking-[-0.022em]">
                 Belajar bareng SellOn
               </h1>
-              <p className="mt-5 text-lg leading-relaxed text-neutral-600">
-                Panduan praktis dari sesama UMKM Indonesia - bukan teori, bukan
+              <p className="mx-auto mt-4 text-[15px] leading-relaxed text-neutral-600 sm:text-base">
+                Panduan praktis dari sesama UMKM Indonesia — bukan teori, bukan
                 copy-paste dari luar negeri. Yang sudah terbukti di warung dan
                 toko online beneran.
               </p>
@@ -128,34 +132,32 @@ export default async function PanduanPage() {
         </section>
 
         {/* Featured articles */}
-        <Section bg="alt" tight>
+        <section className="py-12 lg:py-16">
           <Container>
-            <div className="mb-10 flex items-end justify-between">
-              <div>
-                <p className="text-sm font-medium text-brand-600">
-                  Pilihan Editor
-                </p>
-                <h2 className="mt-2 font-display text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
-                  Yang sering dibaca minggu ini
-                </h2>
-              </div>
-            </div>
+            <h2 className="font-display text-2xl font-bold tracking-[-0.015em] text-neutral-900 sm:text-3xl">
+              Yang sering dibaca minggu ini
+            </h2>
+            <p className="mt-2 max-w-[56ch] text-[15px] leading-relaxed text-neutral-600">
+              Pilihan editor, diurutkan dari yang paling sering dibuka.
+            </p>
 
-            <div className="grid gap-6 lg:grid-cols-3">
+            <div className="mt-6 grid gap-3.5 lg:grid-cols-3">
               {featured.map((a) => (
                 <Link
                   key={a.slug}
                   href={`/guides/${a.slug}`}
-                  className="group flex flex-col gap-4 rounded-xl border border-neutral-200 bg-white p-6 shadow-card transition-all hover:-translate-y-0.5 hover:shadow-elevated"
+                  className="group flex flex-col gap-3 rounded-2xl border border-neutral-200 bg-white p-6 transition-all hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-elevated"
                 >
-                  <Badge variant="brand">{a.category}</Badge>
-                  <h3 className="font-display text-xl font-semibold leading-snug tracking-tight text-neutral-900 group-hover:text-brand-700">
+                  <span className="w-fit rounded-full bg-brand-50 px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-brand-700">
+                    {a.category}
+                  </span>
+                  <h3 className="font-display text-lg font-bold leading-snug tracking-[-0.01em] text-neutral-900 group-hover:text-brand-700">
                     {a.title}
                   </h3>
                   <p className="text-sm leading-relaxed text-neutral-600">
                     {a.excerpt}
                   </p>
-                  <div className="mt-auto flex items-center gap-1.5 text-xs text-neutral-500">
+                  <div className="mt-auto flex items-center gap-1.5 pt-2 text-xs text-neutral-500">
                     <Clock className="size-3.5" aria-hidden />
                     <span>{a.readingTime}</span>
                   </div>
@@ -163,39 +165,38 @@ export default async function PanduanPage() {
               ))}
             </div>
           </Container>
-        </Section>
+        </section>
 
         {/* Category grid */}
-        <Section>
+        <section className="py-12 lg:py-16">
           <Container>
-            <div className="mx-auto max-w-2xl text-center">
-              <p className="text-sm font-medium text-brand-600">Topik</p>
-              <h2 className="mt-2 font-display text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
-                Telusuri berdasarkan topik
-              </h2>
-              <p className="mt-4 text-lg text-neutral-600">
-                Dari setup awal sampai scaling - kami coba bahas semua sisi
-                jualan online buat UMKM.
-              </p>
-            </div>
+            <h2 className="font-display text-2xl font-bold tracking-[-0.015em] text-neutral-900 sm:text-3xl">
+              Telusuri berdasarkan topik
+            </h2>
+            <p className="mt-2 max-w-[56ch] text-[15px] leading-relaxed text-neutral-600">
+              Dari setup awal sampai scaling — kami coba bahas semua sisi
+              jualan online buat UMKM.
+            </p>
 
-            <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {categories.map(({ icon: Icon, title, description, count }) => {
+            <div className="mt-6 grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
+              {categories.map(({ icon: Icon, title, description, count }, i) => {
+                const chip = ["bg-brand-500", "bg-info", "bg-warning", "bg-danger"][i % 4];
+                const tint = ["bg-brand-50", "bg-info/10", "bg-warning/10", "bg-danger/10"][i % 4];
                 const inner = (
                   <>
-                    <div className="flex size-10 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
-                      <Icon className="size-5" strokeWidth={2} aria-hidden />
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-neutral-900 group-hover:text-brand-700">
+                    <span className={`grid size-11 place-items-center rounded-2xl ${chip}`}>
+                      <Icon className="size-[22px] text-white" aria-hidden />
+                    </span>
+                    <div className="mt-4">
+                      <h3 className="font-display text-lg font-bold leading-snug text-neutral-900">
                         {title}
                       </h3>
                       <p className="mt-2 text-sm leading-relaxed text-neutral-600">
                         {description}
                       </p>
                     </div>
-                    <p className="mt-auto text-xs font-medium text-neutral-500">
-                      {count} artikel{count === 0 ? " (segera hadir)" : ""}
+                    <p className="mt-4 text-xs font-bold uppercase tracking-[0.08em] text-neutral-500">
+                      {count} artikel{count === 0 ? " · segera hadir" : ""}
                     </p>
                   </>
                 );
@@ -203,14 +204,14 @@ export default async function PanduanPage() {
                   <Link
                     key={title}
                     href={`/guides/topik/${categorySlug(title)}`}
-                    className="group flex flex-col gap-4 rounded-xl border border-neutral-200 bg-white p-6 shadow-card transition-all hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-elevated"
+                    className={`group flex flex-col rounded-3xl p-6 transition-transform hover:-translate-y-0.5 ${tint}`}
                   >
                     {inner}
                   </Link>
                 ) : (
                   <div
                     key={title}
-                    className="flex flex-col gap-4 rounded-xl border border-neutral-200 bg-white p-6 opacity-70 shadow-card"
+                    className="flex flex-col rounded-3xl bg-neutral-50 p-6 opacity-70"
                   >
                     {inner}
                   </div>
@@ -218,58 +219,56 @@ export default async function PanduanPage() {
               })}
             </div>
           </Container>
-        </Section>
+        </section>
 
         {/* All other articles */}
         {popular.length > 0 && (
-          <Section bg="alt" tight>
+          <section className="pb-16 pt-4 lg:pb-20">
             <Container>
-              <div className="mx-auto max-w-3xl">
-                <h2 className="font-display text-2xl font-semibold tracking-tight text-neutral-900 sm:text-3xl">
-                  Artikel lainnya
-                </h2>
+              <h2 className="font-display text-2xl font-bold tracking-[-0.015em] text-neutral-900 sm:text-3xl">
+                Artikel lainnya
+              </h2>
 
-                <ol className="mt-8 flex flex-col divide-y divide-neutral-200 rounded-xl border border-neutral-200 bg-white shadow-card">
-                  {popular.map((a, i) => (
-                    <li key={a.slug}>
-                      <Link
-                        href={`/guides/${a.slug}`}
-                        className="group flex items-center gap-4 px-5 py-4 transition-colors hover:bg-neutral-50"
-                      >
-                        <span className="font-display text-2xl font-semibold text-neutral-300 group-hover:text-brand-300">
-                          {String(i + 1).padStart(2, "0")}
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate font-medium text-neutral-900 group-hover:text-brand-700">
-                            {a.title}
-                          </p>
-                          <p className="mt-0.5 text-xs text-neutral-500">
-                            {a.category} · {a.readingTime}
-                          </p>
-                        </div>
-                        <ArrowRight
-                          className="size-4 text-neutral-400 transition-transform group-hover:translate-x-0.5 group-hover:text-brand-600"
-                          aria-hidden
-                        />
-                      </Link>
-                    </li>
-                  ))}
-                </ol>
+              <ol className="mt-6 flex flex-col divide-y divide-neutral-200 overflow-hidden rounded-2xl border border-neutral-200 bg-white">
+                {popular.map((a, i) => (
+                  <li key={a.slug}>
+                    <Link
+                      href={`/guides/${a.slug}`}
+                      className="group flex items-center gap-4 px-5 py-4 transition-colors hover:bg-brand-50/50"
+                    >
+                      <span className="font-display text-xl font-bold tabular-nums text-neutral-300 group-hover:text-brand-400">
+                        {String(i + 1).padStart(2, "0")}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-bold text-neutral-900 group-hover:text-brand-700">
+                          {a.title}
+                        </p>
+                        <p className="mt-0.5 text-xs text-neutral-500">
+                          {a.category} · {a.readingTime}
+                        </p>
+                      </div>
+                      <ArrowRight
+                        className="size-4 shrink-0 text-neutral-400 transition-transform group-hover:translate-x-0.5 group-hover:text-brand-600"
+                        aria-hidden
+                      />
+                    </Link>
+                  </li>
+                ))}
+              </ol>
 
-                <p className="mt-6 text-center text-sm text-neutral-500">
-                  Lebih banyak artikel akan dirilis bertahap. Punya request
-                  topik? Kirim ke{" "}
-                  <a
-                    href="mailto:halo@sellon.id"
-                    className="font-medium text-brand-600 hover:text-brand-700"
-                  >
-                    halo@sellon.id
-                  </a>
-                  .
-                </p>
-              </div>
+              <p className="mt-5 text-sm text-neutral-500">
+                Lebih banyak artikel akan dirilis bertahap. Punya request topik?
+                Kirim ke{" "}
+                <a
+                  href="mailto:halo@sellon.id"
+                  className="font-semibold text-brand-700 underline-offset-2 hover:underline"
+                >
+                  halo@sellon.id
+                </a>
+                .
+              </p>
             </Container>
-          </Section>
+          </section>
         )}
       </main>
       <Footer />

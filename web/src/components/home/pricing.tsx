@@ -42,13 +42,14 @@ export function Pricing({ plans }: Props) {
             <h2 className="font-display text-2xl font-bold tracking-[-0.015em] text-neutral-900 sm:text-3xl">
               Bayar tetap per bulan, tanpa potongan per pesanan
             </h2>
-            <p className="mt-2 max-w-[56ch] text-[15px] leading-relaxed text-neutral-600">
-              Jualan 1 pesanan atau 1.000 pesanan, biaya kami tidak naik.
+            {/* Deliberately short: this sits beside the period toggle, so it
+                has to hold one line on a laptop rather than wrap under it. */}
+            <p className="mt-2 text-[15px] leading-relaxed text-neutral-600">
+              Jualan 1 atau 1.000 pesanan, biaya kami tetap sama.
               {yearlyDiscountLabel && (
                 <>
                   {" "}
-                  Hemat {yearlyDiscountLabel.replace("−", "")} kalau pilih
-                  tahunan.
+                  Hemat {yearlyDiscountLabel.replace("−", "")} kalau tahunan.
                 </>
               )}
             </p>

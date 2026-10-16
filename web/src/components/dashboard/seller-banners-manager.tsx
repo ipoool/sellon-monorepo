@@ -426,6 +426,8 @@ export function SellerBannersManager({ initial }: { initial: SellerBanner[] }) {
                 <img
                   src={b.image_url}
                   alt={b.title || "Banner"}
+                  loading="lazy"
+                  decoding="async"
                   className={cn(
                     "w-full shrink-0 rounded-lg object-cover",
                     meta.portrait ? "aspect-[4/5] sm:w-28" : "aspect-[16/5] sm:w-48",

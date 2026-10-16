@@ -229,7 +229,13 @@ export function ProductGrid({ products, categories }: Props) {
                   <div className="flex aspect-square items-center justify-center bg-neutral-100">
                     {p.photo_urls?.[0] ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={p.photo_urls[0]} alt={p.name} className="size-full object-cover" />
+                      <img
+                        src={p.photo_urls[0]}
+                        alt={p.name}
+                        loading="lazy"
+                        decoding="async"
+                        className="size-full object-cover"
+                      />
                     ) : (
                       <Package className="size-9 text-neutral-400" aria-hidden />
                     )}

@@ -3,10 +3,8 @@ import { redirect } from "next/navigation";
 import { ShieldCheck, Zap, Wallet, Sparkles, Handshake } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { EmailAuthForm } from "@/components/auth/email-auth-form";
 import { GoogleSignInButton } from "@/components/auth/google-sign-in-button";
-import { MasukTestimonial } from "@/components/auth/login-testimonial";
 import { getMe } from "@/lib/server-auth";
 import { pageMetadata } from "@/lib/seo";
 
@@ -134,7 +132,7 @@ export default async function MasukPage({
                     <p className="text-xs text-brand-700">Login atau daftar untuk otomatis bergabung ke program.</p>
                   </div>
                 </div>
-                <h1 className="mt-5 font-display text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
+                <h1 className="mt-5 font-display text-3xl font-bold leading-[1.1] tracking-[-0.02em] text-neutral-900 sm:text-4xl">
                   Daftar & langsung mulai resell
                 </h1>
                 <p className="mt-2 text-sm text-neutral-600">
@@ -145,7 +143,7 @@ export default async function MasukPage({
               </>
             ) : (
               <>
-                <h1 className="mt-6 font-display text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
+                <h1 className="mt-6 font-display text-3xl font-bold leading-[1.1] tracking-[-0.02em] text-neutral-900 sm:text-4xl">
                   Masuk untuk mulai jualan
                 </h1>
                 <p className="mt-2 text-sm text-neutral-600">
@@ -163,11 +161,11 @@ export default async function MasukPage({
                 <ul className="flex flex-col gap-4">
                   {benefitsFor(options.emailPassword).map(({ icon: Icon, title, description }) => (
                     <li key={title} className="flex items-start gap-3">
-                      <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
-                        <Icon className="size-5" strokeWidth={2} aria-hidden />
-                      </div>
+                      <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-brand-500">
+                        <Icon className="size-[18px] text-white" strokeWidth={2} aria-hidden />
+                      </span>
                       <div>
-                        <p className="text-sm font-medium text-neutral-900">{title}</p>
+                        <p className="text-sm font-bold text-neutral-900">{title}</p>
                         <p className="mt-0.5 text-sm leading-relaxed text-neutral-600">{description}</p>
                       </div>
                     </li>
@@ -205,12 +203,6 @@ export default async function MasukPage({
                     inviteCode={inviteCode}
                     clientId={options.googleClientId}
                   />
-                  {!options.emailPassword && (
-                    <p className="text-center text-xs leading-relaxed text-neutral-500">
-                      Kalau kamu pernah pakai email yang sama, akunmu tetap yang
-                      itu juga — tinggal lanjutkan dengan Google.
-                    </p>
-                  )}
                   {/* Divider only earns its place when something follows it. */}
                   {options.emailPassword && (
                     <div className="flex items-center gap-3">
@@ -260,31 +252,55 @@ export default async function MasukPage({
           className="absolute -bottom-40 -left-40 size-96 rounded-full bg-brand-300/30 blur-3xl"
         />
 
-        <div className="relative mx-auto flex max-w-md flex-col gap-10 px-12">
-          <Badge variant="brand" className="self-start">
+        {/* The three arguments that are verifiably true, replacing the
+            invented testimonial and the "1.000+ UMKM / 4.9 rating" figures
+            nobody had measured (see PRODUCT.md). */}
+        <div className="relative mx-auto flex max-w-md flex-col gap-8 px-12">
+          <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-white/70 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.1em] text-brand-700">
             <Sparkles className="size-3" aria-hidden />
             Made for UMKM Indonesia
-          </Badge>
+          </span>
 
-          <MasukTestimonial />
+          <h2 className="font-display text-3xl font-bold leading-[1.15] tracking-[-0.02em] text-neutral-900">
+            Tokomu sendiri, bukan lapak di etalase orang lain.
+          </h2>
 
-          <div className="grid grid-cols-3 gap-3 text-center">
+          <ul className="flex flex-col gap-3">
             {[
-              { value: "1.000+", label: "UMKM aktif" },
-              { value: "Rp 0", label: "Take-rate" },
-              { value: "4.9/5", label: "Rating" },
-            ].map((s) => (
-              <div
-                key={s.label}
-                className="rounded-xl border border-white/60 bg-white/60 px-3 py-4 backdrop-blur"
+              {
+                figure: "Rp 0",
+                label: "potongan per pesanan",
+                body: "Kamu pakai akun Midtrans sendiri — dana pembeli tidak pernah mampir ke kami.",
+              },
+              {
+                figure: "1",
+                label: "akun untuk online & offline",
+                body: "Toko online, kasir, QR meja, dan dapur membaca katalog dan stok yang sama.",
+              },
+              {
+                figure: "0",
+                label: "bar sinyal pun tetap jualan",
+                body: "Kasir tetap melayani saat internet mati, lalu tersinkron sendiri.",
+              },
+            ].map((p) => (
+              <li
+                key={p.label}
+                className="rounded-2xl bg-white/80 p-5 shadow-soft backdrop-blur-[2px]"
               >
-                <p className="font-display text-lg font-semibold text-neutral-900">
-                  {s.value}
+                <div className="flex items-baseline gap-2.5">
+                  <span className="font-display text-2xl font-bold leading-none tracking-[-0.02em] text-brand-700">
+                    {p.figure}
+                  </span>
+                  <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-brand-700/70">
+                    {p.label}
+                  </span>
+                </div>
+                <p className="mt-2 text-sm leading-relaxed text-neutral-600">
+                  {p.body}
                 </p>
-                <p className="mt-1 text-xs text-neutral-600">{s.label}</p>
-              </div>
+              </li>
             ))}
-          </div>
+          </ul>
         </div>
       </div>
     </div>

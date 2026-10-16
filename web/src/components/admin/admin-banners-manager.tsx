@@ -275,6 +275,8 @@ export function AdminBannersManager({ initial }: { initial: PlatformBanner[] }) 
                 <img
                   src={b.image_url}
                   alt={b.title || "Banner"}
+                  loading="lazy"
+                  decoding="async"
                   className="aspect-[16/5] w-full shrink-0 rounded-lg object-cover sm:w-48"
                 />
                 <div className="grid flex-1 gap-2 sm:grid-cols-2">

@@ -271,6 +271,8 @@ export function ResellerCatalogView({
                         <img
                           src={product.photo_urls[0]}
                           alt={product.product_name}
+                          loading="lazy"
+                          decoding="async"
                           className="h-full w-full object-cover"
                         />
                       ) : (

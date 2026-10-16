@@ -378,7 +378,13 @@ export function SelfOrderFlow({ slug, storeName, tableId, tableLabel, paymentMod
                   <div className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-neutral-100">
                     {p.photo_url ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={p.photo_url} alt={p.name} className="size-full object-cover" />
+                      <img
+                        src={p.photo_url}
+                        alt={p.name}
+                        loading="lazy"
+                        decoding="async"
+                        className="size-full object-cover"
+                      />
                     ) : (
                       <Package className="size-6 text-neutral-400" aria-hidden />
                     )}
