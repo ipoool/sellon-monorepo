@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sellon/sellon/api/internal/auth"
 	"github.com/sellon/sellon/api/internal/pkg/response"
 )
 
@@ -18,6 +19,21 @@ import (
 // are per process, so with N API replicas the effective limit is N× the
 // configured one; still a hard ceiling where there was none.
 func RateLimit(limit int, window time.Duration) func(http.Handler) http.Handler {
+	return RateLimitKeyed(limit, window, clientIPKey)
+}
+
+// RateLimitKeyed is RateLimit with the bucket key chosen by the caller.
+//
+// IP is the right key for anonymous public endpoints, and the wrong one for
+// authenticated devices: several PhotoBoost booths in the same mall sit behind
+// one NAT, so an IP bucket makes them share a quota and a status poll running
+// every few seconds would collect false 429s. Keying on the booth gives each
+// unit its own ceiling.
+//
+// A key function returning "" means "not identified yet" — the request falls
+// back to the IP bucket rather than sharing one unbounded bucket with every
+// other unidentified caller.
+func RateLimitKeyed(limit int, window time.Duration, key func(*http.Request) string) func(http.Handler) http.Handler {
 	l := &rateLimiter{
 		limit:   limit,
 		window:  window,
@@ -25,8 +41,11 @@ func RateLimit(limit int, window time.Duration) func(http.Handler) http.Handler 
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			key := clientIPKey(r)
-			if retryAfter, ok := l.allow(key); !ok {
+			k := key(r)
+			if k == "" {
+				k = clientIPKey(r)
+			}
+			if retryAfter, ok := l.allow(k); !ok {
 				w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Seconds())+1))
 				response.Error(w, http.StatusTooManyRequests, "terlalu banyak permintaan, coba lagi sebentar")
 				return
@@ -34,6 +53,15 @@ func RateLimit(limit int, window time.Duration) func(http.Handler) http.Handler 
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// BoothKey buckets by the authenticated booth. Must be mounted inside
+// RequireBooth, which is what puts the booth on the context.
+func BoothKey(r *http.Request) string {
+	if b, ok := auth.BoothFromContext(r.Context()); ok {
+		return "booth:" + b.Booth.ID.String()
+	}
+	return ""
 }
 
 type rateBucket struct {

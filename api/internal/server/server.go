@@ -161,8 +161,14 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	digitalDownloadHandler := handler.NewDigitalDownloadHandler(downloadTokens, downloadLogs, stores, logger)
 	buyerOTPs := repository.NewBuyerOTPRepo(pool)
 	buyerCourseHandler := handler.NewBuyerCourseHandler(downloadTokens, buyerOTPs, courseVideos, downloadLogs, mailer, jwtSvc, cfg.IsProd(), logger)
+	photoBooths := repository.NewPhotoBoothRepo(pool)
+	photoBoothSessions := repository.NewPhotoBoothSessionRepo(pool)
+	boothHandler := handler.NewBoothHandler(
+		photoBooths, photoBoothSessions, midtransClient,
+		cfg.PlatformMidtransServerKey, logger,
+	)
 	platformWebhookHandler := handler.NewPlatformWebhookHandler(
-		subscriptions, cfg.PlatformMidtransServerKey, auditLogger, logger,
+		subscriptions, photoBoothSessions, cfg.PlatformMidtransServerKey, auditLogger, logger,
 	)
 	staffHandler := handler.NewStaffHandler(stores, memberships, users, subscriptions, planRepo, mailer, publicWebURL, auditLogger, logger)
 	domainHandler := handler.NewDomainHandler(stores, subscriptions, auditLogger, cfg.CnameTarget, logger)
@@ -184,6 +190,10 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	limitAuth := middleware.RateLimit(15, time.Minute)
 	limitOTP := middleware.RateLimit(20, time.Minute)
 	limitCheckout := middleware.RateLimit(30, time.Minute)
+	// Keyed by booth, not IP: several PhotoBoost units in one mall share a
+	// NAT, and the status poll runs every few seconds.
+	limitBoothPoll := middleware.RateLimitKeyed(240, time.Minute, middleware.BoothKey)
+	limitBoothWrite := middleware.RateLimitKeyed(40, time.Minute, middleware.BoothKey)
 
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
@@ -251,6 +261,19 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 
 		// Public table QR resolution (scan a table → store + table).
 		r.Get("/tables/resolve/{token}", tableHandler.Resolve)
+
+		// PhotoBoost tablets. A device realm of its own: bearer device token,
+		// no user row, no cookie. See middleware.RequireBooth.
+		r.Route("/booth", func(r chi.Router) {
+			r.Use(middleware.RequireBooth(photoBooths, logger))
+			r.With(limitBoothWrite).Get("/config", boothHandler.Config)
+			r.With(limitBoothWrite).Post("/heartbeat", boothHandler.Heartbeat)
+			r.With(limitBoothWrite).Post("/sessions", boothHandler.CreateSession)
+			r.With(limitBoothPoll).Get("/sessions/{number}", boothHandler.GetSession)
+			r.With(limitBoothWrite).Post("/sessions/{number}/charge", boothHandler.Charge)
+			r.With(limitBoothWrite).Post("/sessions/{number}/shots", boothHandler.Shots)
+			r.With(limitBoothWrite).Post("/sessions/{number}/complete", boothHandler.Complete)
+		})
 
 		// Public storefront (no auth)
 		r.Route("/storefront/{slug}", func(r chi.Router) {

@@ -19,13 +19,14 @@ import (
 // /api/v1/webhooks/midtrans/{store_id}.
 type PlatformWebhookHandler struct {
 	subs      *repository.SubscriptionRepo
+	booth     *repository.PhotoBoothSessionRepo
 	serverKey string
 	audit     *audit.Logger
 	logger    *slog.Logger
 }
 
-func NewPlatformWebhookHandler(subs *repository.SubscriptionRepo, serverKey string, audit *audit.Logger, logger *slog.Logger) *PlatformWebhookHandler {
-	return &PlatformWebhookHandler{subs: subs, serverKey: serverKey, audit: audit, logger: logger}
+func NewPlatformWebhookHandler(subs *repository.SubscriptionRepo, booth *repository.PhotoBoothSessionRepo, serverKey string, audit *audit.Logger, logger *slog.Logger) *PlatformWebhookHandler {
+	return &PlatformWebhookHandler{subs: subs, booth: booth, serverKey: serverKey, audit: audit, logger: logger}
 }
 
 type platformNotification struct {
@@ -35,6 +36,9 @@ type platformNotification struct {
 	SignatureKey      string `json:"signature_key"`
 	TransactionStatus string `json:"transaction_status"`
 	FraudStatus       string `json:"fraud_status"`
+	// Midtrans's own id for the transaction. Recorded on a PhotoBoost
+	// session so a support question can be traced into their dashboard.
+	TransactionID string `json:"transaction_id"`
 }
 
 // POST /api/v1/webhooks/platform/midtrans — public endpoint Midtrans hits.
@@ -65,12 +69,21 @@ func (h *PlatformWebhookHandler) Handle(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Only handle our subscription order_ids; ignore anything else.
-	if !strings.HasPrefix(n.OrderID, "SUB-") {
+	// One Midtrans account has one notification URL, so everything the
+	// platform charges arrives here. Route on the order_id prefix: SUB- is
+	// SaaS billing, PB- is a PhotoBoost session, anything else is not ours.
+	switch {
+	case strings.HasPrefix(n.OrderID, "SUB-"):
+		h.handleSubscription(w, r, n)
+	case strings.HasPrefix(n.OrderID, "PB-"):
+		h.handlePhotoBooth(w, r, n)
+	default:
 		response.JSON(w, http.StatusOK, map[string]any{"ignored": true})
-		return
 	}
+}
 
+// handleSubscription settles a SaaS billing invoice.
+func (h *PlatformWebhookHandler) handleSubscription(w http.ResponseWriter, r *http.Request, n platformNotification) {
 	inv, err := h.subs.FindInvoiceByProviderOrderID(r.Context(), n.OrderID)
 	if err != nil {
 		h.logger.Warn("platform webhook: invoice not found", "order_id", n.OrderID)
@@ -158,6 +171,51 @@ func (h *PlatformWebhookHandler) Handle(w http.ResponseWriter, r *http.Request) 
 		response.JSON(w, http.StatusOK, map[string]any{"ok": true, "status": "failed"})
 	default:
 		// pending / authorize — nothing to persist yet.
+		response.JSON(w, http.StatusOK, map[string]any{"ok": true, "status": mapped})
+	}
+}
+
+// handlePhotoBooth settles a PhotoBoost session.
+//
+// The settle itself lives in SettlePhotoBoothSession, shared with the booth's
+// poll-time reconcile, so a lost webhook and a delivered one converge on the
+// same row through the same guard.
+func (h *PlatformWebhookHandler) handlePhotoBooth(w http.ResponseWriter, r *http.Request, n platformNotification) {
+	s, err := h.booth.FindByProviderOrderID(r.Context(), n.OrderID)
+	if err != nil {
+		h.logger.Warn("platform webhook: photobooth session not found", "order_id", n.OrderID)
+		response.Error(w, http.StatusNotFound, "session not found")
+		return
+	}
+
+	mapped := payments.MapTransactionStatus(n.TransactionStatus, n.FraudStatus)
+	switch mapped {
+	case "paid":
+		change, err := SettlePhotoBoothSession(r.Context(), h.booth, h.logger, s, n.GrossAmount, n.TransactionID)
+		if err != nil {
+			h.logger.Error("platform webhook: photobooth settle", "err", err, "order_id", n.OrderID)
+			response.Error(w, http.StatusInternalServerError, "settle failed")
+			return
+		}
+		if change == nil {
+			// Replay, concurrent winner, or an amount mismatch that was
+			// flagged rather than settled. Ack either way so Midtrans stops
+			// retrying; the admin tab is where a mismatch surfaces.
+			response.JSON(w, http.StatusOK, map[string]any{"ok": true, "replay": true})
+			return
+		}
+		h.logger.Info("photobooth session settled",
+			"session", change.SessionNumber, "amount_cents", change.AmountCents)
+		response.JSON(w, http.StatusOK, map[string]any{
+			"ok":      true,
+			"session": change.SessionNumber,
+		})
+	case "failed":
+		// Leave the row alone beyond the expiry the booth already applies: a
+		// 'failed' notification for an unpaid QR is the normal end of an
+		// abandoned session, not an incident.
+		response.JSON(w, http.StatusOK, map[string]any{"ok": true, "status": "failed"})
+	default:
 		response.JSON(w, http.StatusOK, map[string]any{"ok": true, "status": mapped})
 	}
 }

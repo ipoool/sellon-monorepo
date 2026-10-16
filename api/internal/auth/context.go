@@ -15,6 +15,7 @@ const (
 	impersonatorIDKey ctxKey = "imp"
 	buyerKey          ctxKey = "buyer"
 	sessionUserKey    ctxKey = "session_user"
+	boothKey          ctxKey = "booth"
 )
 
 // WithBuyer / BuyerFromContext carry the verified storefront-buyer claims
@@ -84,4 +85,22 @@ func SessionUserFromContext(ctx context.Context) (*repository.User, bool) {
 	}
 	u, ok := v.(*repository.User)
 	return u, ok && u != nil
+}
+
+// WithBooth / BoothFromContext carry an authenticated PhotoBoost device.
+//
+// A third auth realm alongside seller and buyer: a booth is a device, not a
+// person. It has no user row, so none of the user-scoped helpers above apply
+// to it, and keeping it on its own key is what stops the two from crossing.
+func WithBooth(ctx context.Context, b *repository.AuthenticatedBooth) context.Context {
+	return context.WithValue(ctx, boothKey, b)
+}
+
+func BoothFromContext(ctx context.Context) (*repository.AuthenticatedBooth, bool) {
+	v := ctx.Value(boothKey)
+	if v == nil {
+		return nil, false
+	}
+	b, ok := v.(*repository.AuthenticatedBooth)
+	return b, ok && b != nil
 }
