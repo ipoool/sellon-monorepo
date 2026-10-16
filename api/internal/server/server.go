@@ -167,6 +167,9 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 		photoBooths, photoBoothSessions, midtransClient,
 		cfg.PlatformMidtransServerKey, logger,
 	)
+	adminPhotoBoothHandler := handler.NewAdminPhotoBoothHandler(
+		photoBooths, photoBoothSessions, users, platformAuditRepo, logger,
+	)
 	platformWebhookHandler := handler.NewPlatformWebhookHandler(
 		subscriptions, photoBoothSessions, cfg.PlatformMidtransServerKey, auditLogger, logger,
 	)
@@ -618,6 +621,18 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 			r.Route("/admin", func(r chi.Router) {
 				r.Use(middleware.RequireAdmin(users))
 				r.Get("/stats", adminHandler.Stats)
+
+				// PhotoBoost operations: register booths, issue and revoke
+				// device credentials, edit pricing, read the session ledger.
+				r.Route("/photobooth", func(r chi.Router) {
+					r.Get("/booths", adminPhotoBoothHandler.ListBooths)
+					r.Post("/booths", adminPhotoBoothHandler.CreateBooth)
+					r.Put("/booths/{id}", adminPhotoBoothHandler.UpdateBooth)
+					r.Post("/booths/{id}/tokens", adminPhotoBoothHandler.IssueToken)
+					r.Post("/tokens/{tokenID}/revoke", adminPhotoBoothHandler.RevokeToken)
+					r.Put("/settings", adminPhotoBoothHandler.UpdateSettings)
+					r.Get("/sessions", adminPhotoBoothHandler.ListSessions)
+				})
 				r.Get("/users", adminHandler.ListUsers)
 				r.Get("/users/{id}", adminHandler.GetUser)
 				r.Post("/users/{id}/ban", adminHandler.BanUser)

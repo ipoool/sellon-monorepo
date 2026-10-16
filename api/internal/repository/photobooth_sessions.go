@@ -460,3 +460,155 @@ func (r *PhotoBoothSessionRepo) FlagNeedsReview(ctx context.Context, sessionID u
 	`, sessionID, reason)
 	return err
 }
+
+// === Admin listing ===
+
+// AdminSessionRow denormalizes the booth onto the session so the admin table
+// renders without an N+1.
+type AdminSessionRow struct {
+	PhotoBoothSession
+	BoothCodeJoined string
+	BoothNameJoined string
+}
+
+type AdminSessionFilter struct {
+	Search      string
+	Status      string
+	BoothID     *uuid.UUID
+	NeedsReview bool
+	Limit       int
+	Offset      int
+}
+
+// AdminSessionSummary is the stat strip above the table. Computed over the
+// FILTERED set, so it answers "what am I looking at" rather than "what exists".
+type AdminSessionSummary struct {
+	GrossCents     int64
+	PaidCount      int
+	CompletedCount int
+	FailedCount    int
+	ReviewCount    int
+}
+
+// AdminListSessions powers the PhotoBoost tab under Transaksi.
+func (r *PhotoBoothSessionRepo) AdminListSessions(ctx context.Context, f AdminSessionFilter) ([]AdminSessionRow, int, *AdminSessionSummary, error) {
+	if f.Limit <= 0 || f.Limit > 200 {
+		f.Limit = 25
+	}
+	if f.Offset < 0 {
+		f.Offset = 0
+	}
+
+	args := []any{}
+	where := []string{"1=1"}
+	add := func(clause string, v any) {
+		args = append(args, v)
+		where = append(where, fmt.Sprintf(clause, len(args)))
+	}
+	if s := strings.TrimSpace(f.Search); s != "" {
+		add("(s.session_number ILIKE $%d OR b.code ILIKE $%[1]d OR b.name ILIKE $%[1]d)", "%"+s+"%")
+	}
+	if st := strings.TrimSpace(f.Status); st != "" {
+		add("s.payment_status = $%d", st)
+	}
+	if f.BoothID != nil {
+		add("s.booth_id = $%d", *f.BoothID)
+	}
+	if f.NeedsReview {
+		where = append(where, "s.needs_review")
+	}
+	cond := strings.Join(where, " AND ")
+
+	var total int
+	if err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM photobooth_sessions s
+		JOIN photobooth_booths b ON b.id = s.booth_id
+		WHERE `+cond, args...).Scan(&total); err != nil {
+		return nil, 0, nil, err
+	}
+
+	var sum AdminSessionSummary
+	if err := r.pool.QueryRow(ctx, `
+		SELECT
+		  COALESCE(SUM(s.amount_cents) FILTER (WHERE s.payment_status = 'paid'), 0),
+		  COUNT(*) FILTER (WHERE s.payment_status = 'paid'),
+		  COUNT(*) FILTER (WHERE s.status = 'completed'),
+		  COUNT(*) FILTER (WHERE s.status = 'failed'),
+		  COUNT(*) FILTER (WHERE s.needs_review)
+		FROM photobooth_sessions s
+		JOIN photobooth_booths b ON b.id = s.booth_id
+		WHERE `+cond, args...).
+		Scan(&sum.GrossCents, &sum.PaidCount, &sum.CompletedCount,
+			&sum.FailedCount, &sum.ReviewCount); err != nil {
+		return nil, 0, nil, err
+	}
+
+	args = append(args, f.Limit, f.Offset)
+	rows, err := r.pool.Query(ctx, `
+		SELECT `+prefixCols("s", sessionCols)+`, b.code, b.name
+		FROM photobooth_sessions s
+		JOIN photobooth_booths b ON b.id = s.booth_id
+		WHERE `+cond+`
+		ORDER BY s.created_at DESC
+		LIMIT $`+itoa(len(args)-1)+` OFFSET $`+itoa(len(args)), args...)
+	if err != nil {
+		return nil, 0, nil, err
+	}
+	defer rows.Close()
+
+	out := []AdminSessionRow{}
+	for rows.Next() {
+		var row AdminSessionRow
+		s := &row.PhotoBoothSession
+		if err := rows.Scan(
+			&s.ID, &s.BoothID, &s.DeviceTokenID, &s.SessionNumber, &s.IdempotencyKey,
+			&s.AmountCents, &s.ShotsPlanned, &s.ShotsTaken, &s.PrintCopies, &s.FrameID,
+			&s.Status, &s.PaymentStatus,
+			&s.PaymentProvider, &s.PaymentMethod, &s.ProviderOrderID, &s.ProviderTransactionID,
+			&s.QRString, &s.QRURL, &s.QRExpiresAt, &s.ChargePending,
+			&s.NeedsReview, &s.ReviewReason,
+			&s.RefundedAt, &s.RefundAmountCents, &s.RefundReason,
+			&s.ResultURL, &s.AppVersion, &s.FailureReason,
+			&s.CreatedAt, &s.ChargedAt, &s.PaidAt, &s.CapturedAt, &s.PrintedAt,
+			&s.CompletedAt, &s.ExpiredAt, &s.ReconciledAt, &s.UpdatedAt,
+			&row.BoothCodeJoined, &row.BoothNameJoined,
+		); err != nil {
+			return nil, 0, nil, err
+		}
+		out = append(out, row)
+	}
+	return out, total, &sum, rows.Err()
+}
+
+// BoothStats is the fleet overview on the Photo Booth admin page.
+type BoothStats struct {
+	ActiveBooths   int
+	OfflineBooths  int // active, but silent for more than 15 minutes
+	SessionsToday  int
+	GrossTodayCent int64
+}
+
+// FleetStats counts today in Asia/Jakarta, because the people reading it are
+// here and a UTC day boundary would move the first sales of each evening into
+// the previous day.
+func (r *PhotoBoothSessionRepo) FleetStats(ctx context.Context) (*BoothStats, error) {
+	var s BoothStats
+	err := r.pool.QueryRow(ctx, `
+		SELECT
+		  (SELECT COUNT(*) FROM photobooth_booths WHERE status = 'active'),
+		  (SELECT COUNT(*) FROM photobooth_booths
+		    WHERE status = 'active'
+		      AND (last_seen_at IS NULL OR last_seen_at < now() - interval '15 minutes')),
+		  (SELECT COUNT(*) FROM photobooth_sessions
+		    WHERE created_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Jakarta')
+		          AT TIME ZONE 'Asia/Jakarta'),
+		  (SELECT COALESCE(SUM(amount_cents), 0) FROM photobooth_sessions
+		    WHERE payment_status = 'paid'
+		      AND paid_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Jakarta')
+		          AT TIME ZONE 'Asia/Jakarta')
+	`).Scan(&s.ActiveBooths, &s.OfflineBooths, &s.SessionsToday, &s.GrossTodayCent)
+	if err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
