@@ -7,9 +7,11 @@ import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Stat } from "@/components/ui/stat";
 import { StoreRowActions } from "@/components/admin/store-row-actions";
 import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
+import { getAdminStats } from "@/lib/admin-stats";
 import { formatRupiah } from "@/lib/format";
 import type { AdminStoreSummary } from "@/lib/types";
 
@@ -41,7 +43,11 @@ export default async function PlatformTokoPage({
   const url =
     "/api/v1/admin/stores?limit=50" +
     (q ? `&q=${encodeURIComponent(q)}` : "");
-  const data = await serverApi<{ stores: AdminStoreSummary[] }>(url);
+  // Both in one round trip: the table is the page, the stats are context.
+  const [data, stats] = await Promise.all([
+    serverApi<{ stores: AdminStoreSummary[] }>(url),
+    getAdminStats(),
+  ]);
   const stores = data?.stores ?? [];
 
   return (
@@ -50,6 +56,22 @@ export default async function PlatformTokoPage({
       pageTitle="Toko"
       pageSubtitle="Cari toko, lihat performa, klik pemilik untuk impersonate"
     >
+      <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat label="Total toko" value={stats.total_stores.toLocaleString("id-ID")} />
+        <Stat
+          label="Dibuat bulan ini"
+          value={stats.stores_this_month.toLocaleString("id-ID")}
+        />
+        <Stat
+          label="Sudah ada transaksi"
+          value={stats.stores_selling.toLocaleString("id-ID")}
+        />
+        <Stat
+          label="Omzet bulan ini"
+          value={formatRupiah(stats.revenue_month_cents)}
+        />
+      </div>
+
       <Card className="p-0">
         <form
           method="GET"

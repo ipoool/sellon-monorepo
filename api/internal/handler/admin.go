@@ -75,8 +75,11 @@ func (h *AdminHandler) Stats(w http.ResponseWriter, r *http.Request) {
 		"stats": map[string]any{
 			"total_users":         s.TotalUsers,
 			"banned_users":        s.BannedUsers,
+			"users_this_month":    s.UsersThisMonth,
 			"total_stores":        s.TotalStores,
 			"open_stores":         s.OpenStores,
+			"stores_this_month":   s.StoresThisMonth,
+			"stores_selling":      s.StoresSelling,
 			"total_products":      s.TotalProducts,
 			"total_orders":        s.TotalOrders,
 			"orders_this_month":   s.OrdersThisMonth,

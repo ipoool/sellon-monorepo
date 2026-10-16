@@ -21,16 +21,19 @@ func NewAdminRepo(pool *pgxpool.Pool) *AdminRepo {
 }
 
 type AdminStats struct {
-	TotalUsers       int
-	BannedUsers      int
-	TotalStores      int
-	OpenStores       int
-	TotalProducts    int
-	TotalOrders      int
-	OrdersThisMonth  int
-	RevenueAllCents  int64
+	TotalUsers        int
+	BannedUsers       int
+	UsersThisMonth    int
+	TotalStores       int
+	OpenStores        int
+	StoresThisMonth   int
+	StoresSelling     int
+	TotalProducts     int
+	TotalOrders       int
+	OrdersThisMonth   int
+	RevenueAllCents   int64
 	RevenueMonthCents int64
-	PaidSubsCount    int
+	PaidSubsCount     int
 }
 
 // Stats runs the dashboard aggregates in parallel-friendly order. Money
@@ -43,8 +46,14 @@ func (r *AdminRepo) Stats(ctx context.Context) (*AdminStats, error) {
 		SELECT
 		  (SELECT COUNT(*) FROM users),
 		  (SELECT COUNT(*) FROM users WHERE banned_at IS NOT NULL),
+		  (SELECT COUNT(*) FROM users
+		     WHERE created_at >= date_trunc('month', now())),
 		  (SELECT COUNT(*) FROM stores),
 		  (SELECT COUNT(*) FROM stores WHERE is_open),
+		  (SELECT COUNT(*) FROM stores
+		     WHERE created_at >= date_trunc('month', now())),
+		  (SELECT COUNT(DISTINCT store_id) FROM orders
+		     WHERE payment_status = 'paid' AND status <> 'cancelled'),
 		  (SELECT COUNT(*) FROM products),
 		  (SELECT COUNT(*) FROM orders),
 		  (SELECT COUNT(*) FROM orders
@@ -58,8 +67,9 @@ func (r *AdminRepo) Stats(ctx context.Context) (*AdminStats, error) {
 		  (SELECT COUNT(*) FROM subscriptions
 		     WHERE plan IN ('pro','bisnis') AND status = 'active')
 	`).Scan(
-		&out.TotalUsers, &out.BannedUsers,
-		&out.TotalStores, &out.OpenStores,
+		&out.TotalUsers, &out.BannedUsers, &out.UsersThisMonth,
+		&out.TotalStores, &out.OpenStores, &out.StoresThisMonth,
+		&out.StoresSelling,
 		&out.TotalProducts,
 		&out.TotalOrders, &out.OrdersThisMonth,
 		&out.RevenueAllCents, &out.RevenueMonthCents,
@@ -141,20 +151,20 @@ func (r *AdminRepo) ListUsers(ctx context.Context, q string, limit int, before *
 }
 
 type StoreSummary struct {
-	ID              uuid.UUID
-	Slug            string
-	Name            string
-	OwnerUserID     uuid.UUID
-	OwnerEmail      string
-	OwnerName       string
-	IsOpen          bool
-	Plan            string
-	SubStatus       string
-	PeriodEnd       *time.Time
-	ProductsCount   int
-	OrdersCount     int
-	RevenueCents    int64
-	CreatedAt       time.Time
+	ID            uuid.UUID
+	Slug          string
+	Name          string
+	OwnerUserID   uuid.UUID
+	OwnerEmail    string
+	OwnerName     string
+	IsOpen        bool
+	Plan          string
+	SubStatus     string
+	PeriodEnd     *time.Time
+	ProductsCount int
+	OrdersCount   int
+	RevenueCents  int64
+	CreatedAt     time.Time
 }
 
 // ListStoresWithStats powers /admin/stores. q is a substring matched

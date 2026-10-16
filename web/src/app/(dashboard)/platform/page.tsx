@@ -18,42 +18,17 @@ import { Stat } from "@/components/ui/stat";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { getMe } from "@/lib/server-auth";
-import { serverApi } from "@/lib/server-api";
+import { getAdminStats } from "@/lib/admin-stats";
 import { formatRupiah } from "@/lib/format";
 
 export const metadata = { title: "Ringkasan Platform" };
-
-type AdminStats = {
-  total_users: number;
-  banned_users: number;
-  total_stores: number;
-  open_stores: number;
-  total_products: number;
-  total_orders: number;
-  orders_this_month: number;
-  revenue_all_cents: number;
-  revenue_month_cents: number;
-  paid_subs_count: number;
-};
 
 export default async function PlatformOverviewPage() {
   const me = await getMe();
   if (!me) redirect("/login");
   if (me.role !== "admin" || me.is_impersonated) redirect("/dashboard");
 
-  const data = await serverApi<{ stats: AdminStats }>("/api/v1/admin/stats");
-  const s = data?.stats ?? {
-    total_users: 0,
-    banned_users: 0,
-    total_stores: 0,
-    open_stores: 0,
-    total_products: 0,
-    total_orders: 0,
-    orders_this_month: 0,
-    revenue_all_cents: 0,
-    revenue_month_cents: 0,
-    paid_subs_count: 0,
-  };
+  const s = await getAdminStats();
 
   return (
     <DashboardShell
