@@ -1,7 +1,7 @@
 import { Bell, Check } from "lucide-react";
 
 import { Container } from "@/components/layout/container";
-import { ArtMobileApp } from "./feature-art";
+import { FeatureArt } from "./feature-art";
 
 // Deliberately no notify form: outbound email for sellon.id is suspended, so
 // a "kami kabari lewat email" promise is one the product cannot keep today.
@@ -104,7 +104,10 @@ export function MobileApp() {
             </div>
           </div>
 
-          <ArtMobileApp className="relative mx-auto w-full max-w-[340px] text-brand-600" />
+          <FeatureArt
+            name="mobile-app"
+            className="relative mx-auto h-auto w-full max-w-[300px]"
+          />
         </div>
       </Container>
     </section>

@@ -6,7 +6,7 @@ import { ArrowRight, Check } from "lucide-react";
 
 import { Container } from "@/components/layout/container";
 import { HOME_FEATURES } from "@/lib/home-features";
-import { FEATURE_ART } from "./feature-art";
+import { FeatureArt } from "./feature-art";
 
 /**
  * One explorer that replaces six full-height feature sections.
@@ -37,7 +37,6 @@ export function FeatureExplorer() {
 
   const feature = HOME_FEATURES.find((f) => f.key === active) ?? HOME_FEATURES[0];
   const Icon = feature.icon;
-  const Art = FEATURE_ART[feature.key];
 
   return (
     <section id="fitur" className="scroll-mt-20 py-12 lg:py-16">
@@ -134,11 +133,10 @@ export function FeatureExplorer() {
               </Link>
             </div>
 
-            {Art ? (
-              <Art
-                className={`mx-auto w-full max-w-[380px] ${feature.accent}`}
-              />
-            ) : null}
+            <FeatureArt
+              name={feature.key}
+              className="mx-auto h-auto w-full max-w-[380px]"
+            />
           </div>
         </div>
       </Container>
