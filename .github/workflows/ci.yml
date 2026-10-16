@@ -25,6 +25,7 @@ jobs:
     outputs:
       api: ${{ steps.filter.outputs.api }}
       web: ${{ steps.filter.outputs.web }}
+      photoboost: ${{ steps.filter.outputs.photoboost }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -36,6 +37,9 @@ jobs:
               - '.github/workflows/ci.yml'
             web:
               - 'web/**'
+              - '.github/workflows/ci.yml'
+            photoboost:
+              - 'apps/photoboost/**'
               - '.github/workflows/ci.yml'
 
   api:
@@ -77,18 +81,40 @@ jobs:
       - run: pnpm exec tsc --noEmit
       - run: pnpm run lint
 
+  photoboost:
+    name: PhotoBoost (analyze + test)
+    needs: changes
+    if: needs.changes.outputs.photoboost == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/photoboost
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.8
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: dart format --output=none --set-exit-if-changed lib test
+      - run: flutter analyze
+      - run: flutter test
+
   # Single stable status check to require in branch protection. Passes when
   # neither app job FAILED (skipped = no relevant changes = OK).
   ci-pass:
     name: CI passed
-    needs: [api, web]
+    needs: [api, web, photoboost]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Fail if any app check failed
         run: |
-          if [ "${{ needs.api.result }}" = "failure" ] || [ "${{ needs.web.result }}" = "failure" ]; then
-            echo "::error::An app check failed (api=${{ needs.api.result }}, web=${{ needs.web.result }})"
+          if [ "${{ needs.api.result }}" = "failure" ] \
+            || [ "${{ needs.web.result }}" = "failure" ] \
+            || [ "${{ needs.photoboost.result }}" = "failure" ]; then
+            echo "::error::An app check failed (api=${{ needs.api.result }}, web=${{ needs.web.result }}, photoboost=${{ needs.photoboost.result }})"
             exit 1
           fi
-          echo "OK (api=${{ needs.api.result }}, web=${{ needs.web.result }})"
+          echo "OK (api=${{ needs.api.result }}, web=${{ needs.web.result }}, photoboost=${{ needs.photoboost.result }})"
