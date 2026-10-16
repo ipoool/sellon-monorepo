@@ -628,12 +628,18 @@ type ShowcaseStore struct {
 	ProductCount int
 }
 
-// ListShowcaseStores returns stores that have completed at least one PAID
-// order, newest-selling first.
+// ListShowcaseStores returns stores that have an active catalogue AND at
+// least one PAID order, ordered by how much they have actually sold.
 //
 // The paid-order requirement is what makes this proof rather than a
-// directory: an empty shell nobody has bought from never appears. Stores
-// whose owner is banned, or who opted out, are excluded.
+// directory: an empty shell nobody has bought from never appears. Ordering by
+// paid revenue rather than by most recent sale keeps the showcase stable —
+// one order today should not push an established store off the page — and
+// surfaces the sellers for whom the product is demonstrably working.
+//
+// The revenue total never leaves this function: it orders the rows and is not
+// selected, because a seller's turnover is theirs and not marketing copy.
+// Stores whose owner is banned, or who opted out, are excluded.
 func (r *StoreRepo) ListShowcaseStores(ctx context.Context, limit int) ([]ShowcaseStore, error) {
 	if limit <= 0 || limit > 24 {
 		limit = 12
@@ -657,9 +663,12 @@ func (r *StoreRepo) ListShowcaseStores(ctx context.Context, limit int) ([]Showca
 		        WHERE p.store_id = s.id AND p.status = 'active'
 		      )
 		ORDER BY (
-		    SELECT MAX(o.paid_at) FROM orders o
-		    WHERE o.store_id = s.id AND o.payment_status = 'paid'
-		) DESC NULLS LAST
+		    SELECT COALESCE(SUM(o.total_cents), 0) FROM orders o
+		    WHERE o.store_id = s.id
+		      AND o.payment_status = 'paid'
+		      AND o.status <> 'cancelled'
+		) DESC,
+		    s.created_at ASC
 		LIMIT $1
 	`, limit)
 	if err != nil {
