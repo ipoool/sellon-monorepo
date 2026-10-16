@@ -243,6 +243,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 		// Must be registered BEFORE /storefront/{slug} so chi resolves
 		// the static segment "domain-lookup" before the wildcard {slug}.
 		r.Get("/storefront/domain-lookup", storefrontHandler.DomainLookup)
+		r.Get("/storefront/showcase", storefrontHandler.Showcase)
 
 		// Public Caddy on_demand_tls "ask" endpoint — returns 200 only for an
 		// active custom domain so Caddy will obtain a cert for it.

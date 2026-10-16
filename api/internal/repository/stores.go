@@ -245,7 +245,6 @@ func (r *StoreRepo) UpdateMeta(ctx context.Context, storeID uuid.UUID, in Update
 	return err
 }
 
-
 // UpdateCheckoutConfig replaces the store's checkout fields config (raw JSONB).
 func (r *StoreRepo) UpdateCheckoutConfig(ctx context.Context, storeID uuid.UUID, cfg []byte) error {
 	if len(cfg) == 0 {
@@ -610,4 +609,71 @@ func (r *StoreRepo) Update(ctx context.Context, id uuid.UUID, in UpdateStoreInpu
 		return nil, err
 	}
 	return &s, nil
+}
+
+// ShowcaseStore is the marketing-safe public view of a store for the home
+// page's "toko yang sudah jalan" section.
+//
+// Public storefront facts only. A seller's order count, revenue and customer
+// data are theirs and never appear here — the proof this section offers is
+// that the shop exists and can be visited, not how much it earns.
+type ShowcaseStore struct {
+	Slug         string
+	Name         string
+	LogoURL      string
+	BannerURL    string
+	Category     string
+	City         string
+	ThemeHue     int
+	ProductCount int
+}
+
+// ListShowcaseStores returns stores that have completed at least one PAID
+// order, newest-selling first.
+//
+// The paid-order requirement is what makes this proof rather than a
+// directory: an empty shell nobody has bought from never appears. Stores
+// whose owner is banned, or who opted out, are excluded.
+func (r *StoreRepo) ListShowcaseStores(ctx context.Context, limit int) ([]ShowcaseStore, error) {
+	if limit <= 0 || limit > 24 {
+		limit = 12
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT s.slug, s.name, s.logo_url, s.banner_url, s.category, s.city, s.theme_hue,
+		       (SELECT COUNT(*) FROM products p
+		         WHERE p.store_id = s.id AND p.status = 'active')::int AS product_count
+		FROM stores s
+		JOIN users u ON u.id = s.owner_id
+		WHERE s.showcase_opted_out = false
+		  AND u.banned_at IS NULL
+		  AND EXISTS (
+		        SELECT 1 FROM orders o
+		        WHERE o.store_id = s.id
+		          AND o.payment_status = 'paid'
+		          AND o.status <> 'cancelled'
+		      )
+		  AND EXISTS (
+		        SELECT 1 FROM products p
+		        WHERE p.store_id = s.id AND p.status = 'active'
+		      )
+		ORDER BY (
+		    SELECT MAX(o.paid_at) FROM orders o
+		    WHERE o.store_id = s.id AND o.payment_status = 'paid'
+		) DESC NULLS LAST
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]ShowcaseStore, 0, limit)
+	for rows.Next() {
+		var s ShowcaseStore
+		if err := rows.Scan(&s.Slug, &s.Name, &s.LogoURL, &s.BannerURL,
+			&s.Category, &s.City, &s.ThemeHue, &s.ProductCount); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
 }

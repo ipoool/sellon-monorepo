@@ -2132,3 +2132,43 @@ func (h *StorefrontHandler) TLSCheck(w http.ResponseWriter, r *http.Request) {
 	}
 	http.Error(w, "not allowed", http.StatusForbidden)
 }
+
+// showcaseStoreDTO is the public shape of a featured store. Deliberately
+// narrow: everything here is already visible on the seller's own storefront.
+type showcaseStoreDTO struct {
+	Slug         string `json:"slug"`
+	Name         string `json:"name"`
+	LogoURL      string `json:"logo_url"`
+	BannerURL    string `json:"banner_url"`
+	Category     string `json:"category"`
+	City         string `json:"city"`
+	ThemeHue     int    `json:"theme_hue"`
+	ProductCount int    `json:"product_count"`
+}
+
+// GET /api/v1/storefront/showcase?limit=12
+//
+// Public. Real stores that have completed at least one paid order, for the
+// home page's proof section — a visitor can click straight through to the
+// seller's live storefront and check for themselves. No claim, no statistic,
+// nothing the founder has to vouch for.
+func (h *StorefrontHandler) Showcase(w http.ResponseWriter, r *http.Request) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	stores, err := h.stores.ListShowcaseStores(r.Context(), limit)
+	if err != nil {
+		h.logger.Error("showcase stores", "err", err)
+		// The home page renders without this section rather than failing:
+		// marketing proof is never worth a 500 on the landing page.
+		response.JSON(w, http.StatusOK, map[string]any{"stores": []showcaseStoreDTO{}})
+		return
+	}
+	out := make([]showcaseStoreDTO, 0, len(stores))
+	for _, s := range stores {
+		out = append(out, showcaseStoreDTO{
+			Slug: s.Slug, Name: s.Name, LogoURL: s.LogoURL, BannerURL: s.BannerURL,
+			Category: s.Category, City: s.City, ThemeHue: s.ThemeHue,
+			ProductCount: s.ProductCount,
+		})
+	}
+	response.JSON(w, http.StatusOK, map[string]any{"stores": out})
+}
