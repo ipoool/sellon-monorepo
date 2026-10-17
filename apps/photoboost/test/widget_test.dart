@@ -22,6 +22,11 @@ void main() {
     );
     addTearDown(controller.dispose);
 
+    // Load the config before pumping: the idle screen quotes the price from
+    // it, and an unstarted controller would render the screen a customer
+    // never actually sees.
+    await tester.runAsync(controller.start);
+
     await tester.pumpWidget(PhotoBoostApp(controller: controller));
     // The idle screen stages itself in; pump past the entrance animation.
     // (Not pumpAndSettle: the ambient animations never settle by design.)
@@ -31,11 +36,19 @@ void main() {
 
     expect(find.text('PHOTO BOOTH'), findsOneWidget);
     expect(find.text('Mulai'), findsOneWidget);
-    // The four steps are the whole promise; losing one would leave a customer
-    // unsure what they are paying for.
+
+    // The three steps are the whole promise; losing one would leave a
+    // customer unsure what they are paying for.
     expect(find.text('Scan & bayar'), findsOneWidget);
-    expect(find.text('4 kali foto'), findsOneWidget);
-    expect(find.text('Pilih bingkai'), findsOneWidget);
+    expect(find.text('Foto 4 kali'), findsOneWidget);
     expect(find.text('Ambil cetakan'), findsOneWidget);
+
+    // Frames are off, so the idle screen must not promise them.
+    expect(find.text('Pilih bingkai'), findsNothing);
+
+    // The price belongs on the payment screen, not here: the idle screen
+    // sells the idea, and a number next to it reads as a toll.
+    expect(find.text('Rp 5.000'), findsNothing);
+    expect(find.text('4 foto, langsung jadi.'), findsOneWidget);
   });
 }

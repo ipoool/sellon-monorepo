@@ -114,6 +114,10 @@ void main() {
         expect(f.lengthSync(), greaterThan(0));
       }
 
+      // Frames and filters are off (kDecorationsEnabled), so the customer
+      // reaches this screen to confirm the strip and nothing else. The
+      // choosing API still works underneath — the test exercises it so the
+      // path does not rot while the feature is dark.
       c.chooseFrame('pita');
       expect((c.state as Decorating).frameId, 'pita');
 

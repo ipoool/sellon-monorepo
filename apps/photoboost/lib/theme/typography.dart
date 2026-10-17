@@ -1,17 +1,28 @@
 import 'package:flutter/material.dart';
 
+import 'booth_surface.dart';
 import 'colors.dart';
 
 /// Type scale for a 10-12" tablet read at arm's length, so everything is
 /// larger than the web scale it descends from.
 ///
-/// Plus Jakarta Sans is bundled rather than fetched: the booth has to work
-/// with a dead network, and a kiosk falling back to a system font mid-session
-/// would look broken to a paying customer.
+/// NOTE: Plus Jakarta Sans is NOT bundled yet — pubspec has no fonts section,
+/// so this family name currently resolves to the platform default (Roboto on
+/// the Android tablet). It must be bundled before the first booth ships: the
+/// kiosk has to work with a dead network, so fetching at runtime is not an
+/// option, and the booth should not be the one screen in the product wearing
+/// a different typeface.
 ///
 /// `fontVariations` is set alongside `fontWeight` because the bundled face is
 /// a variable font — without the explicit axis some weights silently render
 /// at the default.
+///
+/// Default colours are for the DARK booth surface, because that is what the
+/// whole app runs on. They used to inherit the web scale's near-black, which
+/// rendered the idle headline invisible against the booth's own background —
+/// a style that reads correctly in a design file and not at all in a mall.
+/// The few places that draw on paper-white (the strip preview, the sample
+/// card) override explicitly.
 class SellonText {
   static const _family = 'PlusJakartaSans';
 
@@ -20,7 +31,7 @@ class SellonText {
     required int weight,
     required double spacing,
     double height = 1.3,
-    Color color = SellonColors.neutral900,
+    Color color = BoothSurface.textPrimary,
   }) => TextStyle(
     fontFamily: _family,
     fontSize: size,
@@ -47,7 +58,7 @@ class SellonText {
     weight: 400,
     spacing: 0,
     height: 1.5,
-    color: SellonColors.neutral600,
+    color: BoothSurface.textSecondary,
   );
   static final bodyStrong = _s(size: 18, weight: 700, spacing: -0.015);
 
@@ -57,14 +68,17 @@ class SellonText {
     size: 13,
     weight: 600,
     spacing: 0.06,
-    color: SellonColors.neutral500,
+    color: BoothSurface.textMuted,
   );
 
   static final eyebrow = _s(
     size: 11,
     weight: 700,
     spacing: 0.14,
-    color: SellonColors.brand700,
+    // brand400, not the web's 700: the booth's own note says mid tones go
+    // muddy on a dark ground. The sample strip's caption sits on paper-white
+    // and overrides this back to 700.
+    color: SellonColors.brand400,
   );
 
   static final button = _s(size: 18, weight: 700, spacing: -0.01);

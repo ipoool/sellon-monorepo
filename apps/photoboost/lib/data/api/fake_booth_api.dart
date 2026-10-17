@@ -40,7 +40,7 @@ class FakeBoothApi implements BoothApi {
   Future<BoothConfig> fetchConfig() async {
     await Future<void>.delayed(latency);
     return BoothConfig(
-      priceCents: 2500000, // Rp 25.000
+      priceCents: 500000, // Rp 5.000 — matches the platform default
       shotsCount: 4,
       printCopies: 1,
       sessionTimeoutSeconds: 300,

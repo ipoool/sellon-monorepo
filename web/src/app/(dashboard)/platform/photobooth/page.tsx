@@ -45,7 +45,7 @@ export default async function PlatformPhotoBoothPage() {
     <DashboardShell
       me={me}
       pageTitle="Photo Booth"
-      pageSubtitle="Daftarkan booth, terbitkan token perangkat, dan atur harga"
+      pageSubtitle="Daftarkan booth, hubungkan tabletnya, dan atur harga"
     >
       {/* Offline count sits beside the active one on purpose: for an
           unattended fleet the useful question is not "how many exist" but

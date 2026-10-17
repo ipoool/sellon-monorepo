@@ -17,8 +17,27 @@ Built and tested:
 - SellOn theme ported to Dart, the state-machine types, the camera and
   printer abstractions, and the thermal raster pipeline
 
-Not built yet: the session controller, the screens past idle, the Bluetooth
-transport, and the real UVC camera. See the plan for the milestone order.
+Not built yet: the Bluetooth transport and the real UVC camera. See the plan
+for the milestone order.
+
+## What the booth sells today
+
+Rp 5.000, four shots, one strip on thermal receipt paper. The price and the
+shot count come from the server (`photobooth_settings`, editable per booth)
+— the tablet never decides either.
+
+**Frames, stickers and filters are off** (`lib/features/feature_flags.dart`,
+`kDecorationsEnabled = false`). The code is all still here and the server
+still carries a frames list; the screens just skip the choice. Two reasons:
+the output is 1-bit dithered monochrome, so a filter chosen on a bright
+screen mostly vanishes on the paper, and it cost a paying customer a
+decision they could not judge until it was already printed.
+
+The confirm screen stays, without the chips. It is the only place anyone
+sees the strip before it is committed to paper they have paid for.
+
+Turning the feature back on when a dye-sublimation printer arrives is one
+constant plus whatever frames an admin uploads.
 
 ## Running it
 

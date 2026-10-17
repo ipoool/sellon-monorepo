@@ -215,8 +215,8 @@ export function AdminPhotoBoothManager({ booths, settings }: Props) {
             Belum ada booth
           </h2>
           <p className="mx-auto mt-2 max-w-md text-sm text-neutral-600">
-            Daftarkan unit pertama, lalu hubungkan tabletnya dengan kode
-            pairing enam huruf.
+            Daftarkan unit pertama, lalu tekan &ldquo;Hubungkan perangkat&rdquo;
+            untuk dapat kode enam huruf yang diketik di tabletnya.
           </p>
         </Card>
       ) : (
@@ -323,7 +323,7 @@ export function AdminPhotoBoothManager({ booths, settings }: Props) {
                       </dd>
                     </div>
                     <div>
-                      <dt className="text-xs text-neutral-500">Perangkat</dt>
+                      <dt className="text-xs text-neutral-500">Tablet</dt>
                       <dd className="text-neutral-700">
                         {liveTokens.length > 0 ? (
                           `${liveTokens.length} terhubung`
@@ -415,10 +415,10 @@ export function AdminPhotoBoothManager({ booths, settings }: Props) {
                     variant="ghost"
                     onClick={() => issueToken(b)}
                     disabled={busy || b.status === "retired"}
-                    title="Terbitkan token mentah tanpa pairing"
+                    title="Terbitkan token mentah tanpa pairing — untuk provisioning terotomasi"
                   >
                     <KeyRound className="size-3.5" aria-hidden />
-                    Token manual
+                    Token lanjutan
                   </Button>
                   {b.status !== "retired" && (
                     <Button

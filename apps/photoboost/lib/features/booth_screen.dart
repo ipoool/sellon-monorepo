@@ -17,6 +17,7 @@ import '../widgets/motion.dart';
 import '../widgets/pill_button.dart';
 import '../widgets/qr_view.dart';
 import '../widgets/tinted_panel.dart';
+import 'feature_flags.dart';
 
 /// One screen per state. A booth is a single machine, so routing it as a
 /// navigator stack would just invite a customer to press Back out of a paid
@@ -53,7 +54,11 @@ class BoothScreen extends StatelessWidget {
   }
 
   Widget _body(BuildContext context, BoothState state) => switch (state) {
-    Idle() => _IdleView(onStart: controller.beginSession),
+    Idle() => _IdleView(
+      onStart: controller.beginSession,
+      priceCents: controller.config?.priceCents ?? 0,
+      shots: controller.config?.shotsCount ?? 4,
+    ),
     CreatingSession() => const _Busy(message: 'Menyiapkan sesi…'),
     AwaitingPayment(:final session, :final secondsLeft) => _PaymentView(
       qrData: session.qrString,
@@ -151,13 +156,23 @@ class _Centered extends StatelessWidget {
 }
 
 class _IdleView extends StatelessWidget {
-  const _IdleView({required this.onStart});
-  final VoidCallback onStart;
+  const _IdleView({
+    required this.onStart,
+    required this.priceCents,
+    required this.shots,
+  });
 
-  static const _steps = [
+  final VoidCallback onStart;
+  final int priceCents;
+  final int shots;
+
+  // Three steps, not four: the frame-picking one is gone, and a passer-by
+  // reads three things where they skim four. These follow the config rather
+  // than hardcoding "4", so an admin changing the shot count cannot leave the
+  // idle screen advertising something the booth does not do.
+  List<(IconData, String)> get _steps => [
     (Icons.qr_code_rounded, 'Scan & bayar'),
-    (Icons.photo_camera_rounded, '4 kali foto'),
-    (Icons.auto_awesome_rounded, 'Pilih bingkai'),
+    (Icons.photo_camera_rounded, 'Foto $shots kali'),
     (Icons.print_rounded, 'Ambil cetakan'),
   ];
 
@@ -204,7 +219,7 @@ class _IdleView extends StatelessWidget {
                       FadeInUp(
                         delay: const Duration(milliseconds: 180),
                         child: Text(
-                          'Bayar pakai QRIS, ambil 4 foto, pilih bingkai.',
+                          '$shots foto, langsung jadi.',
                           style: SellonText.body,
                         ),
                       ),
@@ -343,28 +358,39 @@ class _SampleStripState extends State<_SampleStrip>
         final tilt = math.sin(_c.value * 2 * math.pi) * 0.018;
         return Transform.rotate(
           angle: -0.04 + tilt,
-          child: Container(
-            padding: const EdgeInsets.fromLTRB(14, 14, 14, 26),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(SellonRadii.card),
-              boxShadow: SellonShadows.popout,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                for (var i = 0; i < 4; i++)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: _SampleFrame(
-                      // Each cell advances on its own beat, so the strip
-                      // looks like it is still being filled.
-                      seed: ((_c.value * 4).floor() + i) % 6,
+          // Center gives the card loose constraints so it shrink-wraps the
+          // photos. Inside the Expanded it was stretching to the full column
+          // width, which turned a photo strip into a big white slab with
+          // pictures floating in it.
+          child: Center(
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(14, 14, 14, 22),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(SellonRadii.card),
+                boxShadow: SellonShadows.popout,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (var i = 0; i < 4; i++)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: _SampleFrame(
+                        // Each cell advances on its own beat, so the strip
+                        // looks like it is still being filled.
+                        seed: ((_c.value * 4).floor() + i) % _sampleCount,
+                      ),
+                    ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'PHOTOBOOST',
+                    style: SellonText.eyebrow.copyWith(
+                      color: SellonColors.brand700,
                     ),
                   ),
-                const SizedBox(height: 4),
-                Text('PHOTOBOOST', style: SellonText.eyebrow),
-              ],
+                ],
+              ),
             ),
           ),
         );
@@ -377,43 +403,30 @@ class _SampleFrame extends StatelessWidget {
   const _SampleFrame({required this.seed});
   final int seed;
 
-  static const _palette = [
-    [Color(0xFFFFD9A0), Color(0xFFE88B6B)],
-    [Color(0xFFBFE8D2), Color(0xFF6BBF93)],
-    [Color(0xFFCFE0FB), Color(0xFF7FA8E0)],
-    [Color(0xFFF6CDE3), Color(0xFFD282B4)],
-    [Color(0xFFE8E2C8), Color(0xFFB9A97A)],
-    [Color(0xFFD5D2F2), Color(0xFF9B93DB)],
-  ];
-
   @override
   Widget build(BuildContext context) {
-    final pair = _palette[seed % _palette.length];
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 520),
-      child: Container(
+      child: ClipRRect(
         key: ValueKey(seed),
-        width: 210,
-        height: 150,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(10),
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: pair,
-          ),
-        ),
-        child: Center(
-          child: Icon(
-            Icons.emoji_emotions_rounded,
-            size: 56,
-            color: Colors.white.withValues(alpha: 0.65),
-          ),
+        borderRadius: BorderRadius.circular(10),
+        child: Image.asset(
+          'assets/samples/${(seed % _sampleCount) + 1}.jpg',
+          width: 210,
+          height: 150,
+          fit: BoxFit.cover,
+          // The strip sells the product, so it shows the product: real
+          // photographs of people having fun, not coloured rectangles with
+          // an emoji in them. Nobody queues for a smiley.
+          filterQuality: FilterQuality.medium,
         ),
       ),
     );
   }
 }
+
+/// How many sample photographs ship in assets/samples.
+const int _sampleCount = 4;
 
 class _Busy extends StatelessWidget {
   const _Busy({required this.message});
@@ -727,7 +740,12 @@ class _ShotsView extends StatelessWidget {
           ),
           const SizedBox(width: SellonSpacing.md),
           PillButton(
-            label: isLast ? 'Pilih bingkai' : 'Lanjut foto',
+            // On the last shot this leads to the preview, not the printer —
+            // "Lihat hasil" says that, where "Cetak" would promise paper one
+            // screen too early.
+            label: isLast
+                ? (kDecorationsEnabled ? 'Pilih bingkai' : 'Lihat hasil')
+                : 'Lanjut foto',
             icon: isLast
                 ? Icons.auto_awesome_rounded
                 : Icons.photo_camera_rounded,
@@ -840,7 +858,15 @@ class _DecorateViewState extends State<_DecorateView> {
     }
   }
 
-  void _rebuild() => setState(() => _preview = widget.render(360));
+  // Block body, not an arrow: `=> _preview = ...` returns the assigned
+  // Future, and setState asserts when its callback returns one. The assert
+  // only fires in debug, so this screen threw in every debug build and in
+  // any test that reached it, while release looked fine.
+  void _rebuild() {
+    setState(() {
+      _preview = widget.render(360);
+    });
+  }
 
   @override
   Widget build(BuildContext context) => Center(
@@ -859,50 +885,66 @@ class _DecorateViewState extends State<_DecorateView> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text('PERCANTIK FOTOMU', style: SellonText.eyebrow),
+                  Text('SIAP CETAK', style: SellonText.eyebrow),
                   const SizedBox(height: SellonSpacing.xs),
                   Text(
-                    'Pilih bingkai & filter',
+                    kDecorationsEnabled
+                        ? 'Pilih bingkai & filter'
+                        : 'Beginilah hasilnya',
                     style: SellonText.h1.copyWith(
                       color: BoothSurface.textPrimary,
                     ),
                   ),
+                  const SizedBox(height: SellonSpacing.sm),
+                  if (!kDecorationsEnabled)
+                    Text(
+                      'Kalau sudah pas, tekan Cetak.',
+                      style: SellonText.body.copyWith(
+                        color: BoothSurface.textSecondary,
+                      ),
+                    ),
                   const SizedBox(height: SellonSpacing.lg),
 
-                  Text('BINGKAI', style: SellonText.eyebrow),
-                  const SizedBox(height: SellonSpacing.sm),
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
-                    children: [
-                      for (final f in widget.frames)
-                        _FrameChip(
-                          label: f.name as String,
-                          selected: f.id == widget.selected,
-                          onTap: () => widget.onPick(f.id as String),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: SellonSpacing.lg),
-
-                  Text('FILTER', style: SellonText.eyebrow),
-                  const SizedBox(height: SellonSpacing.sm),
-                  Row(
-                    children: [
-                      for (final f in PhotoFilter.values)
-                        Padding(
-                          padding: const EdgeInsets.only(right: 14),
-                          child: _FilterChip(
-                            filter: f,
-                            sample: widget.shots.isEmpty
-                                ? null
-                                : widget.shots.first,
-                            selected: f == widget.filter,
-                            onTap: () => widget.onPickFilter(f),
+                  // Frames and filters are switched off while the booth runs
+                  // on thermal paper. The screen stays, because it is the one
+                  // place the customer sees the strip before it is committed
+                  // to paper they already paid for.
+                  if (kDecorationsEnabled) ...[
+                    Text('BINGKAI', style: SellonText.eyebrow),
+                    const SizedBox(height: SellonSpacing.sm),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: [
+                        for (final f in widget.frames)
+                          _FrameChip(
+                            label: f.name as String,
+                            selected: f.id == widget.selected,
+                            onTap: () => widget.onPick(f.id as String),
                           ),
-                        ),
-                    ],
-                  ),
+                      ],
+                    ),
+                    const SizedBox(height: SellonSpacing.lg),
+
+                    Text('FILTER', style: SellonText.eyebrow),
+                    const SizedBox(height: SellonSpacing.sm),
+                    Row(
+                      children: [
+                        for (final f in PhotoFilter.values)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 14),
+                            child: _FilterChip(
+                              filter: f,
+                              sample: widget.shots.isEmpty
+                                  ? null
+                                  : widget.shots.first,
+                              selected: f == widget.filter,
+                              onTap: () => widget.onPickFilter(f),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
 
                   const SizedBox(height: SellonSpacing.xl),
                   Row(
