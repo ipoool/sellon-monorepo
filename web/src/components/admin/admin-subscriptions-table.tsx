@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition, type FormEvent } from "react";
-import { showError, showSuccess } from "@/lib/toast";
+import { showError } from "@/lib/toast";
 import { useRouter } from "next/navigation";
 import {
   Search,
@@ -28,7 +28,6 @@ import {
   TablePagination,
 } from "@/components/dashboard/table-pagination";
 import { formatRupiah } from "@/lib/format";
-import { cn } from "@/lib/utils";
 import type { AdminSubscriptionInvoice } from "@/lib/types";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -223,11 +222,131 @@ export function AdminSubscriptionsTable({
           </p>
         </Card>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-neutral-200 bg-white shadow-card">
-          {/* min-w forces a horizontal scroll instead of crushing the
-              columns: a timestamp broken across three lines is harder to
-              read than one that sits past the edge. */}
-          <table className="w-full min-w-[1080px] text-left text-sm">
+        <>
+        {/* Mobile: cards. A table this wide cannot be scrolled to its action
+            column on a phone — the buttons were simply unreachable. */}
+        <ul className="flex flex-col gap-3 lg:hidden">
+          {rows.map((r) => {
+            const sb = statusBadge[r.status];
+            const busy = busyId === r.id;
+            return (
+              <li
+                key={r.id}
+                className="rounded-xl border border-neutral-200 bg-white p-4 shadow-card"
+              >
+                <div className="flex items-start gap-3">
+                  <Avatar
+                    src={r.owner_picture || null}
+                    name={r.owner_name || r.owner_email || r.store_name}
+                    size="sm"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium text-neutral-900">
+                      {r.owner_name || "(belum isi nama)"}
+                    </p>
+                    <p className="truncate text-xs text-neutral-500">
+                      {r.owner_email || "—"}
+                    </p>
+                    <p className="mt-0.5 truncate text-xs text-neutral-600">
+                      <Crown
+                        className="mr-1 inline size-3 text-warning"
+                        aria-hidden
+                      />
+                      {r.store_name}{" "}
+                      <span className="text-neutral-400">/{r.store_slug}</span>
+                    </p>
+                  </div>
+                  <Badge variant={sb.variant}>{sb.label}</Badge>
+                </div>
+
+                <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 border-t border-neutral-100 pt-3 text-sm">
+                  <div>
+                    <dt className="text-xs text-neutral-500">Nominal</dt>
+                    <dd className="font-medium text-neutral-900">
+                      {formatRupiah(r.amount_cents)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-neutral-500">Paket</dt>
+                    <dd className="text-neutral-700">
+                      {planLabel[r.plan] ?? r.plan} · {r.months} bulan
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-neutral-500">Metode</dt>
+                    <dd className="text-neutral-700">
+                      {providerLabel[r.provider] ?? (r.provider || "—")}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-neutral-500">Diminta</dt>
+                    <dd className="text-neutral-700">
+                      {formatDateTime(r.created_at)}
+                    </dd>
+                  </div>
+                </dl>
+
+                <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-neutral-100 pt-3">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setDetail(r)}
+                  >
+                    <Eye className="size-3.5" aria-hidden />
+                    Detail
+                    {r.payment_proof_url && (
+                      <Paperclip
+                        className="size-3 text-success"
+                        aria-label="Ada bukti transfer"
+                      />
+                    )}
+                  </Button>
+                  {r.status === "pending" ? (
+                    <>
+                      <Button
+                        size="sm"
+                        onClick={() => setDialog({ kind: "activate", row: r })}
+                        disabled={busy}
+                      >
+                        {busy ? (
+                          <Loader2
+                            className="size-3.5 animate-spin"
+                            aria-hidden
+                          />
+                        ) : (
+                          <CheckCircle2 className="size-3.5" aria-hidden />
+                        )}
+                        Aktifkan
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setDialog({ kind: "reject", row: r })}
+                        disabled={busy}
+                        className="text-danger hover:bg-danger/10"
+                      >
+                        <XCircle className="size-3.5" aria-hidden />
+                        Tolak
+                      </Button>
+                    </>
+                  ) : (
+                    <span className="text-xs text-neutral-400">
+                      {r.status === "paid" ? "Sudah aktif" : "Sudah ditolak"}
+                    </span>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+
+        <div className="hidden overflow-x-auto rounded-xl border border-neutral-200 bg-white shadow-card lg:block">
+          {/* The table scrolls rather than crushing its columns — a
+              timestamp broken across three lines is harder to read than one
+              that sits past the edge — but the action column is pinned to
+              the right so the buttons are always reachable without
+              scrolling to find them. */}
+          <table className="w-full min-w-[1020px] text-left text-sm">
             <thead className="bg-neutral-50 text-xs font-semibold uppercase tracking-wider text-neutral-500">
               <tr>
                 <th className="px-5 py-3">Pemilik & Toko</th>
@@ -236,7 +355,9 @@ export function AdminSubscriptionsTable({
                 <th className="whitespace-nowrap px-5 py-3">Metode</th>
                 <th className="whitespace-nowrap px-5 py-3">Status</th>
                 <th className="whitespace-nowrap px-5 py-3">Diminta</th>
-                <th className="whitespace-nowrap px-5 py-3 text-right">Aksi</th>
+                <th className="sticky right-0 z-10 whitespace-nowrap bg-neutral-50 px-5 py-3 text-right shadow-[-8px_0_12px_-8px_rgba(0,0,0,0.12)]">
+                  Aksi
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-200">
@@ -244,7 +365,7 @@ export function AdminSubscriptionsTable({
                 const sb = statusBadge[r.status];
                 const busy = busyId === r.id;
                 return (
-                  <tr key={r.id} className={cn("hover:bg-neutral-50")}>
+                  <tr key={r.id} className="group hover:bg-neutral-50">
                     <td className="px-5 py-3">
                       <div className="flex items-center gap-3">
                         <Avatar
@@ -300,7 +421,7 @@ export function AdminSubscriptionsTable({
                         {formatDateTime(r.created_at)}
                       </span>
                     </td>
-                    <td className="px-5 py-3">
+                    <td className="sticky right-0 z-10 bg-white px-5 py-3 shadow-[-8px_0_12px_-8px_rgba(0,0,0,0.12)] group-hover:bg-neutral-50">
                       <div className="flex items-center justify-end gap-1.5">
                         <Button
                           size="sm"
@@ -367,6 +488,7 @@ export function AdminSubscriptionsTable({
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       <TablePagination
