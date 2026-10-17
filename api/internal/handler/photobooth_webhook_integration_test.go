@@ -28,7 +28,8 @@ func pbWebhookHandler(t *testing.T, pool *pgxpool.Pool) (*PlatformWebhookHandler
 	sessions := repository.NewPhotoBoothSessionRepo(pool)
 	h := NewPlatformWebhookHandler(
 		repository.NewSubscriptionRepo(pool), sessions, testServerKey,
-		audit.New(repository.NewAuditRepo(pool), repository.NewUserRepo(pool), logger), logger,
+		audit.New(repository.NewAuditRepo(pool), repository.NewUserRepo(pool), logger),
+		nil, logger,
 	)
 	return h, sessions
 }

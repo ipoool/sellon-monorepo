@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -54,10 +55,31 @@ type SubscriptionInvoice struct {
 
 type SubscriptionRepo struct {
 	pool *pgxpool.Pool
+	// Only used to report a partner-commission accrual that was skipped.
+	// Nil-safe: see logAccrualSkipped.
+	logger *slog.Logger
 }
 
 func NewSubscriptionRepo(pool *pgxpool.Pool) *SubscriptionRepo {
 	return &SubscriptionRepo{pool: pool}
+}
+
+// WithLogger attaches a logger for the one thing in here that fails quietly
+// on purpose: partner commission accrual, which must never cost a seller the
+// period they just paid for. Fluent rather than a constructor argument so the
+// money path's existing call sites are untouched.
+func (r *SubscriptionRepo) WithLogger(l *slog.Logger) *SubscriptionRepo {
+	r.logger = l
+	return r
+}
+
+func (r *SubscriptionRepo) logAccrualSkipped(invoiceID uuid.UUID, err error) {
+	l := r.logger
+	if l == nil {
+		l = slog.Default()
+	}
+	l.Error("partner commission accrual skipped",
+		"err", err, "invoice_id", invoiceID.String())
 }
 
 const subscriptionCols = `id, store_id, plan, status, current_period_start,
@@ -443,6 +465,26 @@ func (r *SubscriptionRepo) SettleInvoice(ctx context.Context, invoiceID uuid.UUI
 	settled, err := scanInvoice(invRow)
 	if err != nil {
 		return nil, nil, err
+	}
+
+	// Partner commission, if this store's owner came from one.
+	//
+	// Inside this transaction, so a commission can only exist for an invoice
+	// that really settled, and so a replayed webhook — which never gets past
+	// the guarded UPDATE above — cannot accrue twice.
+	//
+	// Behind a savepoint, because the reverse must also hold: a surprise here
+	// must never cost a seller the period they just paid for. A plain failed
+	// Exec would abort the whole transaction and take the settle with it.
+	if sp, serr := tx.Begin(ctx); serr == nil {
+		if _, aerr := sp.Exec(ctx, accrueCommissionSQL, inv.ID); aerr != nil {
+			_ = sp.Rollback(ctx)
+			r.logAccrualSkipped(inv.ID, aerr)
+		} else {
+			_ = sp.Commit(ctx)
+		}
+	} else {
+		r.logAccrualSkipped(inv.ID, serr)
 	}
 
 	if err := tx.Commit(ctx); err != nil {

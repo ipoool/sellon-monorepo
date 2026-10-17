@@ -83,7 +83,7 @@ func TestPlatformWebhookRefusesAmountMismatch(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError + 1}))
 	inv, subs := seedCheckoutInvoice(t, pool, 9900000) // Rp 99.000
-	h := NewPlatformWebhookHandler(subs, repository.NewPhotoBoothSessionRepo(pool), testServerKey, audit.New(repository.NewAuditRepo(pool), repository.NewUserRepo(pool), logger), logger)
+	h := NewPlatformWebhookHandler(subs, repository.NewPhotoBoothSessionRepo(pool), testServerKey, audit.New(repository.NewAuditRepo(pool), repository.NewUserRepo(pool), logger), nil, logger)
 
 	// Midtrans reports Rp 1.000 against a Rp 99.000 invoice.
 	body := map[string]string{
@@ -126,7 +126,7 @@ func TestPlatformWebhookSettlesMatchingAmount(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError + 1}))
 	inv, subs := seedCheckoutInvoice(t, pool, 9900000)
-	h := NewPlatformWebhookHandler(subs, repository.NewPhotoBoothSessionRepo(pool), testServerKey, audit.New(repository.NewAuditRepo(pool), repository.NewUserRepo(pool), logger), logger)
+	h := NewPlatformWebhookHandler(subs, repository.NewPhotoBoothSessionRepo(pool), testServerKey, audit.New(repository.NewAuditRepo(pool), repository.NewUserRepo(pool), logger), nil, logger)
 
 	body := map[string]string{
 		"order_id":           inv.ProviderOrderID,

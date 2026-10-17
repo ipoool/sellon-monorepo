@@ -31,6 +31,13 @@ const cookies: Cookie[] = [
       "Menyimpan token sesi login JWT (HttpOnly, SameSite=Lax, Secure di production). Tanpa cookie ini, Anda tidak bisa tetap login di antara request. Saat tim admin SellOn melakukan impersonation untuk membantu support, cookie ini sementara berisi token impersonation dan banner merah selalu tampil di seluruh dasbor sampai admin keluar dari mode tersebut.",
     duration: "7 hari",
   },
+  {
+    name: "sellon_ref",
+    type: "Fungsional",
+    purpose:
+      "Hanya dibuat kalau Anda membuka SellOn lewat link partner (misalnya dari sebuah acara atau komunitas), dan isinya cuma kode partner itu — bukan identitas Anda. Gunanya supaya kami tahu partner mana yang memperkenalkan Anda ke SellOn, untuk perhitungan bagi hasil dengan mereka. Tidak dipakai untuk iklan, tidak dibagikan ke pihak ketiga, dan tidak memengaruhi harga atau layanan yang Anda terima. Cookie ini HttpOnly dan hanya dibaca saat Anda mendaftar.",
+    duration: "90 hari",
+  },
 ];
 
 export default async function CookiePage() {
@@ -63,8 +70,9 @@ export default async function CookiePage() {
                   pindah halaman.
                 </p>
                 <p className="mt-3">
-                  SellOn hanya menggunakan cookie yang strictly-necessary
-                  untuk operasional. Kami{" "}
+                  SellOn hanya menggunakan cookie yang dibutuhkan untuk
+                  operasional dan untuk mencatat partner yang memperkenalkan
+                  Anda ke SellOn. Kami{" "}
                   <strong>tidak</strong> menggunakan cookie iklan, pelacakan
                   perilaku lintas situs, atau third-party analytics yang
                   invasif.

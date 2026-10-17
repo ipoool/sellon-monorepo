@@ -1194,3 +1194,76 @@ export type PhotoBoothSessionSummary = {
   failed_count: number;
   review_count: number;
 };
+
+// === Partner referral programme ===
+
+/** A promoting party: an event, a community, anyone who sends SellOn users. */
+export type Partner = {
+  id: string;
+  code: string;
+  name: string;
+  contact_name: string;
+  contact_email: string;
+  contact_phone: string;
+  /** Basis points — 2000 is 20%. No float ever touches money. */
+  commission_bps: number;
+  status: "active" | "paused" | "ended";
+  notes: string;
+  created_at: string;
+  updated_at: string;
+  // Present on the list endpoint only.
+  referrals?: number;
+  converted?: number;
+  owed_cents?: number;
+  paid_cents?: number;
+  gross_cents?: number;
+};
+
+export type PartnerTotals = {
+  partners: number;
+  referrals: number;
+  converted: number;
+  owed_cents: number;
+  paid_cents: number;
+};
+
+/** One signup attributed to a partner, and whether it ever paid. */
+export type PartnerReferral = {
+  user_id: string;
+  name: string;
+  email: string;
+  signup_method: "google" | "email" | "admin";
+  created_at: string;
+  store_name: string;
+  subscribed: boolean;
+  plan: string;
+  commission_cents: number;
+  paid_at: string | null;
+};
+
+export type PartnerCommission = {
+  id: string;
+  referred_user_email: string;
+  store_name: string;
+  invoice_id: string;
+  plan: string;
+  months: number;
+  base_amount_cents: number;
+  commission_bps: number;
+  commission_cents: number;
+  status: "earned" | "paid" | "void";
+  void_reason: string;
+  payout_ref: string;
+  paid_out_at: string | null;
+  created_at: string;
+};
+
+export type PartnerPayout = {
+  id: string;
+  amount_cents: number;
+  commission_count: number;
+  method: string;
+  reference: string;
+  notes: string;
+  paid_at: string;
+};

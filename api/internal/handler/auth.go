@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/crypto/bcrypt"
 
@@ -34,6 +35,37 @@ type AuthHandler struct {
 	// emailPasswordEnabled gates the whole email+password path — register,
 	// verify, resend, forgot password AND login. Off means Google-only.
 	emailPasswordEnabled bool
+	// Set via WithPartners. Nil-safe: attribution is marketing metadata and
+	// must never be able to fail a signup.
+	partners *repository.PartnerRepo
+}
+
+// WithPartners enables referral attribution at signup.
+func (h *AuthHandler) WithPartners(p *repository.PartnerRepo) *AuthHandler {
+	h.partners = p
+	return h
+}
+
+// bondReferral records that a brand-new user arrived through a partner link.
+//
+// Called ONLY on the two paths that create a genuinely new account, so an
+// existing user clicking a partner link is never re-attributed — not because
+// of a check here, but because this is never reached for them.
+//
+// Best-effort by design: an unknown code, a paused partner, a database
+// hiccup. None of those are worth failing a registration over, and the
+// unique index on user_id means a retry can never produce a second bond.
+func (h *AuthHandler) bondReferral(ctx context.Context, userID uuid.UUID, code, method, landing string) {
+	if h.partners == nil || strings.TrimSpace(code) == "" {
+		return
+	}
+	if err := h.partners.BondReferral(ctx, userID, code, method, landing); err != nil {
+		h.logger.Warn("partner referral bond failed",
+			"err", err, "user_id", userID.String(), "code", code)
+		return
+	}
+	h.logger.Info("partner referral bonded",
+		"user_id", userID.String(), "code", strings.ToUpper(code), "method", method)
 }
 
 // errEmailPasswordDisabled is the copy shown when the app is running
@@ -78,6 +110,11 @@ func NewAuthHandler(
 
 type googleSignInReq struct {
 	Credential string `json:"credential"`
+	// Partner attribution, read from the sellon_ref cookie by the web tier.
+	// The API is on a different origin, so the cookie cannot reach us
+	// directly — it travels in the body, like invite_code already does.
+	ReferralCode string `json:"referral_code"`
+	ReferralPath string `json:"referral_path"`
 }
 
 type meResponse struct {
@@ -163,6 +200,9 @@ type registerReq struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
 	Name     string `json:"name"`
+	// Partner attribution. See googleSignInReq for why it rides in the body.
+	ReferralCode string `json:"referral_code"`
+	ReferralPath string `json:"referral_path"`
 }
 
 // POST /api/v1/auth/register
@@ -225,6 +265,11 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 			response.Error(w, http.StatusInternalServerError, "gagal memproses pendaftaran")
 			return
 		}
+		// Bond here, not at verify-email: verification is a separate
+		// submission that can happen days later from a different tab, and
+		// the referral code would be long gone by then. The row this branch
+		// just created is the only moment both facts are in hand.
+		h.bondReferral(r.Context(), user.ID, req.ReferralCode, "email", req.ReferralPath)
 	default:
 		h.logger.Error("lookup user by email failed", "err", err)
 		response.Error(w, http.StatusInternalServerError, "gagal memproses pendaftaran")
@@ -642,6 +687,7 @@ func (h *AuthHandler) Google(w http.ResponseWriter, r *http.Request) {
 	h.logger.Info("auth google", "user_id", user.ID, "email", user.Email, "is_new", isNew)
 	if isNew {
 		h.sendWelcomeEmail(user)
+		h.bondReferral(r.Context(), user.ID, req.ReferralCode, "google", req.ReferralPath)
 	}
 
 	// Block banned users at the gate. Returns 403 (not 401) so the

@@ -22,11 +22,15 @@ type PlatformWebhookHandler struct {
 	booth     *repository.PhotoBoothSessionRepo
 	serverKey string
 	audit     *audit.Logger
+	partners  *PartnerNotifier
 	logger    *slog.Logger
 }
 
-func NewPlatformWebhookHandler(subs *repository.SubscriptionRepo, booth *repository.PhotoBoothSessionRepo, serverKey string, audit *audit.Logger, logger *slog.Logger) *PlatformWebhookHandler {
-	return &PlatformWebhookHandler{subs: subs, booth: booth, serverKey: serverKey, audit: audit, logger: logger}
+func NewPlatformWebhookHandler(subs *repository.SubscriptionRepo, booth *repository.PhotoBoothSessionRepo, serverKey string, audit *audit.Logger, partners *PartnerNotifier, logger *slog.Logger) *PlatformWebhookHandler {
+	return &PlatformWebhookHandler{
+		subs: subs, booth: booth, serverKey: serverKey,
+		audit: audit, partners: partners, logger: logger,
+	}
 }
 
 type platformNotification struct {
@@ -144,6 +148,9 @@ func (h *PlatformWebhookHandler) handleSubscription(w http.ResponseWriter, r *ht
 			"store_id", settled.StoreID,
 			"plan", sub.Plan,
 			"period_end", sub.CurrentPeriodEnd)
+		// After the commit, never before: an email cannot be recalled, and
+		// the claim inside makes a redelivered webhook a no-op.
+		h.partners.NotifySettled(settled.ID)
 		// Webhook context has no user; audit logger records this with
 		// empty actor — surfaces in the UI as "Sistem (Midtrans)".
 		h.audit.Log(r.Context(), settled.StoreID, audit.Event{

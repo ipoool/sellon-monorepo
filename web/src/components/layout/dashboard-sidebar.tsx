@@ -27,6 +27,7 @@ import {
   Boxes,
   ChefHat,
   Camera,
+  Handshake,
   GalleryHorizontalEnd,
   Download,
   type LucideIcon,
@@ -340,6 +341,11 @@ function SidebarContent({
                   label: "Transaksi",
                   href: "/platform/subscriptions",
                   icon: Receipt,
+                },
+                {
+                  label: "Partner",
+                  href: "/platform/partners",
+                  icon: Handshake,
                 },
                 {
                   label: "Photo Booth",

@@ -33,7 +33,19 @@ async function postJSON(path: string, body: unknown) {
 
 // Only rendered when the email+password path is open (see the login page):
 // when it is closed the whole form is omitted, not disabled in place.
-export function EmailAuthForm({ inviteCode }: { inviteCode?: string }) {
+export function EmailAuthForm({
+  inviteCode,
+  referralCode,
+}: {
+  inviteCode?: string;
+  /**
+   * Partner attribution, read server-side from the sellon_ref cookie. Sent
+   * with register — the only call that creates an account — because the
+   * verify step is a separate submission that may happen days later from a
+   * different tab, by which point the code is gone.
+   */
+  referralCode?: string;
+}) {
   const { push, refresh } = useRouter();
   const [mode, setMode] = useState<Mode>("login");
   const [step, setStep] = useState<Step>("form");
@@ -70,6 +82,9 @@ export function EmailAuthForm({ inviteCode }: { inviteCode?: string }) {
           email,
           password,
           name,
+          referral_code: referralCode ?? "",
+          referral_path:
+            typeof window !== "undefined" ? window.location.pathname : "",
         });
         if (!ok) throw new Error(data.error || "Gagal mendaftar");
         if (data.status === "verify_email") {

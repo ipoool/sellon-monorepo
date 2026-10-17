@@ -48,7 +48,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	variants := repository.NewVariantRepo(pool)
 	promos := repository.NewPromoRepo(pool)
 	reports := repository.NewReportsRepo(pool)
-	subscriptions := repository.NewSubscriptionRepo(pool)
+	subscriptions := repository.NewSubscriptionRepo(pool).WithLogger(logger)
 	memberships := repository.NewMembershipRepo(pool)
 	auditRepo := repository.NewAuditRepo(pool)
 	platformAuditRepo := repository.NewPlatformAuditRepo(pool)
@@ -116,7 +116,10 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	metaClient := meta.NewClient(logger)
 	metaNotifier := meta.NewNotifier(stores, orders, subscriptions, encryptor, metaClient, publicWebURL, logger)
 
-	authHandler := handler.NewAuthHandler(users, emailVerifications, memberships, googleVerifier, jwtSvc, mailer, publicWebURL, logger, cfg.IsProd(), cfg.AuthEmailPasswordEnabled)
+	// Declared before authHandler: signup attribution needs it.
+	partners := repository.NewPartnerRepo(pool)
+	authHandler := handler.NewAuthHandler(users, emailVerifications, memberships, googleVerifier, jwtSvc, mailer, publicWebURL, logger, cfg.IsProd(), cfg.AuthEmailPasswordEnabled).
+		WithPartners(partners)
 	storeHandler := handler.NewStoreHandler(stores, subscriptions, auditLogger, logger)
 	metaHandler := handler.NewMetaHandler(stores, encryptor, cfg.WebhookBaseURL, auditLogger, logger)
 	productHandler := handler.NewProductHandler(products, variants, stores, subscriptions, planRepo, bulkJobs, productDiscounts, modifierRepo, materialRepo, categories, courseVideos, storageClient, broker, auditLogger, logger)
@@ -161,6 +164,8 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	digitalDownloadHandler := handler.NewDigitalDownloadHandler(downloadTokens, downloadLogs, stores, logger)
 	buyerOTPs := repository.NewBuyerOTPRepo(pool)
 	buyerCourseHandler := handler.NewBuyerCourseHandler(downloadTokens, buyerOTPs, courseVideos, downloadLogs, mailer, jwtSvc, cfg.IsProd(), logger)
+	partnerNotifier := handler.NewPartnerNotifier(partners, mailer, logger)
+	adminPartnersHandler := handler.NewAdminPartnersHandler(partners, users, platformAuditRepo, logger)
 	photoBooths := repository.NewPhotoBoothRepo(pool)
 	photoBoothSessions := repository.NewPhotoBoothSessionRepo(pool)
 	boothHandler := handler.NewBoothHandler(
@@ -171,7 +176,8 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 		photoBooths, photoBoothSessions, users, platformAuditRepo, logger,
 	)
 	platformWebhookHandler := handler.NewPlatformWebhookHandler(
-		subscriptions, photoBoothSessions, cfg.PlatformMidtransServerKey, auditLogger, logger,
+		subscriptions, photoBoothSessions, cfg.PlatformMidtransServerKey,
+		auditLogger, partnerNotifier, logger,
 	)
 	staffHandler := handler.NewStaffHandler(stores, memberships, users, subscriptions, planRepo, mailer, publicWebURL, auditLogger, logger)
 	domainHandler := handler.NewDomainHandler(stores, subscriptions, auditLogger, cfg.CnameTarget, logger)
@@ -181,7 +187,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	adminHandler := handler.NewAdminHandler(
 		users, stores, adminRepo, platformAuditRepo, auditRepo, subscriptions,
 		planRepo, storageClient, jwtSvc, mailer, publicWebURL, cfg.IsProd(), logger,
-	)
+	).WithPartnerNotifier(partnerNotifier)
 
 	requireAuth := middleware.RequireAuth(jwtSvc, users)
 	requireBuyer := middleware.RequireBuyer(jwtSvc)
@@ -645,6 +651,19 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 					r.Post("/tokens/{tokenID}/revoke", adminPhotoBoothHandler.RevokeToken)
 					r.Put("/settings", adminPhotoBoothHandler.UpdateSettings)
 					r.Get("/sessions", adminPhotoBoothHandler.ListSessions)
+				})
+				// Partner referral programme: who sends SellOn users, and
+				// what they are owed when those users subscribe.
+				r.Route("/partners", func(r chi.Router) {
+					r.Get("/", adminPartnersHandler.List)
+					r.Post("/", adminPartnersHandler.Create)
+					// Declared before /{id} so chi does not read
+					// "commissions" as a partner id.
+					r.Post("/commissions/{id}/void", adminPartnersHandler.VoidCommission)
+					r.Get("/{id}", adminPartnersHandler.Detail)
+					r.Put("/{id}", adminPartnersHandler.Update)
+					r.Post("/{id}/referrals", adminPartnersHandler.AttachReferral)
+					r.Post("/{id}/payouts", adminPartnersHandler.RecordPayout)
 				})
 				r.Get("/users", adminHandler.ListUsers)
 				r.Get("/users/{id}", adminHandler.GetUser)

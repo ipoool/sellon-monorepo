@@ -96,6 +96,42 @@ async function resolveDomainToSlug(host: string): Promise<string | null> {
   }
 }
 
+
+// Partner referral capture.
+//
+// A partner link is `sellon.id/?ref=KODE` on a flyer, a slide, a WhatsApp
+// broadcast. The visitor lands on the marketing site, reads for two minutes,
+// then clicks through to sign up — by which point the query string is long
+// gone. Parking the code in a cookie here is what makes attribution survive
+// that gap, and it works on every public page rather than only /login.
+//
+// Root host only: a seller's custom domain must never carry a platform
+// partner code.
+//
+// The cookie is only a carrier. First-touch arbitration happens in the
+// database at signup, where a unique index on user_id means the first partner
+// to actually convert someone keeps them — so letting a newer ?ref= overwrite
+// an older cookie is safe, and matches what the visitor most recently clicked.
+const REF_COOKIE = "sellon_ref";
+const REF_MAX_AGE = 60 * 60 * 24 * 90; // 90 days
+// Mirrors the partner code CHECK constraint in migration 0112. Validated
+// before storage: this value ends up in a cookie and then in a request body,
+// and an unbounded string off a query param is not worth carrying around.
+const REF_PATTERN = /^[A-Za-z0-9][A-Za-z0-9-]{1,23}$/;
+
+function withReferral(request: NextRequest, res: NextResponse): NextResponse {
+  const ref = request.nextUrl.searchParams.get("ref");
+  if (!ref || !REF_PATTERN.test(ref)) return res;
+  res.cookies.set(REF_COOKIE, ref.toUpperCase(), {
+    path: "/",
+    maxAge: REF_MAX_AGE,
+    httpOnly: true, // only the login page reads it, server-side
+    sameSite: "lax",
+    secure: siteUrl.startsWith("https"),
+  });
+  return res;
+}
+
 export async function middleware(request: NextRequest) {
   const rawHost = request.headers.get("host") ?? "";
   // Strip port for comparison, but keep it in the original for matching ROOT_HOST.
@@ -108,7 +144,7 @@ export async function middleware(request: NextRequest) {
     hostNormalized === "localhost" ||
     hostNormalized === "127.0.0.1"
   ) {
-    return NextResponse.next();
+    return withReferral(request, NextResponse.next());
   }
 
   // We are on a seller's custom domain. Resolve which store owns it before

@@ -47,9 +47,16 @@ function loadGISScript(onReady: () => void): () => void {
 
 export function GoogleSignInButton({
   inviteCode,
+  referralCode,
   clientId: clientIdProp,
 }: {
   inviteCode?: string;
+  /**
+   * Partner attribution, read server-side from the sellon_ref cookie. The
+   * API is on another origin and cannot see that cookie, so it rides in the
+   * request body — and only matters when this sign-in creates a new account.
+   */
+  referralCode?: string;
   /** From GET /api/v1/info, so the id can change without a rebuild. */
   clientId?: string;
 }) {
@@ -81,7 +88,12 @@ export function GoogleSignInButton({
             method: "POST",
             credentials: "include",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ credential }),
+            body: JSON.stringify({
+              credential,
+              referral_code: referralCode ?? "",
+              referral_path:
+                typeof window !== "undefined" ? window.location.pathname : "",
+            }),
           });
           const data = await res.json().catch(() => ({}));
           if (!res.ok) {
@@ -129,9 +141,9 @@ export function GoogleSignInButton({
       // "memuat tombol" hint below stays visible so the user isn't
       // staring at empty space.
     }
-    // inviteCode is read inside the GIS callback, so a change must
-    // re-initialize the button or the join would post a stale code.
-  }, [scriptReady, clientId, apiBase, inviteCode, push, refresh]);
+    // inviteCode and referralCode are read inside the GIS callback, so a
+    // change must re-initialize the button or it would post a stale code.
+  }, [scriptReady, clientId, apiBase, inviteCode, referralCode, push, refresh]);
 
   // Defensive only — the login page resolves the client id server-side and
   // doesn't mount this button without one. It must never name an env var or a

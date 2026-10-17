@@ -33,7 +33,10 @@ type AdminHandler struct {
 	mailer        *email.Mailer
 	webOrigin     string
 	cookieSecure  bool
-	logger        *slog.Logger
+	// Set via WithPartnerNotifier. Nil-safe, and fluent rather than a 14th
+	// constructor argument.
+	partners *PartnerNotifier
+	logger   *slog.Logger
 }
 
 func NewAdminHandler(
@@ -59,6 +62,14 @@ func NewAdminHandler(
 		jwt:     jwt, mailer: mailer, webOrigin: webOrigin,
 		cookieSecure: cookieSecure, logger: logger,
 	}
+}
+
+// WithPartnerNotifier lets a manually activated invoice announce its partner
+// commission the same way a Midtrans-settled one does. A bank transfer and a
+// QRIS payment are the same sale to the partner.
+func (h *AdminHandler) WithPartnerNotifier(n *PartnerNotifier) *AdminHandler {
+	h.partners = n
+	return h
 }
 
 // === Stats ===
@@ -816,6 +827,10 @@ func (h *AdminHandler) ActivateInvoice(w http.ResponseWriter, r *http.Request) {
 			"gagal aktifkan transaksi - cek apakah invoice sudah pernah di-settle")
 		return
 	}
+	// After the settle committed. The claim inside makes a double activation
+	// (which the guard above already rejects) a no-op anyway.
+	h.partners.NotifySettled(inv.ID)
+
 	storeID := inv.StoreID
 	h.logPlatform(r, "subscription.invoice_activated", nil, &storeID,
 		"Aktifkan transaksi langganan #"+id.String()[:8],

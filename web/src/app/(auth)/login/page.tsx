@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { ShieldCheck, Zap, Wallet, Sparkles, Handshake } from "lucide-react";
 
@@ -95,7 +96,7 @@ async function signInOptions(): Promise<{
 export default async function MasukPage({
   searchParams,
 }: {
-  searchParams: Promise<{ invite?: string }>;
+  searchParams: Promise<{ invite?: string; ref?: string }>;
 }) {
   const me = await getMe();
   if (me) {
@@ -105,8 +106,17 @@ export default async function MasukPage({
     redirect("/dashboard");
   }
 
-  const { invite } = await searchParams;
+  const { invite, ref } = await searchParams;
   const inviteCode = invite?.trim().toUpperCase() || undefined;
+
+  // Partner attribution. The query param wins over the cookie so a link
+  // opened directly on /login still works, but the cookie is the usual
+  // carrier — middleware parked it when the visitor first arrived, possibly
+  // several pages ago. The API lives on another origin and can never read
+  // the cookie itself, so the code has to travel in the signup request body.
+  const refCookie = (await cookies()).get("sellon_ref")?.value;
+  const referralCode = (ref || refCookie)?.trim().toUpperCase() || undefined;
+
   const options = await signInOptions();
 
   return (
@@ -201,6 +211,7 @@ export default async function MasukPage({
                 <div className="flex flex-col gap-4">
                   <GoogleSignInButton
                     inviteCode={inviteCode}
+                    referralCode={referralCode}
                     clientId={options.googleClientId}
                   />
                   {/* Divider only earns its place when something follows it. */}
@@ -214,7 +225,12 @@ export default async function MasukPage({
                 </div>
               )}
 
-              {options.emailPassword && <EmailAuthForm inviteCode={inviteCode} />}
+              {options.emailPassword && (
+                <EmailAuthForm
+                  inviteCode={inviteCode}
+                  referralCode={referralCode}
+                />
+              )}
               <p className="text-center text-xs leading-relaxed text-neutral-500">
                 Dengan masuk, kamu menyetujui{" "}
                 <Link href="/terms" className="font-medium text-brand-600 hover:text-brand-700">
