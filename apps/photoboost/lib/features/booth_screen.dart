@@ -360,48 +360,32 @@ class _SampleStripState extends State<_SampleStrip>
     child: AnimatedBuilder(
       animation: _c,
       builder: (context, _) {
-        final tilt = math.sin(_c.value * 2 * math.pi) * 0.018;
-        return Transform.rotate(
-          angle: -0.04 + tilt,
-          // Center gives the card loose constraints so it shrink-wraps the
-          // photos. Inside the Expanded it was stretching to the full column
-          // width, which turned a photo strip into a big white slab with
-          // pictures floating in it.
-          child: Center(
-            child: Container(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(SellonRadii.card),
-                boxShadow: SellonShadows.popout,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Three cells, not four. Four made the strip taller than
-                  // the whole left column, which left a dead band across the
-                  // middle of the screen — and shrank each photo to the point
-                  // where the card was mostly white margin.
-                  for (var i = 0; i < _stripCells; i++)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: _SampleFrame(
-                        // Each cell advances on its own beat, so the strip
-                        // looks like it is still being filled.
-                        // Still cycles all four photographs, so none of them
-                        // goes unseen just because the strip got shorter.
-                        seed: ((_c.value * 4).floor() + i) % _sampleCount,
+        // One gentle sway for the whole pile rather than per-strip motion:
+        // three things drifting independently reads as a glitch, one pile
+        // settling reads as paper.
+        final sway = math.sin(_c.value * 2 * math.pi) * 0.012;
+        return Center(
+          child: SizedBox(
+            width: _fanWidth,
+            height: _stripHeight + 44,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                for (var i = 0; i < _stripsInFan; i++)
+                  Positioned(
+                    left: i * _fanStep,
+                    top: _fanDrop[i],
+                    child: Transform.rotate(
+                      angle: _fanAngle[i] + sway,
+                      child: _PrintedStrip(
+                        // Each strip starts on a different photograph, so a
+                        // pile of three reads as three different customers'
+                        // prints rather than the same one copied.
+                        offset: i * 2,
                       ),
                     ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'PHOTOBOOST',
-                    style: SellonText.eyebrow.copyWith(
-                      color: SellonColors.brand700,
-                    ),
                   ),
-                ],
-              ),
+              ],
             ),
           ),
         );
@@ -410,27 +394,76 @@ class _SampleStripState extends State<_SampleStrip>
   );
 }
 
+// The fan. Three printed strips, overlapping, at slight angles — what the
+// booth actually hands people, piling up.
+const int _stripsInFan = 3;
+const double _stripWidth = 168;
+const double _stripHeight = 374;
+const double _fanStep = 104; // horizontal offset between strips
+const double _fanWidth = _stripWidth + _fanStep * (_stripsInFan - 1);
+const _fanAngle = [-0.085, 0.015, 0.075];
+const _fanDrop = [10.0, 0.0, 18.0];
+
+/// One printed strip: three photographs on paper-white, captioned.
+class _PrintedStrip extends StatelessWidget {
+  const _PrintedStrip({required this.offset});
+
+  /// Where in the photo set this strip starts, so the three in the fan do
+  /// not show identical pictures.
+  final int offset;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: _stripWidth,
+    padding: const EdgeInsets.fromLTRB(10, 10, 10, 14),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(8),
+      boxShadow: SellonShadows.popout,
+    ),
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 0; i < _stripCells; i++)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 7),
+            child: _SampleFrame(seed: (offset + i) % _sampleCount),
+          ),
+        const SizedBox(height: 2),
+        Text(
+          'PHOTOBOOST',
+          style: SellonText.eyebrow.copyWith(
+            color: SellonColors.brand700,
+            fontSize: 8,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+/// One cell of a printed strip.
 class _SampleFrame extends StatelessWidget {
   const _SampleFrame({required this.seed});
+
   final int seed;
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 520),
-      child: ClipRRect(
-        key: ValueKey(seed),
-        borderRadius: BorderRadius.circular(10),
-        child: Image.asset(
-          'assets/samples/${(seed % _sampleCount) + 1}.jpg',
-          width: 300,
-          height: 214,
-          fit: BoxFit.cover,
-          // The strip sells the product, so it shows the product: real
-          // photographs of people having fun, not coloured rectangles with
-          // an emoji in them. Nobody queues for a smiley.
-          filterQuality: FilterQuality.medium,
-        ),
+    // No AnimatedSwitcher: cross-fading one face into another looked like a
+    // double exposure, and a printed strip does not change its mind about
+    // what is on it.
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(5),
+      child: Image.asset(
+        'assets/samples/${(seed % _sampleCount) + 1}.jpg',
+        width: _stripWidth - 20,
+        height: (_stripWidth - 20) / 1.4,
+        fit: BoxFit.cover,
+        // The strip sells the product, so it shows the product: real
+        // photographs of people having fun, not coloured rectangles with
+        // an emoji in them. Nobody queues for a smiley.
+        filterQuality: FilterQuality.medium,
       ),
     );
   }

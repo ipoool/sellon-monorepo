@@ -62,31 +62,56 @@ class PairingScreen extends StatefulWidget {
 }
 
 class _PairingScreenState extends State<PairingScreen> {
-  String _code = '';
+  final _controller = TextEditingController();
+  final _focus = FocusNode();
   bool _busy = false;
   String? _error;
 
+  String get _code => _controller.text;
   bool get _complete => _code.length == _codeLength;
 
-  void _press(String ch) {
-    if (_busy || _complete) return;
-    HapticFeedback.selectionClick();
-    setState(() {
-      _code += ch;
-      _error = null;
+  @override
+  void initState() {
+    super.initState();
+    // Raise the keyboard on arrival: this screen has exactly one thing to
+    // do, and making the technician tap a field first is a step for nothing.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focus.requestFocus();
     });
-    // Submitting on the sixth key removes a step the operator would
-    // otherwise have to find after already finishing the task.
-    if (_code.length == _codeLength) _submit();
   }
 
-  void _backspace() {
-    if (_busy || _code.isEmpty) return;
-    HapticFeedback.selectionClick();
-    setState(() {
-      _code = _code.substring(0, _code.length - 1);
-      _error = null;
-    });
+  @override
+  void dispose() {
+    _controller.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  void _onChanged(String raw) {
+    // The platform keyboard offers lowercase, O, I and L — none of which the
+    // codes use. Fold and filter here rather than refusing input, so typing
+    // a lowercase "o" is not a dead key the operator has to puzzle over.
+    final cleaned = raw
+        .toUpperCase()
+        .split('')
+        .where(_alphabet.contains)
+        .take(_codeLength)
+        .join();
+
+    if (cleaned != raw) {
+      _controller.value = TextEditingValue(
+        text: cleaned,
+        selection: TextSelection.collapsed(offset: cleaned.length),
+      );
+    }
+    setState(() => _error = null);
+
+    // Submit on the sixth character rather than making them find a button
+    // after the task is already finished.
+    if (cleaned.length == _codeLength) {
+      HapticFeedback.selectionClick();
+      _submit();
+    }
   }
 
   Future<void> _submit() async {
@@ -111,16 +136,18 @@ class _PairingScreenState extends State<PairingScreen> {
         _error = e.message;
         // Clearing is deliberate: every failure here means the six
         // characters are wrong, expired or spent. Leaving them on screen
-        // invites the operator to press "coba lagi" on the same dead code.
-        _code = '';
+        // invites the operator to retype around the same dead code.
+        _controller.clear();
       });
+      _focus.requestFocus();
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _busy = false;
         _error = 'Gagal menghubungkan. Coba lagi.';
-        _code = '';
+        _controller.clear();
       });
+      _focus.requestFocus();
     }
   }
 
@@ -216,31 +243,70 @@ class _PairingScreenState extends State<PairingScreen> {
   /// Six slots rather than a text field: the operator can see at a glance how
   /// many characters are left, and there is no cursor, no selection, and no
   /// soft keyboard to fight.
+  ///
+  /// The boxes are display only — the real input is a zero-size TextField
+  /// behind them, so the platform keyboard does the typing while the screen
+  /// still shows six slots filling up. Tapping anywhere here raises it.
   Widget _slots() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: List.generate(_codeLength, (i) {
-        final filled = i < _code.length;
-        final next = i == _code.length && !_busy;
-        return Container(
-          width: 62,
-          height: 76,
-          margin: const EdgeInsets.symmetric(horizontal: 5),
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: filled ? BoothSurface.card : BoothSurface.raised,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: next ? BoothSurface.accent : BoothSurface.border,
-              width: next ? 2 : 1,
+    return GestureDetector(
+      onTap: () => _focus.requestFocus(),
+      behavior: HitTestBehavior.opaque,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          SizedBox(
+            width: 1,
+            height: 1,
+            child: TextField(
+              controller: _controller,
+              focusNode: _focus,
+              onChanged: _onChanged,
+              enabled: !_busy,
+              autocorrect: false,
+              enableSuggestions: false,
+              textCapitalization: TextCapitalization.characters,
+              // Visible characters, invisible field: a transparent cursor and
+              // text keep the system selection handles from floating over the
+              // slots.
+              showCursor: false,
+              cursorWidth: 0,
+              style: const TextStyle(color: Colors.transparent, fontSize: 1),
+              decoration: const InputDecoration(
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: EdgeInsets.zero,
+              ),
             ),
           ),
-          child: Text(
-            filled ? _code[i] : '',
-            style: SellonText.h1.copyWith(color: BoothSurface.textPrimary),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: List.generate(_codeLength, (i) {
+              final filled = i < _code.length;
+              final next = i == _code.length && !_busy;
+              return Container(
+                width: 62,
+                height: 76,
+                margin: const EdgeInsets.symmetric(horizontal: 5),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: filled ? BoothSurface.card : BoothSurface.raised,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: next ? BoothSurface.accent : BoothSurface.border,
+                    width: next ? 2 : 1,
+                  ),
+                ),
+                child: Text(
+                  filled ? _code[i] : '',
+                  style: SellonText.h1.copyWith(
+                    color: BoothSurface.textPrimary,
+                  ),
+                ),
+              );
+            }),
           ),
-        );
-      }),
+        ],
+      ),
     );
   }
 
@@ -265,86 +331,30 @@ class _PairingScreenState extends State<PairingScreen> {
 
   Widget _keypad() {
     if (_busy) {
-      return SizedBox(
-        height: 236,
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(
-                width: 34,
-                height: 34,
-                child: CircularProgressIndicator(
-                  strokeWidth: 3,
-                  color: BoothSurface.accent,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Menghubungkan…',
-                style: SellonText.body.copyWith(
-                  color: BoothSurface.textSecondary,
-                ),
-              ),
-            ],
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(
+            width: 34,
+            height: 34,
+            child: CircularProgressIndicator(
+              strokeWidth: 3,
+              color: BoothSurface.accent,
+            ),
           ),
-        ),
+          const SizedBox(height: 16),
+          Text(
+            'Menghubungkan…',
+            style: SellonText.body.copyWith(color: BoothSurface.textSecondary),
+          ),
+        ],
       );
     }
-
-    return Column(
-      children: [
-        Wrap(
-          alignment: WrapAlignment.center,
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final ch in _alphabet.split(''))
-              _Key(label: ch, onTap: () => _press(ch)),
-          ],
-        ),
-        const SizedBox(height: 12),
-        PillButton(
-          label: 'Hapus',
-          icon: Icons.backspace_outlined,
-          variant: PillVariant.secondary,
-          onPressed: _code.isEmpty ? null : _backspace,
-        ),
-      ],
-    );
-  }
-}
-
-/// One keypad key. Sized past the 56px the booth's buttons hold themselves
-/// to, because this is pressed by someone holding a clipboard.
-class _Key extends StatelessWidget {
-  const _Key({required this.label, required this.onTap});
-
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: BoothSurface.card,
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          width: 58,
-          height: 58,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: BoothSurface.border),
-          ),
-          child: Text(
-            label,
-            style: SellonText.h3.copyWith(color: BoothSurface.textPrimary),
-          ),
-        ),
-      ),
+    return PillButton(
+      label: 'Ketuk untuk mengetik',
+      icon: Icons.keyboard_alt_outlined,
+      variant: PillVariant.secondary,
+      onPressed: () => _focus.requestFocus(),
     );
   }
 }

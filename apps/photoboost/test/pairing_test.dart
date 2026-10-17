@@ -182,10 +182,7 @@ void main() {
       );
       await _pumpPast(tester);
 
-      for (final ch in ['A', 'B', 'C', 'D', 'E', 'F']) {
-        await tester.tap(find.widgetWithText(InkWell, ch));
-        await tester.pump();
-      }
+      await tester.enterText(find.byType(TextField), 'ABCDEF');
       await _pumpPast(tester);
 
       expect(sentCode, 'ABCDEF');
@@ -224,10 +221,7 @@ void main() {
       );
       await _pumpPast(tester);
 
-      for (final ch in ['A', 'B', 'C', 'D', 'E', 'F']) {
-        await tester.tap(find.widgetWithText(InkWell, ch));
-        await tester.pump();
-      }
+      await tester.enterText(find.byType(TextField), 'ABCDEF');
       await _pumpPast(tester);
 
       expect(attempts, 1);
@@ -235,18 +229,14 @@ void main() {
         find.text('Kode tidak berlaku atau sudah dipakai'),
         findsOneWidget,
       );
-      // Every failure here means those six characters are dead. Leaving them
-      // on screen would invite the operator to retry the same bad code.
-      expect(find.widgetWithText(InkWell, 'A'), findsOneWidget);
-      final slotTexts = tester
-          .widgetList<Text>(find.byType(Text))
-          .where((t) => t.data == 'A')
-          .length;
+      // Every failure here means those six characters are dead. Leaving
+      // them on screen would invite the operator to retype around the same
+      // bad code, so the field and the slots must both be empty.
       expect(
-        slotTexts,
-        1,
-        reason: 'the A slot was cleared; only the key remains',
+        tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        isEmpty,
       );
+      expect(find.text('A'), findsNothing);
     });
 
     testWidgets('a revoked tablet is told which booth it used to be', (
