@@ -10,6 +10,7 @@ import {
   Handshake,
   Loader2,
   Plus,
+  QrCode,
   X,
 } from "lucide-react";
 
@@ -19,6 +20,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { showError, showSuccess } from "@/lib/toast";
 import { formatRupiah } from "@/lib/format";
+import { PartnerQrDialog } from "@/components/admin/partner-qr-dialog";
 import type { Partner } from "@/lib/types";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -108,6 +110,7 @@ function PartnerCard({
   onEdit: () => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const [qrOpen, setQrOpen] = useState(false);
   const referrals = p.referrals ?? 0;
   const converted = p.converted ?? 0;
   // Conversion rate earns its place next to the raw count: four hundred
@@ -174,7 +177,24 @@ function PartnerCard({
           )}
           {copied ? "Tersalin" : "Salin"}
         </button>
+        <button
+          type="button"
+          onClick={() => setQrOpen(true)}
+          className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-brand-700 hover:bg-white"
+        >
+          <QrCode className="size-3.5" aria-hidden />
+          QR
+        </button>
       </div>
+
+      {qrOpen && (
+        <PartnerQrDialog
+          partnerName={p.name}
+          code={p.code}
+          url={partnerLink(p.code)}
+          onClose={() => setQrOpen(false)}
+        />
+      )}
 
       <dl className="mt-3 grid grid-cols-3 gap-2 border-t border-neutral-100 pt-3 text-sm">
         <div>

@@ -7,6 +7,7 @@ import {
   Check,
   Copy,
   Loader2,
+  QrCode,
   UserPlus,
 } from "lucide-react";
 
@@ -24,6 +25,7 @@ import {
   formatRate,
   partnerLink,
 } from "@/components/admin/admin-partners-manager";
+import { PartnerQrDialog } from "@/components/admin/partner-qr-dialog";
 import type {
   Partner,
   PartnerCommission,
@@ -50,6 +52,7 @@ export function AdminPartnerDetail({
   const [, startTransition] = useTransition();
   const [copied, setCopied] = useState(false);
   const [payoutOpen, setPayoutOpen] = useState(false);
+  const [qrOpen, setQrOpen] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
   const [voiding, setVoiding] = useState<PartnerCommission | null>(null);
   const [busy, setBusy] = useState(false);
@@ -163,6 +166,10 @@ export function AdminPartnerDetail({
           >
             <Banknote className="size-3.5" aria-hidden />
             Tandai sudah dibayar
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setQrOpen(true)}>
+            <QrCode className="size-3.5" aria-hidden />
+            Unduh QR
           </Button>
           <Button
             size="sm"
@@ -386,6 +393,15 @@ export function AdminPartnerDetail({
             </table>
           </div>
         </section>
+      )}
+
+      {qrOpen && (
+        <PartnerQrDialog
+          partnerName={partner.name}
+          code={partner.code}
+          url={partnerLink(partner.code)}
+          onClose={() => setQrOpen(false)}
+        />
       )}
 
       {payoutOpen && (
