@@ -132,19 +132,25 @@ export function AdminPartnersManager({ partners }: { partners: Partner[] }) {
         />
       )}
 
+      {/* The typed phrase is the partner's own code, not a generic "HAPUS":
+          typing it is what makes you check WHICH partner is about to go, and
+          muscle memory from the last deletion cannot carry you through this
+          one. */}
       <ConfirmDialog
         open={deleting !== null}
         onClose={() => setDeleting(null)}
         title="Hapus partner?"
         description={
-          `Partner ${deleting?.code ?? ""} akan dihapus permanen beserta ` +
-          `link-nya. Kalau link itu sudah terlanjur disebar, orang yang ` +
-          `mengekliknya nanti tidak akan tercatat ke siapa pun.`
+          `Partner ${deleting?.name ?? ""} akan dihapus permanen beserta ` +
+          `link-nya. Kalau link itu sudah terlanjur disebar atau QR-nya ` +
+          `sudah dicetak, orang yang memakainya nanti tidak akan tercatat ` +
+          `ke siapa pun.`
         }
         confirmLabel="Hapus partner"
         kind="danger"
         busy={busy}
         error={deleteError}
+        requireTypedPhrase={deleting?.code}
         onConfirm={() => {
           if (deleting) void remove(deleting);
         }}
