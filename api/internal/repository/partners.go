@@ -30,6 +30,9 @@ var (
 	ErrPartnerCodeTaken = errors.New("partner code taken")
 	ErrCommissionLocked = errors.New("commission already paid or void")
 	ErrPayoutNothingDue = errors.New("no commission due")
+	// ErrPartnerHasHistory means the partner already brought users in, so the
+	// row is a record rather than a draft.
+	ErrPartnerHasHistory = errors.New("partner has referrals")
 )
 
 // Partner is one promoting party.
@@ -118,6 +121,35 @@ type UpdatePartnerInput struct {
 	CommissionBps int
 	Status        string
 	Notes         string
+}
+
+// DeletePartner removes a partner that never brought anyone in.
+//
+// Guarded on having NO referrals, in the same statement that deletes — not a
+// count followed by a delete, which a signup landing between the two would
+// invalidate. A partner with history is deactivated (status 'ended'), never
+// deleted: their commission rows are accounting, and the FKs are RESTRICT so
+// the database would refuse anyway.
+//
+// So this is really "discard a mistake": a typo'd code, a partner registered
+// twice, a test row.
+func (r *PartnerRepo) DeletePartner(ctx context.Context, id uuid.UUID) error {
+	ct, err := r.pool.Exec(ctx, `
+		DELETE FROM partners p
+		WHERE p.id = $1
+		  AND NOT EXISTS (SELECT 1 FROM partner_referrals r WHERE r.partner_id = p.id)
+		  AND NOT EXISTS (SELECT 1 FROM partner_commissions c WHERE c.partner_id = p.id)
+		  AND NOT EXISTS (SELECT 1 FROM partner_payouts po WHERE po.partner_id = p.id)
+	`, id)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		// Either unknown, or it has history. The handler re-reads to tell
+		// those apart, because the two need different copy.
+		return ErrPartnerHasHistory
+	}
+	return nil
 }
 
 // UpdatePartner changes everything except the code. The code is printed on

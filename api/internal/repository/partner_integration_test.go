@@ -574,3 +574,90 @@ func TestPartnerNoticeSkippedAfterPayout(t *testing.T) {
 		t.Fatal("a settled commission was queued for notification")
 	}
 }
+
+// === Delete ===
+
+// A partner registered by mistake — wrong code, duplicate, a test — should be
+// removable. Nothing has happened yet, so nothing is lost.
+func TestPartnerDeleteRemovesAnUnusedPartner(t *testing.T) {
+	pool := testPool(t)
+	defer pool.Close()
+	ctx := context.Background()
+	repo := repository.NewPartnerRepo(pool)
+	p := newPartner(t, repo, 2000)
+
+	if err := repo.DeletePartner(ctx, p.ID); err != nil {
+		t.Fatalf("delete an unused partner: %v", err)
+	}
+	if _, err := repo.FindPartnerByID(ctx, p.ID); !errors.Is(err, repository.ErrPartnerNotFound) {
+		t.Fatalf("partner still present after delete (%v)", err)
+	}
+}
+
+// The important half. Once someone signed up through the link, the row is a
+// record of who is owed what — deleting it would erase the evidence behind a
+// payout, and the FKs would refuse anyway.
+func TestPartnerDeleteRefusedOnceSomeoneSignedUp(t *testing.T) {
+	pool := testPool(t)
+	defer pool.Close()
+	ctx := context.Background()
+	repo := repository.NewPartnerRepo(pool)
+	p := newPartner(t, repo, 2000)
+
+	seedReferredSeller(t, pool, repo, p.Code)
+
+	if err := repo.DeletePartner(ctx, p.ID); !errors.Is(err, repository.ErrPartnerHasHistory) {
+		t.Fatalf("delete returned %v, want ErrPartnerHasHistory", err)
+	}
+	if _, err := repo.FindPartnerByID(ctx, p.ID); err != nil {
+		t.Fatalf("partner was damaged by a refused delete: %v", err)
+	}
+}
+
+// A commission outlives its referral row only in theory today, but the guard
+// checks commissions and payouts independently so a future change to the
+// referral table cannot quietly open a hole in the money history.
+func TestPartnerDeleteRefusedWhenCommissionsExist(t *testing.T) {
+	pool := testPool(t)
+	defer pool.Close()
+	ctx := context.Background()
+	repo := repository.NewPartnerRepo(pool)
+	p := newPartner(t, repo, 2000)
+
+	_, storeID, subs, subID := seedReferredSeller(t, pool, repo, p.Code)
+	inv, err := subs.CreatePendingInvoice(ctx, storeID, subID, 9_900_000, "pro", 1, "test")
+	if err != nil {
+		t.Fatalf("invoice: %v", err)
+	}
+	if _, _, err := subs.SettleInvoice(ctx, inv.ID); err != nil {
+		t.Fatalf("settle: %v", err)
+	}
+
+	// Drop the referral, leaving the commission behind: the delete must still
+	// refuse, because the money row is the thing worth protecting.
+	if _, err := pool.Exec(ctx,
+		`UPDATE partner_commissions SET referral_id = NULL WHERE partner_id = $1`, p.ID); err != nil {
+		t.Fatalf("detach referral: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`DELETE FROM partner_referrals WHERE partner_id = $1`, p.ID); err != nil {
+		t.Fatalf("delete referrals: %v", err)
+	}
+
+	if err := repo.DeletePartner(ctx, p.ID); !errors.Is(err, repository.ErrPartnerHasHistory) {
+		t.Fatalf("delete returned %v, want ErrPartnerHasHistory", err)
+	}
+	if n := countCommissions(t, pool, p.ID); n != 1 {
+		t.Fatalf("commission count = %d after a refused delete, want 1", n)
+	}
+}
+
+// Deleting an unknown id is not a crash and not a success.
+func TestPartnerDeleteUnknownID(t *testing.T) {
+	pool := testPool(t)
+	defer pool.Close()
+	repo := repository.NewPartnerRepo(pool)
+	if err := repo.DeletePartner(context.Background(), uuid.New()); !errors.Is(err, repository.ErrPartnerHasHistory) {
+		t.Fatalf("unknown id returned %v, want the guarded no-op error", err)
+	}
+}

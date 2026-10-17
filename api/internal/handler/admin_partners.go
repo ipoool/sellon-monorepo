@@ -176,6 +176,47 @@ func (h *AdminPartnersHandler) Update(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, partnerDTOFlat(p))
 }
 
+// DELETE /api/v1/admin/partners/{id}
+//
+// Only for a partner that never brought anyone in — a typo'd code, a
+// duplicate, a test row. Once there are referrals the row is a record of
+// money owed, so the answer is "akhiri kerja sama" (status 'ended'), which
+// keeps the history and stops new attribution.
+func (h *AdminPartnersHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "id tidak valid")
+		return
+	}
+	// Read first, so the audit entry can name what was removed and so a
+	// missing partner is reported as missing rather than as "has history".
+	p, err := h.partners.FindPartnerByID(r.Context(), id)
+	if errors.Is(err, repository.ErrPartnerNotFound) {
+		response.Error(w, http.StatusNotFound, "partner tidak ditemukan")
+		return
+	}
+	if err != nil {
+		h.logger.Error("admin delete partner lookup", "err", err, "partner", id)
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	if err := h.partners.DeletePartner(r.Context(), id); err != nil {
+		if errors.Is(err, repository.ErrPartnerHasHistory) {
+			response.Error(w, http.StatusConflict,
+				"partner ini sudah punya pendaftar, jadi tidak bisa dihapus. "+
+					"Ubah statusnya jadi Selesai lewat Edit.")
+			return
+		}
+		h.logger.Error("admin delete partner", "err", err, "partner", id)
+		response.Error(w, http.StatusInternalServerError, "gagal menghapus partner")
+		return
+	}
+	h.audit(r, "partner.deleted", "Partner "+p.Code+" dihapus",
+		map[string]any{"partner_id": id.String(), "code": p.Code, "name": p.Name})
+	response.JSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
 // GET /api/v1/admin/partners/{id}
 func (h *AdminPartnersHandler) Detail(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))

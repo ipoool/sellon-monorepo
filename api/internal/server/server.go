@@ -662,6 +662,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 					r.Post("/commissions/{id}/void", adminPartnersHandler.VoidCommission)
 					r.Get("/{id}", adminPartnersHandler.Detail)
 					r.Put("/{id}", adminPartnersHandler.Update)
+					r.Delete("/{id}", adminPartnersHandler.Delete)
 					r.Post("/{id}/referrals", adminPartnersHandler.AttachReferral)
 					r.Post("/{id}/payouts", adminPartnersHandler.RecordPayout)
 				})

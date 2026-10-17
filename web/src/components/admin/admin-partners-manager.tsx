@@ -11,12 +11,14 @@ import {
   Loader2,
   Plus,
   QrCode,
+  Trash2,
   X,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { showError, showSuccess } from "@/lib/toast";
 import { formatRupiah } from "@/lib/format";
@@ -47,6 +49,31 @@ export function AdminPartnersManager({ partners }: { partners: Partner[] }) {
   const [pending, startTransition] = useTransition();
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Partner | null>(null);
+  const [deleting, setDeleting] = useState<Partner | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | undefined>();
+
+  async function remove(p: Partner) {
+    setBusy(true);
+    setDeleteError(undefined);
+    try {
+      const res = await fetch(`${apiBase}/api/v1/admin/partners/${p.id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || "Gagal menghapus");
+      showSuccess(`Partner ${p.code} dihapus`);
+      setDeleting(null);
+      startTransition(() => router.refresh());
+    } catch (e) {
+      // Shown inside the dialog rather than as a toast: the message explains
+      // what to do instead, and a toast would vanish before it is read.
+      setDeleteError(e instanceof Error ? e.message : "Gagal menghapus");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -77,7 +104,15 @@ export function AdminPartnersManager({ partners }: { partners: Partner[] }) {
       ) : (
         <ul className="grid gap-3 lg:grid-cols-2">
           {partners.map((p) => (
-            <PartnerCard key={p.id} partner={p} onEdit={() => setEditing(p)} />
+            <PartnerCard
+              key={p.id}
+              partner={p}
+              onEdit={() => setEditing(p)}
+              onDelete={() => {
+                setDeleteError(undefined);
+                setDeleting(p);
+              }}
+            />
           ))}
         </ul>
       )}
@@ -97,6 +132,24 @@ export function AdminPartnersManager({ partners }: { partners: Partner[] }) {
         />
       )}
 
+      <ConfirmDialog
+        open={deleting !== null}
+        onClose={() => setDeleting(null)}
+        title="Hapus partner?"
+        description={
+          `Partner ${deleting?.code ?? ""} akan dihapus permanen beserta ` +
+          `link-nya. Kalau link itu sudah terlanjur disebar, orang yang ` +
+          `mengekliknya nanti tidak akan tercatat ke siapa pun.`
+        }
+        confirmLabel="Hapus partner"
+        kind="danger"
+        busy={busy}
+        error={deleteError}
+        onConfirm={() => {
+          if (deleting) void remove(deleting);
+        }}
+      />
+
       {pending && <p className="text-xs text-neutral-400">Menyegarkan…</p>}
     </div>
   );
@@ -105,9 +158,11 @@ export function AdminPartnersManager({ partners }: { partners: Partner[] }) {
 function PartnerCard({
   partner: p,
   onEdit,
+  onDelete,
 }: {
   partner: Partner;
   onEdit: () => void;
+  onDelete: () => void;
 }) {
   const [copied, setCopied] = useState(false);
   const [qrOpen, setQrOpen] = useState(false);
@@ -236,6 +291,27 @@ function PartnerCard({
         <Button size="sm" variant="outline" onClick={onEdit}>
           Edit
         </Button>
+        {/* Deletable only while nothing has happened yet. Once someone has
+            signed up the row is a record of money owed, so the honest action
+            is to end the partnership, not erase it — and the server refuses
+            anyway. Hiding the button beats offering one that always fails. */}
+        {referrals === 0 && (p.paid_cents ?? 0) === 0 ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-danger hover:bg-danger/10"
+            onClick={onDelete}
+          >
+            <Trash2 className="size-3.5" aria-hidden />
+            Hapus
+          </Button>
+        ) : (
+          p.status !== "ended" && (
+            <span className="text-xs text-neutral-400">
+              Sudah ada riwayat — akhiri lewat Edit
+            </span>
+          )
+        )}
       </div>
     </li>
   );
