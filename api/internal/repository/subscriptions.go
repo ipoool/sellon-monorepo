@@ -570,9 +570,22 @@ type AdminListInvoicesFilter struct {
 // AdminListInvoices returns subscription invoices across every store with
 // owner + store details joined in. Admin-only — caller is responsible for
 // the RequireAdmin middleware.
+// AdminInvoiceSummary is the stat strip above the admin transactions table.
+//
+// Computed over the FILTERED set, not the whole table, so it answers "what am
+// I looking at" rather than "what exists" — filtering to one store and still
+// seeing platform-wide revenue would be worse than showing nothing.
+type AdminInvoiceSummary struct {
+	// Paid invoices only. A pending invoice is a request, not money.
+	GrossCents     int64
+	ThisMonthCents int64
+	PaidCount      int
+	PendingCount   int
+}
+
 func (r *SubscriptionRepo) AdminListInvoices(
 	ctx context.Context, f AdminListInvoicesFilter,
-) ([]AdminInvoiceRow, int, error) {
+) ([]AdminInvoiceRow, int, *AdminInvoiceSummary, error) {
 	if f.Limit <= 0 || f.Limit > 200 {
 		f.Limit = 25
 	}
@@ -601,7 +614,27 @@ func (r *SubscriptionRepo) AdminListInvoices(
 		LEFT JOIN users u ON u.id = s.owner_id
 		WHERE `+where, args...,
 	).Scan(&total); err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
+	}
+
+	// Revenue is counted in Asia/Jakarta: a UTC month boundary would move the
+	// last evening of each month into the next one.
+	var sum AdminInvoiceSummary
+	if err := r.pool.QueryRow(ctx, `
+		SELECT
+		  COALESCE(SUM(si.amount_cents) FILTER (WHERE si.status = 'paid'), 0),
+		  COALESCE(SUM(si.amount_cents) FILTER (
+		      WHERE si.status = 'paid'
+		        AND si.paid_at >= date_trunc('month', now() AT TIME ZONE 'Asia/Jakarta')
+		            AT TIME ZONE 'Asia/Jakarta'), 0),
+		  COUNT(*) FILTER (WHERE si.status = 'paid'),
+		  COUNT(*) FILTER (WHERE si.status = 'pending')
+		FROM subscription_invoices si
+		JOIN stores s ON s.id = si.store_id
+		LEFT JOIN users u ON u.id = s.owner_id
+		WHERE `+where, args...,
+	).Scan(&sum.GrossCents, &sum.ThisMonthCents, &sum.PaidCount, &sum.PendingCount); err != nil {
+		return nil, 0, nil, err
 	}
 
 	args = append(args, f.Limit, f.Offset)
@@ -622,7 +655,7 @@ func (r *SubscriptionRepo) AdminListInvoices(
 
 	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	defer rows.Close()
 
@@ -637,11 +670,11 @@ func (r *SubscriptionRepo) AdminListInvoices(
 			&row.StoreName, &row.StoreSlug,
 			&row.OwnerName, &row.OwnerEmail, &row.OwnerPicture,
 		); err != nil {
-			return nil, 0, err
+			return nil, 0, nil, err
 		}
 		out = append(out, row)
 	}
-	return out, total, rows.Err()
+	return out, total, &sum, rows.Err()
 }
 
 // AdminGrantSubscription overrides a store's plan + period_end directly,

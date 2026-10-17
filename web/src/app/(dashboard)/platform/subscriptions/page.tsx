@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 
 import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { AdminSubscriptionsTable } from "@/components/admin/admin-subscriptions-table";
+import { Stat } from "@/components/ui/stat";
+import { formatRupiah } from "@/lib/format";
 import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import type { AdminSubscriptionInvoice } from "@/lib/types";
@@ -39,9 +41,22 @@ export default async function PlatformSubscriptionsPage({
   const data = await serverApi<{
     invoices: AdminSubscriptionInvoice[];
     total: number;
+    summary: {
+      gross_cents: number;
+      this_month_cents: number;
+      paid_count: number;
+      pending_count: number;
+    };
   }>(`/api/v1/admin/subscriptions/invoices?${params.toString()}`);
   const invoices = data?.invoices ?? [];
   const total = data?.total ?? 0;
+  const summary = data?.summary ?? {
+    gross_cents: 0,
+    this_month_cents: 0,
+    paid_count: 0,
+    pending_count: 0,
+  };
+  const filtered = Boolean(q || status);
 
   return (
     <DashboardShell
@@ -51,6 +66,28 @@ export default async function PlatformSubscriptionsPage({
         status ? ` (status: ${status})` : ""
       }`}
     >
+      {/* Revenue counts PAID invoices only — a pending one is a request,
+          not money — and follows whatever filter is applied, so the numbers
+          always describe the rows below them. */}
+      <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat
+          label={filtered ? "Pendapatan (terfilter)" : "Total pendapatan"}
+          value={formatRupiah(summary.gross_cents)}
+        />
+        <Stat
+          label="Pendapatan bulan ini"
+          value={formatRupiah(summary.this_month_cents)}
+        />
+        <Stat
+          label="Transaksi lunas"
+          value={summary.paid_count.toLocaleString("id-ID")}
+        />
+        <Stat
+          label="Menunggu aktivasi"
+          value={summary.pending_count.toLocaleString("id-ID")}
+        />
+      </div>
+
       <AdminSubscriptionsTable
         initial={invoices}
         total={total}

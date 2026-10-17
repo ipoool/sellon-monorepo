@@ -763,7 +763,7 @@ func (h *AdminHandler) ListInvoices(w http.ResponseWriter, r *http.Request) {
 	}
 	offset, _ := strconv.Atoi(q.Get("offset"))
 
-	rows, total, err := h.subs.AdminListInvoices(r.Context(), repository.AdminListInvoicesFilter{
+	rows, total, sum, err := h.subs.AdminListInvoices(r.Context(), repository.AdminListInvoicesFilter{
 		Status: strings.TrimSpace(q.Get("status")),
 		Search: strings.TrimSpace(q.Get("q")),
 		Limit:  limit,
@@ -782,6 +782,12 @@ func (h *AdminHandler) ListInvoices(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, map[string]any{
 		"invoices": out,
 		"total":    total,
+		"summary": map[string]any{
+			"gross_cents":      sum.GrossCents,
+			"this_month_cents": sum.ThisMonthCents,
+			"paid_count":       sum.PaidCount,
+			"pending_count":    sum.PendingCount,
+		},
 	})
 }
 
