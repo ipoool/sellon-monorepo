@@ -2,11 +2,17 @@ import { redirect } from "next/navigation";
 
 import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { AdminSubscriptionsTable } from "@/components/admin/admin-subscriptions-table";
+import { AdminTransactionsTabs } from "@/components/admin/admin-transactions-tabs";
+import { AdminPhotoBoothSessionsTable } from "@/components/admin/admin-photobooth-sessions-table";
 import { Stat } from "@/components/ui/stat";
 import { formatRupiah } from "@/lib/format";
 import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
-import type { AdminSubscriptionInvoice } from "@/lib/types";
+import type {
+  AdminSubscriptionInvoice,
+  PhotoBoothSession,
+  PhotoBoothSessionSummary,
+} from "@/lib/types";
 
 export const metadata = { title: "Transaksi" };
 
@@ -16,6 +22,7 @@ type SearchParams = Promise<{
   q?: string;
   status?: string;
   page?: string;
+  tab?: string;
 }>;
 
 export default async function PlatformSubscriptionsPage({
@@ -28,6 +35,7 @@ export default async function PlatformSubscriptionsPage({
   if (me.role !== "admin" || me.is_impersonated) redirect("/dashboard");
 
   const sp = await searchParams;
+  const tab = sp.tab === "photobooth" ? "photobooth" : "langganan";
   const q = sp.q ?? "";
   const status = sp.status ?? "";
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
@@ -37,6 +45,59 @@ export default async function PlatformSubscriptionsPage({
   if (status) params.set("status", status);
   params.set("limit", String(PAGE_SIZE));
   params.set("offset", String((page - 1) * PAGE_SIZE));
+
+  if (tab === "photobooth") {
+    const pb = await serverApi<{
+      sessions: PhotoBoothSession[];
+      total: number;
+      summary: PhotoBoothSessionSummary;
+    }>(`/api/v1/admin/photobooth/sessions?${params.toString()}`);
+
+    const sessions = pb?.sessions ?? [];
+    const pbTotal = pb?.total ?? 0;
+    const pbSummary = pb?.summary ?? {
+      gross_cents: 0,
+      paid_count: 0,
+      completed_count: 0,
+      failed_count: 0,
+      review_count: 0,
+    };
+
+    return (
+      <DashboardShell
+        me={me}
+        pageTitle="Transaksi"
+        pageSubtitle={`${pbTotal} sesi foto tercatat`}
+      >
+        <AdminTransactionsTabs active={tab} />
+
+        <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Stat
+            label="Pendapatan booth"
+            value={formatRupiah(pbSummary.gross_cents)}
+          />
+          <Stat
+            label="Sesi lunas"
+            value={pbSummary.paid_count.toLocaleString("id-ID")}
+          />
+          <Stat
+            label="Selesai dicetak"
+            value={pbSummary.completed_count.toLocaleString("id-ID")}
+          />
+          <Stat
+            label="Perlu dicek"
+            value={pbSummary.review_count.toLocaleString("id-ID")}
+          />
+        </div>
+
+        <AdminPhotoBoothSessionsTable
+          sessions={sessions}
+          total={pbTotal}
+          page={page}
+        />
+      </DashboardShell>
+    );
+  }
 
   const data = await serverApi<{
     invoices: AdminSubscriptionInvoice[];
@@ -66,6 +127,8 @@ export default async function PlatformSubscriptionsPage({
         status ? ` (status: ${status})` : ""
       }`}
     >
+      <AdminTransactionsTabs active={tab} />
+
       {/* Revenue counts PAID invoices only — a pending one is a request,
           not money — and follows whatever filter is applied, so the numbers
           always describe the rows below them. */}

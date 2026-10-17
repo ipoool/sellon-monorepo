@@ -1075,3 +1075,111 @@ export type POSReport = {
   by_cashier: POSReportCashier[];
 };
 
+
+// === PhotoBoost (platform-owned photo booths) ===
+
+export type PhotoBoothFrame = {
+  id: string;
+  name: string;
+  image_url: string;
+  kind: string; // "frame" | "sticker"
+};
+
+/// The config a booth actually runs on: its own overrides already resolved
+/// against the platform defaults, server-side.
+export type PhotoBoothConfig = {
+  price_cents: number;
+  shots_count: number;
+  print_copies: number;
+  session_timeout_seconds: number;
+  qris_expiry_minutes: number;
+  frames: PhotoBoothFrame[];
+};
+
+export type PhotoBoothDeviceToken = {
+  id: string;
+  prefix: string;
+  label: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+};
+
+export type PhotoBoothBooth = {
+  id: string;
+  code: string;
+  name: string;
+  location: string;
+  status: "active" | "paused" | "retired";
+  notes: string;
+  // null means "inherit the platform default" — NOT zero. The UI shows these
+  // as muted placeholders so an admin can see what is set here and what is
+  // simply following the global value.
+  price_cents: number | null;
+  shots_count: number | null;
+  print_copies: number | null;
+  session_timeout_seconds: number | null;
+  qris_expiry_minutes: number | null;
+  frames: PhotoBoothFrame[] | null;
+  app_version: string;
+  printer_ok: boolean;
+  paper_low: boolean;
+  last_seen_at: string | null;
+  created_at: string;
+  effective?: PhotoBoothConfig;
+  tokens?: PhotoBoothDeviceToken[];
+};
+
+export type PhotoBoothFleetStats = {
+  active_booths: number;
+  offline_booths: number;
+  sessions_today: number;
+  gross_today_cents: number;
+};
+
+export type PhotoBoothSession = {
+  id: string;
+  session_number: string;
+  booth_id: string;
+  booth_code: string;
+  booth_name: string;
+  amount_cents: number;
+  shots_planned: number;
+  shots_taken: number;
+  print_copies: number;
+  frame_id: string;
+  status:
+    | "created"
+    | "awaiting_payment"
+    | "paid"
+    | "capturing"
+    | "printing"
+    | "completed"
+    | "expired"
+    | "failed"
+    | "refunded";
+  payment_status: "pending" | "paid" | "failed" | "expired" | "refunded";
+  payment_method: string;
+  provider_transaction_id: string;
+  needs_review: boolean;
+  review_reason: string;
+  failure_reason: string;
+  result_url: string;
+  app_version: string;
+  created_at: string;
+  charged_at: string | null;
+  paid_at: string | null;
+  captured_at: string | null;
+  printed_at: string | null;
+  completed_at: string | null;
+  expired_at: string | null;
+  qr_expires_at: string | null;
+};
+
+export type PhotoBoothSessionSummary = {
+  gross_cents: number;
+  paid_count: number;
+  completed_count: number;
+  failed_count: number;
+  review_count: number;
+};

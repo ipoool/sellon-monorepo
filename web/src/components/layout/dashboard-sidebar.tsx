@@ -26,6 +26,7 @@ import {
   ChevronDown,
   Boxes,
   ChefHat,
+  Camera,
   GalleryHorizontalEnd,
   Download,
   type LucideIcon,
@@ -339,6 +340,11 @@ function SidebarContent({
                   label: "Transaksi",
                   href: "/platform/subscriptions",
                   icon: Receipt,
+                },
+                {
+                  label: "Photo Booth",
+                  href: "/platform/photobooth",
+                  icon: Camera,
                 },
                 {
                   label: "Banner",
