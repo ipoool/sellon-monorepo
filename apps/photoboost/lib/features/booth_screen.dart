@@ -200,7 +200,7 @@ class _IdleView extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Expanded(
-                  flex: 6,
+                  flex: 5,
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -262,9 +262,13 @@ class _IdleView extends StatelessWidget {
                     ],
                   ),
                 ),
-                const SizedBox(width: SellonSpacing.xl),
+                const SizedBox(width: SellonSpacing.lg),
                 // A sample strip, so what you get is visible before you
                 // pay rather than described in words.
+                //
+                // 5:4 rather than 6:4 — the text column was claiming width
+                // it never filled, which opened a dead channel between the
+                // button and the strip.
                 const Expanded(flex: 4, child: _SampleStrip()),
               ],
             ),
@@ -365,7 +369,7 @@ class _SampleStripState extends State<_SampleStrip>
           // pictures floating in it.
           child: Center(
             child: Container(
-              padding: const EdgeInsets.fromLTRB(14, 14, 14, 22),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(SellonRadii.card),
@@ -374,12 +378,18 @@ class _SampleStripState extends State<_SampleStrip>
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  for (var i = 0; i < 4; i++)
+                  // Three cells, not four. Four made the strip taller than
+                  // the whole left column, which left a dead band across the
+                  // middle of the screen — and shrank each photo to the point
+                  // where the card was mostly white margin.
+                  for (var i = 0; i < _stripCells; i++)
                     Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.only(bottom: 12),
                       child: _SampleFrame(
                         // Each cell advances on its own beat, so the strip
                         // looks like it is still being filled.
+                        // Still cycles all four photographs, so none of them
+                        // goes unseen just because the strip got shorter.
                         seed: ((_c.value * 4).floor() + i) % _sampleCount,
                       ),
                     ),
@@ -413,8 +423,8 @@ class _SampleFrame extends StatelessWidget {
         borderRadius: BorderRadius.circular(10),
         child: Image.asset(
           'assets/samples/${(seed % _sampleCount) + 1}.jpg',
-          width: 210,
-          height: 150,
+          width: 300,
+          height: 214,
           fit: BoxFit.cover,
           // The strip sells the product, so it shows the product: real
           // photographs of people having fun, not coloured rectangles with
@@ -428,6 +438,9 @@ class _SampleFrame extends StatelessWidget {
 
 /// How many sample photographs ship in assets/samples.
 const int _sampleCount = 4;
+
+/// How many of them the idle strip shows at once.
+const int _stripCells = 3;
 
 class _Busy extends StatelessWidget {
   const _Busy({required this.message});
