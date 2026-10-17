@@ -1,132 +1,65 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'theme/colors.dart';
+import 'camera/camera_source.dart';
+import 'camera/fake_camera_source.dart';
+import 'data/api/booth_api.dart';
+import 'data/api/fake_booth_api.dart';
+import 'features/booth_screen.dart';
+import 'printing/fake_printer.dart';
+import 'printing/printer.dart';
+import 'session/booth_controller.dart';
 import 'theme/sellon_theme.dart';
-import 'theme/shadows.dart';
-import 'theme/typography.dart';
-import 'widgets/pill_button.dart';
-import 'widgets/tinted_panel.dart';
 
-void main() {
+/// Demo mode runs the whole flow against fakes: no backend, no Midtrans key,
+/// no webcam, no printer. It exists so the booth can be shown and exercised
+/// end to end before any of that hardware is bought.
+///
+///   flutter run -d macos                      # demo (default off-device)
+///   flutter run -d macos --dart-define=DEMO=false
+const kDemo = bool.fromEnvironment('DEMO', defaultValue: true);
+
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Landscape only: the booth is a fixed installation and a rotated kiosk is
+
+  // Landscape only: the booth is a fixed installation, and a rotated kiosk is
   // a broken kiosk.
-  SystemChrome.setPreferredOrientations([
+  await SystemChrome.setPreferredOrientations([
     DeviceOrientation.landscapeLeft,
     DeviceOrientation.landscapeRight,
   ]);
-  SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-  runApp(const PhotoBoostApp());
+  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+
+  final mediaDir = Directory('${Directory.systemTemp.path}/photoboost-media');
+  await mediaDir.create(recursive: true);
+
+  final BoothApi api = FakeBoothApi();
+  final CameraSource camera = FakeCameraSource();
+  final BoothPrinter printer = FakePrinter();
+
+  final controller = BoothController(
+    api: api,
+    camera: camera,
+    printer: printer,
+    mediaDir: mediaDir,
+  );
+  await controller.start();
+
+  runApp(PhotoBoostApp(controller: controller));
 }
 
 class PhotoBoostApp extends StatelessWidget {
-  const PhotoBoostApp({super.key});
+  const PhotoBoostApp({super.key, required this.controller});
+
+  final BoothController controller;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
     title: 'PhotoBoost',
     debugShowCheckedModeBanner: false,
     theme: buildSellonTheme(),
-    home: const IdleScreen(),
-  );
-}
-
-/// The attract screen. Everything else in the flow is still being built; this
-/// is what a passer-by sees, and it is already the real theme rather than a
-/// placeholder, so the brand work can be judged on a device.
-class IdleScreen extends StatelessWidget {
-  const IdleScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Stack(
-        children: [
-          // Brand wash, the same radial the web hero uses.
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: RadialGradient(
-                  center: const Alignment(0, -1.1),
-                  radius: 1.4,
-                  colors: [
-                    SellonColors.brand100.withValues(alpha: 0.85),
-                    SellonColors.neutral50,
-                  ],
-                ),
-              ),
-            ),
-          ),
-          SafeArea(
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 900),
-                child: Padding(
-                  padding: const EdgeInsets.all(SellonSpacing.lg),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text('PHOTO BOOTH', style: SellonText.eyebrow),
-                      const SizedBox(height: SellonSpacing.sm),
-                      Text(
-                        'Foto seru,\nlangsung cetak.',
-                        textAlign: TextAlign.center,
-                        style: SellonText.displayXl,
-                      ),
-                      const SizedBox(height: SellonSpacing.md),
-                      Text(
-                        'Bayar pakai QRIS, ambil 4 foto, pilih bingkai.',
-                        textAlign: TextAlign.center,
-                        style: SellonText.body,
-                      ),
-                      const SizedBox(height: SellonSpacing.xl),
-                      const _Steps(),
-                      const SizedBox(height: SellonSpacing.xl),
-                      PillButton(
-                        label: 'Mulai',
-                        icon: Icons.photo_camera_rounded,
-                        minWidth: 320,
-                        // Wired up once the session controller lands.
-                        onPressed: () {},
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _Steps extends StatelessWidget {
-  const _Steps();
-
-  static const _items = [
-    (Icons.qr_code_rounded, 'Scan & bayar'),
-    (Icons.photo_camera_rounded, '4 kali foto'),
-    (Icons.auto_awesome_rounded, 'Pilih bingkai'),
-    (Icons.print_rounded, 'Ambil cetakan'),
-  ];
-
-  @override
-  Widget build(BuildContext context) => TintedPanel(
-    padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 28),
-    child: Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-      children: [
-        for (final (icon, label) in _items)
-          Column(
-            children: [
-              IconChip(icon: icon),
-              const SizedBox(height: SellonSpacing.sm),
-              Text(label, style: SellonText.label),
-            ],
-          ),
-      ],
-    ),
+    home: BoothScreen(controller: controller),
   );
 }

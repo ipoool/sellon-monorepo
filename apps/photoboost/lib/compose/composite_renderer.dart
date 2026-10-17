@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -146,4 +147,13 @@ class CompositeRenderer {
     final data = await img.toByteData(format: ui.ImageByteFormat.rawRgba);
     return data!.buffer.asUint8List();
   }
+}
+
+/// Decodes a captured shot from disk. Shots live as files rather than bytes
+/// so a session survives the process being killed; this is the way back.
+Future<ui.Image> decodeImageFile(File file) async {
+  final bytes = await file.readAsBytes();
+  final codec = await ui.instantiateImageCodec(bytes);
+  final frame = await codec.getNextFrame();
+  return frame.image;
 }
