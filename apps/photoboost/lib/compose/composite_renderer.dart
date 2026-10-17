@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
+import 'frame_art.dart';
 import 'photo_filter.dart';
 
 /// Lays out the finished photo strip.
@@ -49,6 +50,7 @@ class CompositeRenderer {
     required String boothName,
     required String sessionNumber,
     ui.Image? frame,
+    String? frameId,
     PhotoFilter filter = PhotoFilter.normal,
     bool monochrome = false,
   }) async {
@@ -74,6 +76,7 @@ class CompositeRenderer {
       // The filter applies to the photograph only — a frame or sticker drawn
       // on top keeps its own colours.
       _drawCover(canvas, shot, dst, filter.colorFilter);
+      // An uploaded frame image wins; otherwise the built-in line art.
       if (frame != null) {
         canvas.drawImageRect(
           frame,
@@ -81,6 +84,8 @@ class CompositeRenderer {
           dst,
           Paint(),
         );
+      } else {
+        FrameStyle.fromId(frameId).paintCell(canvas, dst, width);
       }
       y += cell + g;
     }

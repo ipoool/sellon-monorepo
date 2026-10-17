@@ -91,13 +91,11 @@ class BoothScreen extends StatelessWidget {
       selected: frameId,
       frames: controller.config?.frames ?? const [],
       filter: filter,
+      render: controller.renderPreview,
       onPick: controller.chooseFrame,
       onPickFilter: controller.chooseFilter,
-      onConfirm: controller.confirmFrame,
-    ),
-    Previewing() => _PreviewView(
-      render: controller.renderPreview,
       onPrint: controller.printNow,
+      onBack: controller.backToShots,
     ),
     Printing(:final progress) => _PrintingView(progress: progress),
     PrintFailed(:final session, :final reason) => _PrintFailedView(
@@ -108,6 +106,7 @@ class BoothScreen extends StatelessWidget {
     ThankYou(:final secondsLeft, :final shareUrl) => _ThankYouView(
       secondsLeft: secondsLeft,
       shareUrl: shareUrl,
+      onDone: controller.reset,
     ),
     Unregistered(:final reason) => _FatalView(message: reason),
     Fatal(:final message) => _FatalView(message: message),
@@ -692,7 +691,7 @@ class _ShotsView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => _Centered(
-    maxWidth: 1040,
+    maxWidth: 1280,
     children: [
       Text('FOTO ${shots.length} DARI $total', style: SellonText.eyebrow),
       const SizedBox(height: SellonSpacing.sm),
@@ -711,6 +710,7 @@ class _ShotsView extends StatelessWidget {
                 file: i < shots.length ? shots[i] : null,
                 // The shot just taken is the one being judged.
                 highlight: i == shots.length - 1,
+                scale: 1.55,
               ),
             ),
         ],
@@ -750,9 +750,14 @@ class _ShotsView extends StatelessWidget {
 }
 
 class _Thumb extends StatelessWidget {
-  const _Thumb({this.file, this.highlight = false, this.filter});
+  const _Thumb({this.file, this.highlight = false, this.scale = 1.0});
+
   final File? file;
-  final PhotoFilter? filter;
+
+  /// Lets the review screen show the shots large — there they ARE the
+  /// screen, and a customer judging whether to retake needs to actually see
+  /// their face.
+  final double scale;
 
   /// The shot just taken grows and takes a brand border, so the customer
   /// knows which of the four they are being asked about.
@@ -762,8 +767,8 @@ class _Thumb extends StatelessWidget {
   Widget build(BuildContext context) => AnimatedContainer(
     duration: const Duration(milliseconds: 260),
     curve: Curves.easeOutCubic,
-    width: highlight ? 200 : 170,
-    height: highlight ? 150 : 128,
+    width: (highlight ? 200 : 170) * scale,
+    height: (highlight ? 150 : 128) * scale,
     decoration: BoxDecoration(
       color: BoothSurface.card,
       borderRadius: BorderRadius.circular(SellonRadii.card),
@@ -778,101 +783,195 @@ class _Thumb extends StatelessWidget {
     clipBehavior: Clip.antiAlias,
     child: file == null
         ? const Icon(Icons.photo_outlined, color: BoothSurface.textMuted)
-        : _filtered(Image.file(file!, fit: BoxFit.cover)),
+        : Image.file(file!, fit: BoxFit.cover),
   );
-
-  /// A thumbnail always shows the treatment that will actually be printed,
-  /// so the choice is judged on the customer's own face.
-  Widget _filtered(Widget child) {
-    final cf = filter?.colorFilter;
-    if (cf == null) return child;
-    return ColorFiltered(colorFilter: cf, child: child);
-  }
 }
 
-class _DecorateView extends StatelessWidget {
+/// Frame and filter, with a live strip beside them.
+///
+/// The preview is the real composite — the same renderer that drives the
+/// printer — so what the customer approves is literally what comes out. Four
+/// loose thumbnails could not show that: the frame, the order, the caption
+/// and the paper margins are all properties of the strip, not of a photo.
+class _DecorateView extends StatefulWidget {
   const _DecorateView({
     required this.shots,
     required this.selected,
     required this.frames,
     required this.filter,
+    required this.render,
     required this.onPick,
     required this.onPickFilter,
-    required this.onConfirm,
+    required this.onPrint,
+    required this.onBack,
   });
 
   final List<File> shots;
   final String? selected;
   final List frames;
   final PhotoFilter filter;
+  final Future<ui.Image> Function(double width) render;
   final ValueChanged<String> onPick;
   final ValueChanged<PhotoFilter> onPickFilter;
-  final VoidCallback onConfirm;
+  final VoidCallback onPrint;
+  final VoidCallback onBack;
 
   @override
-  Widget build(BuildContext context) => _Centered(
-    maxWidth: 1100,
-    children: [
-      Text('PERCANTIK FOTOMU', style: SellonText.eyebrow),
-      const SizedBox(height: SellonSpacing.sm),
-      Text(
-        'Pilih bingkai & filter',
-        style: SellonText.h1.copyWith(color: BoothSurface.textPrimary),
-      ),
-      const SizedBox(height: SellonSpacing.lg),
+  State<_DecorateView> createState() => _DecorateViewState();
+}
 
-      // Thumbnails show the filter applied, so the choice is judged on the
-      // customer's own face rather than on an abstract swatch.
-      Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          for (final s in shots.take(4))
-            Padding(
-              padding: const EdgeInsets.all(6),
-              child: _Thumb(file: s, filter: filter),
-            ),
-        ],
-      ),
-      const SizedBox(height: SellonSpacing.lg),
+class _DecorateViewState extends State<_DecorateView> {
+  Future<ui.Image>? _preview;
 
-      Text('BINGKAI', style: SellonText.eyebrow),
-      const SizedBox(height: SellonSpacing.sm),
-      Wrap(
-        alignment: WrapAlignment.center,
-        spacing: 12,
-        runSpacing: 12,
-        children: [
-          for (final f in frames)
-            _FrameChip(
-              label: f.name as String,
-              selected: f.id == selected,
-              onTap: () => onPick(f.id as String),
-            ),
-        ],
-      ),
-      const SizedBox(height: SellonSpacing.lg),
+  @override
+  void initState() {
+    super.initState();
+    _rebuild();
+  }
 
-      Text('FILTER', style: SellonText.eyebrow),
-      const SizedBox(height: SellonSpacing.sm),
-      Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          for (final f in PhotoFilter.values)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: _FilterChip(
-                filter: f,
-                sample: shots.isEmpty ? null : shots.first,
-                selected: f == filter,
-                onTap: () => onPickFilter(f),
+  @override
+  void didUpdateWidget(_DecorateView old) {
+    super.didUpdateWidget(old);
+    // Re-render only when the choice actually changed; the parent rebuilds
+    // on every controller tick and re-compositing four images each time
+    // would make the picker stutter.
+    if (old.selected != widget.selected || old.filter != widget.filter) {
+      _rebuild();
+    }
+  }
+
+  void _rebuild() => setState(() => _preview = widget.render(360));
+
+  @override
+  Widget build(BuildContext context) => Center(
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 1180),
+      child: Padding(
+        padding: const EdgeInsets.all(SellonSpacing.lg),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(flex: 4, child: _StripPreview(image: _preview)),
+            const SizedBox(width: SellonSpacing.xl),
+            Expanded(
+              flex: 6,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('PERCANTIK FOTOMU', style: SellonText.eyebrow),
+                  const SizedBox(height: SellonSpacing.xs),
+                  Text(
+                    'Pilih bingkai & filter',
+                    style: SellonText.h1.copyWith(
+                      color: BoothSurface.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: SellonSpacing.lg),
+
+                  Text('BINGKAI', style: SellonText.eyebrow),
+                  const SizedBox(height: SellonSpacing.sm),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      for (final f in widget.frames)
+                        _FrameChip(
+                          label: f.name as String,
+                          selected: f.id == widget.selected,
+                          onTap: () => widget.onPick(f.id as String),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: SellonSpacing.lg),
+
+                  Text('FILTER', style: SellonText.eyebrow),
+                  const SizedBox(height: SellonSpacing.sm),
+                  Row(
+                    children: [
+                      for (final f in PhotoFilter.values)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 14),
+                          child: _FilterChip(
+                            filter: f,
+                            sample: widget.shots.isEmpty
+                                ? null
+                                : widget.shots.first,
+                            selected: f == widget.filter,
+                            onTap: () => widget.onPickFilter(f),
+                          ),
+                        ),
+                    ],
+                  ),
+
+                  const SizedBox(height: SellonSpacing.xl),
+                  Row(
+                    children: [
+                      PillButton(
+                        label: 'Kembali',
+                        icon: Icons.arrow_back_rounded,
+                        variant: PillVariant.secondary,
+                        onPressed: widget.onBack,
+                      ),
+                      const SizedBox(width: SellonSpacing.sm),
+                      PillButton(
+                        label: 'Cetak',
+                        icon: Icons.print_rounded,
+                        minWidth: 260,
+                        onPressed: widget.onPrint,
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
-        ],
+          ],
+        ),
       ),
+    ),
+  );
+}
 
-      const SizedBox(height: SellonSpacing.xl),
-      PillButton(label: 'Lanjut', minWidth: 320, onPressed: onConfirm),
-    ],
+/// The strip itself, on paper-white so it reads as the printed object rather
+/// than as another panel of the UI.
+class _StripPreview extends StatelessWidget {
+  const _StripPreview({required this.image});
+
+  final Future<ui.Image>? image;
+
+  @override
+  Widget build(BuildContext context) => Center(
+    child: Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(SellonRadii.card),
+        boxShadow: BoothSurface.accentGlow(0.3),
+      ),
+      padding: const EdgeInsets.all(10),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 620),
+        child: FutureBuilder<ui.Image>(
+          future: image,
+          builder: (context, snap) {
+            // Keep the last frame while the next renders: blanking on every
+            // tap would make the picker flicker.
+            if (!snap.hasData) {
+              return const SizedBox(
+                width: 240,
+                height: 400,
+                child: Center(
+                  child: CircularProgressIndicator(
+                    color: BoothSurface.accent,
+                    strokeWidth: 2,
+                  ),
+                ),
+              );
+            }
+            return RawImage(image: snap.data, fit: BoxFit.contain);
+          },
+        ),
+      ),
+    ),
   );
 }
 
@@ -967,58 +1066,6 @@ class _FrameChip extends StatelessWidget {
   );
 }
 
-class _PreviewView extends StatelessWidget {
-  const _PreviewView({required this.render, required this.onPrint});
-
-  final Future<ui.Image> Function(double width) render;
-  final VoidCallback onPrint;
-
-  @override
-  Widget build(BuildContext context) => _Centered(
-    maxWidth: 760,
-    children: [
-      Text('HASILNYA', style: SellonText.eyebrow),
-      const SizedBox(height: SellonSpacing.sm),
-      Text(
-        'Sudah pas?',
-        style: SellonText.h1.copyWith(color: BoothSurface.textPrimary),
-      ),
-      const SizedBox(height: SellonSpacing.md),
-      // The same renderer the printer uses, at screen width. What is on
-      // this screen is what comes out of the printer.
-      FutureBuilder<ui.Image>(
-        future: render(420),
-        builder: (context, snap) {
-          if (!snap.hasData) {
-            return const SizedBox(
-              height: 300,
-              child: Center(
-                child: CircularProgressIndicator(color: SellonColors.brand600),
-              ),
-            );
-          }
-          return Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(SellonRadii.card),
-              boxShadow: SellonShadows.elevated,
-            ),
-            clipBehavior: Clip.antiAlias,
-            constraints: const BoxConstraints(maxHeight: 420),
-            child: RawImage(image: snap.data, fit: BoxFit.contain),
-          );
-        },
-      ),
-      const SizedBox(height: SellonSpacing.lg),
-      PillButton(
-        label: 'Cetak',
-        icon: Icons.print_rounded,
-        minWidth: 320,
-        onPressed: onPrint,
-      ),
-    ],
-  );
-}
-
 class _PrintingView extends StatelessWidget {
   const _PrintingView({required this.progress});
   final double progress;
@@ -1109,9 +1156,14 @@ class _PrintFailedView extends StatelessWidget {
 }
 
 class _ThankYouView extends StatelessWidget {
-  const _ThankYouView({required this.secondsLeft, this.shareUrl});
+  const _ThankYouView({
+    required this.secondsLeft,
+    required this.onDone,
+    this.shareUrl,
+  });
 
   final int secondsLeft;
+  final VoidCallback onDone;
 
   /// Null until the upload lands, or for good if it failed. The screen just
   /// omits the QR: the customer has their print either way, and an error
@@ -1142,15 +1194,24 @@ class _ThankYouView extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  // White behind the code: a dark QR on a dark panel will
-                  // not scan.
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(SellonRadii.card),
-                ),
-                child: QrView(data: shareUrl!, size: 190),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      // White behind the code: a dark QR on a dark panel
+                      // will not scan.
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(SellonRadii.card),
+                    ),
+                    child: QrView(data: shareUrl!, size: 190),
+                  ),
+                  const SizedBox(height: SellonSpacing.sm),
+                  // Under the code, where someone looking at the QR is
+                  // already looking.
+                  Text('Link berlaku 7 hari', style: SellonText.label),
+                ],
               ),
               const SizedBox(width: SellonSpacing.lg),
               SizedBox(
@@ -1174,8 +1235,7 @@ class _ThankYouView extends StatelessWidget {
                     ),
                     const SizedBox(height: SellonSpacing.xs),
                     Text(
-                      'Buka kamera HP, arahkan ke kode, lalu simpan fotonya. '
-                      'Link berlaku 7 hari.',
+                      'Buka kamera HP, arahkan ke kode, lalu simpan fotonya.',
                       style: SellonText.body,
                     ),
                   ],

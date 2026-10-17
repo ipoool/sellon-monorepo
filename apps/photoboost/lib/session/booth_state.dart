@@ -17,7 +17,6 @@ sealed class BoothState {
     Capturing() ||
     ShotTaken() ||
     Decorating() ||
-    Previewing() ||
     Printing() ||
     PrintFailed() ||
     ThankYou() => true,
@@ -90,20 +89,6 @@ class ShotTaken extends BoothState {
 
 class Decorating extends BoothState {
   const Decorating(
-    this.session, {
-    required this.shots,
-    this.frameId,
-    this.filter = PhotoFilter.normal,
-  });
-
-  final BoothSession session;
-  final List<File> shots;
-  final String? frameId;
-  final PhotoFilter filter;
-}
-
-class Previewing extends BoothState {
-  const Previewing(
     this.session, {
     required this.shots,
     this.frameId,

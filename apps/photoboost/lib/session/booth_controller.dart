@@ -252,20 +252,22 @@ class BoothController extends ChangeNotifier {
         filter: _filter,
       ),
     );
-    // Advance, never cancel: picking nothing means picking the default.
+    // Advance, never cancel: choosing nothing means accepting the defaults
+    // and printing. They have paid; leaving them parked here is worse than
+    // printing something reasonable.
     _timeout(Timeouts.decorateIdle, () {
-      if (_state case Decorating(frameId: final f)) {
-        _set(
-          Previewing(
-            session,
-            shots: List.of(_shots),
-            frameId: f,
-            filter: _filter,
-          ),
-        );
-        _armPreviewTimeout(session, f);
-      }
+      if (_state is Decorating) unawaited(printNow());
     });
+  }
+
+  /// Back to the last shot, so a customer who changed their mind about a
+  /// photo can retake it instead of being stuck on the frame picker.
+  void backToShots() {
+    if (_state case Decorating(session: final session, shots: final shots)) {
+      if (shots.isEmpty) return;
+      _ticker?.cancel();
+      _awaitContinue(session);
+    }
   }
 
   void chooseFrame(String frameId) {
@@ -287,27 +289,13 @@ class BoothController extends ChangeNotifier {
     }
   }
 
-  void confirmFrame() {
-    if (_state case Decorating(
-      session: final s,
-      shots: final sh,
-      frameId: final f,
-    )) {
-      _ticker?.cancel();
-      _set(Previewing(s, shots: sh, frameId: f, filter: _filter));
-      _armPreviewTimeout(s, f);
-    }
-  }
-
-  void _armPreviewTimeout(BoothSession session, String? frameId) {
-    // Auto-print rather than auto-cancel. They paid.
-    _timeout(Timeouts.previewIdle, () {
-      if (_state is Previewing) printNow();
-    });
-  }
-
+  /// Prints what is on screen.
+  ///
+  /// Driven straight from the frame/filter screen: that screen already shows
+  /// the real composite beside the choices, so a separate confirm step would
+  /// be asking the customer to approve the same image twice.
   Future<void> printNow() async {
-    if (_state case Previewing(
+    if (_state case Decorating(
       session: final session,
       frameId: final frameId,
     )) {
@@ -437,9 +425,13 @@ class BoothController extends ChangeNotifier {
       width: _printer.capabilities.dotsPerLine.toDouble(),
       boothName: _config?.boothName ?? 'PhotoBoost',
       sessionNumber: switch (_state) {
-        Previewing(session: final s) => s.sessionNumber,
+        Decorating(session: final s) => s.sessionNumber,
         Printing(session: final s) => s.sessionNumber,
         _ => '',
+      },
+      frameId: switch (_state) {
+        Decorating(frameId: final f) => f,
+        _ => null,
       },
       filter: _filter,
       monochrome: !_printer.capabilities.isColor,
@@ -459,8 +451,11 @@ class BoothController extends ChangeNotifier {
       boothName: _config?.boothName ?? 'PhotoBoost',
       sessionNumber: switch (_state) {
         Decorating(session: final s) => s.sessionNumber,
-        Previewing(session: final s) => s.sessionNumber,
         _ => '',
+      },
+      frameId: switch (_state) {
+        Decorating(frameId: final f) => f,
+        _ => null,
       },
       filter: _filter,
     );

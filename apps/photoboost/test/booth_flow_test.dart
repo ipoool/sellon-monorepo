@@ -117,9 +117,6 @@ void main() {
       c.chooseFrame('pita');
       expect((c.state as Decorating).frameId, 'pita');
 
-      c.confirmFrame();
-      await waitFor(c, (s) => s is Previewing);
-
       await c.printNow();
       await waitFor(
         c,
@@ -181,9 +178,6 @@ void main() {
         (s) => s is Decorating,
         limit: const Duration(seconds: 30),
       );
-      c.confirmFrame();
-      await waitFor(c, (s) => s is Previewing);
-
       await c.printNow();
       await waitFor(
         c,
@@ -212,9 +206,6 @@ void main() {
         (s) => s is Decorating,
         limit: const Duration(seconds: 30),
       );
-      c.confirmFrame();
-      await waitFor(c, (s) => s is Previewing);
-
       await c.printNow();
       await waitFor(c, (s) => s is PrintFailed);
       expect(c.state, isA<PrintFailed>());
