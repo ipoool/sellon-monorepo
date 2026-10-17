@@ -62,7 +62,10 @@ void main() async {
 }
 
 class PhotoBoostApp extends StatelessWidget {
-  const PhotoBoostApp({super.key, this.controller});
+  const PhotoBoostApp({super.key, this.controller, this.store});
+
+  /// Passed through to BoothHost; see its own doc.
+  final CredentialStore? store;
 
   /// Supplied by tests, which build their own controller over fakes and have
   /// no business going through pairing or credential storage to reach a
@@ -78,7 +81,7 @@ class PhotoBoostApp extends StatelessWidget {
       theme: buildSellonTheme(),
       home: injected != null
           ? BoothScreen(controller: injected)
-          : const BoothHost(),
+          : BoothHost(store: store),
     );
   }
 }
@@ -91,14 +94,18 @@ class PhotoBoostApp extends StatelessWidget {
 /// token, the next call answers 401, and the tablet returns to the keypad
 /// instead of sitting on a screen that quietly no longer works.
 class BoothHost extends StatefulWidget {
-  const BoothHost({super.key});
+  const BoothHost({super.key, this.store});
+
+  /// Supplied by tests so the pairing gate can be exercised against a temp
+  /// directory instead of the platform's app-support path.
+  final CredentialStore? store;
 
   @override
   State<BoothHost> createState() => _BoothHostState();
 }
 
 class _BoothHostState extends State<BoothHost> {
-  final _store = CredentialStore();
+  late final CredentialStore _store = widget.store ?? CredentialStore();
 
   bool _loading = true;
   BoothController? _controller;
@@ -118,23 +125,28 @@ class _BoothHostState extends State<BoothHost> {
   }
 
   Future<void> _boot() async {
-    if (kDemo) {
-      await _startSelling(FakeBoothApi());
-      return;
-    }
+    // Pairing gates everything, demo included. A booth that has not been
+    // claimed by an operator is not a booth yet, and showing it the idle
+    // screen invites a customer to pay into a tablet nobody is tracking.
+    // Demo mode changes WHO answers the pairing call, not whether it happens.
     final creds = await _store.load();
     if (creds == null) {
       if (mounted) setState(() => _loading = false);
       return;
     }
-    await _startSelling(
-      HttpBoothApi(
-        credentials: creds,
-        appVersion: kAppVersion,
-        onUnauthorized: () => _unpair(creds.booth),
-      ),
-    );
+    await _startSelling(_apiFor(creds));
   }
+
+  /// In demo mode every call is answered by the fake, so the whole flow runs
+  /// with no backend — but only after the tablet has been paired, exactly
+  /// like a real one.
+  BoothApi _apiFor(DeviceCredentials creds) => kDemo
+      ? FakeBoothApi()
+      : HttpBoothApi(
+          credentials: creds,
+          appVersion: kAppVersion,
+          onUnauthorized: () => _unpair(creds.booth),
+        );
 
   Future<void> _startSelling(BoothApi api) async {
     // The tablet's own camera, with a live preview. Demo mode keeps the fake
@@ -201,13 +213,7 @@ class _BoothHostState extends State<BoothHost> {
       _loading = true;
       _previousBooth = null;
     });
-    await _startSelling(
-      HttpBoothApi(
-        credentials: result.credentials,
-        appVersion: kAppVersion,
-        onUnauthorized: () => _unpair(result.credentials.booth),
-      ),
-    );
+    await _startSelling(_apiFor(result.credentials));
   }
 
   @override
@@ -232,6 +238,8 @@ class _BoothHostState extends State<BoothHost> {
       appVersion: kAppVersion,
       previousBooth: _previousBooth,
       onPaired: (r) => _onPaired(r),
+      pair: kDemo ? fakePairDevice : pairDevice,
+      hint: kDemo ? 'Mode demo — ketik $kDemoPairingCode' : null,
     );
   }
 }

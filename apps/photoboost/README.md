@@ -164,8 +164,15 @@ flutter build apk --release \
 An operator who could point a tablet at an arbitrary host is one phone call
 away from pairing the fleet to someone else's server.
 
-`--dart-define=DEMO=true` (the default off-device) skips pairing entirely and
-runs the whole flow against fakes.
+`--dart-define=DEMO=true` (the default off-device) answers every call with a
+fake, so the whole flow runs with no backend — but the tablet still has to
+pair first, exactly like a real one. Type **TEST23** on the keypad; the
+screen says so.
+
+Demo mode used to skip pairing and boot straight to idle, which left the
+pairing screen unreachable in the only build anyone ran. An unpaired tablet
+now never reaches the idle screen in any mode: a booth no console is
+tracking must not be inviting people to pay into it.
 
 ## Money rules this app must not break
 

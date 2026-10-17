@@ -28,6 +28,7 @@ class PairingScreen extends StatefulWidget {
     required this.onPaired,
     this.previousBooth,
     this.pair = pairDevice,
+    this.hint,
   });
 
   final String baseUrl;
@@ -40,6 +41,11 @@ class PairingScreen extends StatefulWidget {
   /// because the tablet is new. Saying which booth it used to be is the
   /// difference between "something broke" and "someone un-paired this".
   final BoothIdentity? previousBooth;
+
+  /// Shown under the keypad in place of the usual instruction. Demo mode
+  /// puts the code there, because a keypad with no reachable code is a
+  /// locked door.
+  final String? hint;
 
   /// The redemption call, injectable the same way the camera and printer
   /// are, so the keypad's behaviour can be tested without a server.
@@ -149,11 +155,14 @@ class _PairingScreenState extends State<PairingScreen> {
                         _keypad(),
                         const SizedBox(height: 20),
                         Text(
-                          'Kode dibuat dari dashboard SellOn: '
-                          'Photo Booth → Hubungkan perangkat.',
+                          widget.hint ??
+                              'Kode dibuat dari dashboard SellOn: '
+                                  'Photo Booth → Hubungkan perangkat.',
                           textAlign: TextAlign.center,
                           style: SellonText.label.copyWith(
-                            color: BoothSurface.textMuted,
+                            color: widget.hint == null
+                                ? BoothSurface.textMuted
+                                : BoothSurface.accent,
                           ),
                         ),
                       ],

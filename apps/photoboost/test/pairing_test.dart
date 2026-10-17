@@ -5,7 +5,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:photoboost/data/api/http_booth_api.dart';
 import 'package:photoboost/data/api/session_dto.dart';
 import 'package:photoboost/data/device_credentials.dart';
+import 'package:photoboost/data/api/fake_booth_api.dart';
 import 'package:photoboost/features/pairing_screen.dart';
+import 'package:photoboost/main.dart';
 
 const _booth = BoothIdentity(
   id: 'b1',
@@ -42,6 +44,7 @@ Future<void> _pumpPast(WidgetTester tester) async {
 }
 
 void main() {
+  _demoCodeIsTypeable();
   group('CredentialStore', () {
     late Directory dir;
 
@@ -91,6 +94,60 @@ void main() {
       // A booth that cannot parse its credential must still reach a screen
       // an operator can act on, rather than failing to start in a mall.
       expect(await CredentialStore(overrideDirectory: dir).load(), isNull);
+    });
+  });
+
+  group('BoothHost', () {
+    testWidgets('an unpaired tablet shows the keypad, never the idle screen', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(1280, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      // An empty store: the state a tablet is in out of the box.
+      final dir = Directory.systemTemp.createTempSync('pb-unpaired');
+      addTearDown(() => dir.deleteSync(recursive: true));
+
+      // Mounted INSIDE runAsync: _boot() starts in initState and awaits real
+      // file I/O. Suspended in the test's fake-async zone it would never
+      // resume, and the host would sit on its splash forever.
+      await tester.runAsync(() async {
+        await tester.pumpWidget(
+          PhotoBoostApp(store: CredentialStore(overrideDirectory: dir)),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+      });
+      for (var i = 0; i < 20; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+
+      expect(find.byType(PairingScreen), findsOneWidget);
+      // Demo mode used to skip pairing and boot straight here, which left
+      // the keypad unreachable in the only build anyone ran.
+      expect(find.text('Mulai'), findsNothing);
+      expect(find.text('PHOTO BOOTH'), findsNothing);
+    });
+  });
+
+  group('fakePairDevice', () {
+    test('accepts the demo code and refuses anything else', () async {
+      final ok = await fakePairDevice(
+        baseUrl: 'demo',
+        code: kDemoPairingCode.toLowerCase(),
+        deviceName: 'tablet',
+        appVersion: 'test',
+      );
+      expect(ok.credentials.token, isNotEmpty);
+
+      await expectLater(
+        fakePairDevice(
+          baseUrl: 'demo',
+          code: 'ZZZZZZ',
+          deviceName: 'tablet',
+          appVersion: 'test',
+        ),
+        throwsA(isA<BoothApiException>()),
+      );
     });
   });
 
@@ -215,5 +272,24 @@ void main() {
         findsOneWidget,
       );
     });
+  });
+}
+
+/// The demo code must be typeable on the booth's own keypad.
+///
+/// The keypad omits O/0/I/1/L because those are misread off a screen. A demo
+/// code containing one is a locked door: the hint tells you what to type and
+/// the keys to type it do not exist. DEMO23 was exactly that.
+void _demoCodeIsTypeable() {
+  test('the demo pairing code uses only keys the keypad has', () {
+    const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+    for (final ch in kDemoPairingCode.split('')) {
+      expect(
+        alphabet.contains(ch),
+        isTrue,
+        reason: '"$ch" in $kDemoPairingCode is not on the keypad',
+      );
+    }
+    expect(kDemoPairingCode.length, 6);
   });
 }

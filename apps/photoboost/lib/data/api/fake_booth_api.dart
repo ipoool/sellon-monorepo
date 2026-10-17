@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:math';
 
+import '../device_credentials.dart';
 import 'booth_api.dart';
+import 'http_booth_api.dart';
 import 'session_dto.dart';
 
 /// A server that is not a server.
@@ -259,5 +261,49 @@ class _FakeSession {
     createdAt: createdAt,
     qrExpiresAt: qrExpiresAt,
     paidAt: paidAt,
+  );
+}
+
+/// The demo code the fake pairing accepts.
+///
+/// Drawn from the same alphabet the server mints from — no O/0/I/1/L — so
+/// it is typeable on the real keypad. The obvious choice, DEMO23, is not:
+/// the keypad has no O, which only showed up when someone tried to type it.
+/// A test pins this.
+const kDemoPairingCode = 'TEST23';
+
+/// Pairing, answered locally.
+///
+/// Demo mode still walks the operator through pairing rather than skipping
+/// it: the screen a technician sees on day one is the screen we should be
+/// demoing, and a shortcut that hides it is how it shipped unreachable.
+///
+/// Wrong codes fail the way the server fails them, so the error path is
+/// demoable too.
+Future<PairingResult> fakePairDevice({
+  required String baseUrl,
+  required String code,
+  required String deviceName,
+  required String appVersion,
+}) async {
+  await Future<void>.delayed(const Duration(milliseconds: 600));
+  if (code.toUpperCase() != kDemoPairingCode) {
+    throw const BoothApiException(
+      'Kode tidak berlaku atau sudah dipakai',
+      statusCode: 401,
+    );
+  }
+  return PairingResult(
+    credentials: const DeviceCredentials(
+      token: 'pbt_demo',
+      baseUrl: 'demo',
+      booth: BoothIdentity(
+        id: 'demo-booth',
+        code: 'DEMO',
+        name: 'Booth Demo',
+        location: 'Mode demo',
+      ),
+    ),
+    config: await FakeBoothApi().fetchConfig(),
   );
 }
