@@ -29,7 +29,11 @@ type BoothHandler struct {
 	storage   storage.Client
 	serverKey string // the PLATFORM key: PhotoBoost is the platform's own business
 	webOrigin string // where the QR on the thank-you screen points
-	logger    *slog.Logger
+
+	// Pairing is the one booth action a human performs, and the one worth a
+	// trail: it is how a tablet becomes able to take money.
+	platformAudit *repository.PlatformAuditRepo
+	logger        *slog.Logger
 }
 
 func NewBoothHandler(
@@ -39,13 +43,95 @@ func NewBoothHandler(
 	storageCli storage.Client,
 	platformServerKey string,
 	webOrigin string,
+	platformAudit *repository.PlatformAuditRepo,
 	logger *slog.Logger,
 ) *BoothHandler {
 	return &BoothHandler{
 		booths: booths, sessions: sessions, midtrans: midtrans,
 		storage: storageCli, serverKey: platformServerKey,
-		webOrigin: webOrigin, logger: logger,
+		webOrigin: webOrigin, platformAudit: platformAudit, logger: logger,
 	}
+}
+
+type pairReq struct {
+	Code       string `json:"code"`
+	DeviceName string `json:"device_name"`
+	AppVersion string `json:"app_version"`
+}
+
+// POST /api/v1/photobooth/pair
+//
+// The ONE unauthenticated route in the booth realm, because a tablet being
+// set up has no credential yet — that is the whole problem pairing solves.
+// What protects it is the shape of the secret rather than a session: a code
+// that is single-use, dies in fifteen minutes, and only exists in the window
+// an admin deliberately opened.
+//
+// On success the tablet receives its device token and the booth's config in
+// one answer, so setup finishes without a second round trip that could leave
+// a paired-but-unconfigured booth on screen.
+func (h *BoothHandler) Pair(w http.ResponseWriter, r *http.Request) {
+	var req pairReq
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "body tidak valid")
+		return
+	}
+
+	label := strings.TrimSpace(req.DeviceName)
+	if len(label) > 60 {
+		label = label[:60]
+	}
+	raw, booth, err := h.booths.RedeemPairingCode(r.Context(), req.Code, label)
+	if err != nil {
+		if errors.Is(err, repository.ErrPairingCodeInvalid) {
+			// Unknown, expired, already used and booth-not-active all answer
+			// the same way: a tablet that guessed learns nothing, and an
+			// operator who mistyped is told the one thing that helps.
+			response.Error(w, http.StatusUnauthorized, "kode pairing tidak berlaku atau sudah dipakai")
+			return
+		}
+		h.logger.Error("booth pair", "err", err)
+		response.Error(w, http.StatusInternalServerError, "gagal menghubungkan perangkat")
+		return
+	}
+
+	cfg, err := h.booths.EffectiveConfigFor(r.Context(), booth.ID)
+	if err != nil {
+		h.logger.Error("booth pair config", "err", err, "booth", booth.Code)
+		response.Error(w, http.StatusInternalServerError, "gagal memuat konfigurasi")
+		return
+	}
+
+	h.logger.Info("booth paired", "booth", booth.Code, "device", label)
+	if h.platformAudit != nil {
+		if err := h.platformAudit.Log(r.Context(), repository.PlatformAuditInput{
+			Action:  "photobooth.booth_paired",
+			Summary: "Perangkat terhubung ke booth " + booth.Code,
+			Metadata: map[string]any{
+				"booth_id":    booth.ID.String(),
+				"code":        booth.Code,
+				"device_name": label,
+				"app_version": strings.TrimSpace(req.AppVersion),
+			},
+		}); err != nil {
+			// A missing audit row must not undo a pairing that already
+			// happened; the token is issued and the tablet is holding it.
+			h.logger.Error("platform audit insert", "err", err, "action", "photobooth.booth_paired")
+		}
+	}
+
+	response.JSON(w, http.StatusOK, map[string]any{
+		"device_token": raw,
+		"booth": map[string]any{
+			"id":       booth.ID,
+			"code":     booth.Code,
+			"name":     booth.Name,
+			"location": booth.Location,
+			"status":   booth.Status,
+		},
+		"config":         boothConfigDTO(cfg),
+		"config_version": cfg.Version(),
+	})
 }
 
 // How long a soft copy stays downloadable. Long enough that a customer who

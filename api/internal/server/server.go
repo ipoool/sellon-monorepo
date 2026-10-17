@@ -165,7 +165,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	photoBoothSessions := repository.NewPhotoBoothSessionRepo(pool)
 	boothHandler := handler.NewBoothHandler(
 		photoBooths, photoBoothSessions, midtransClient, storageClient,
-		cfg.PlatformMidtransServerKey, publicWebURL, logger,
+		cfg.PlatformMidtransServerKey, publicWebURL, platformAuditRepo, logger,
 	)
 	adminPhotoBoothHandler := handler.NewAdminPhotoBoothHandler(
 		photoBooths, photoBoothSessions, users, platformAuditRepo, logger,
@@ -268,6 +268,12 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 		// Soft-copy download. Public — the 32-byte token in the URL is the
 		// only credential, the same posture the digital-delivery links take.
 		r.With(limitCheckout).Get("/photobooth/photo/{token}", boothHandler.PublicPhoto)
+
+		// Device pairing. Unauthenticated by necessity — a tablet being set
+		// up has no token yet — so it is rate limited hard: the code is six
+		// characters, and an unthrottled endpoint would make that guessable.
+		r.With(middleware.RateLimit(10, time.Minute)).
+			Post("/photobooth/pair", boothHandler.Pair)
 
 		// PhotoBoost tablets. A device realm of its own: bearer device token,
 		// no user row, no cookie. See middleware.RequireBooth.
@@ -634,6 +640,8 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 					r.Post("/booths", adminPhotoBoothHandler.CreateBooth)
 					r.Put("/booths/{id}", adminPhotoBoothHandler.UpdateBooth)
 					r.Post("/booths/{id}/tokens", adminPhotoBoothHandler.IssueToken)
+					r.Post("/booths/{id}/pairing-code", adminPhotoBoothHandler.CreatePairingCode)
+					r.Delete("/booths/{id}/pairing-code", adminPhotoBoothHandler.CancelPairingCode)
 					r.Post("/tokens/{tokenID}/revoke", adminPhotoBoothHandler.RevokeToken)
 					r.Put("/settings", adminPhotoBoothHandler.UpdateSettings)
 					r.Get("/sessions", adminPhotoBoothHandler.ListSessions)

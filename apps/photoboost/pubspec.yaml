@@ -35,6 +35,11 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
 
+  # The booth's device token has to survive a reboot, and Android gives no
+  # path to app-private storage from pure Dart. First-party Flutter plugin,
+  # and the only dependency pairing needs — HTTP is dart:io.
+  path_provider: ^2.1.5
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

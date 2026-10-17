@@ -1128,6 +1128,17 @@ export type PhotoBoothBooth = {
   created_at: string;
   effective?: PhotoBoothConfig;
   tokens?: PhotoBoothDeviceToken[];
+  // Present only while an invitation is outstanding. Carried on the list so a
+  // console reload still shows the code the operator is holding.
+  pairing?: PhotoBoothPairingCode;
+};
+
+/// A short-lived invitation for one tablet to become one booth. The device
+/// token itself never passes through a person — the tablet trades this code
+/// for it directly.
+export type PhotoBoothPairingCode = {
+  code: string;
+  expires_at: string;
 };
 
 export type PhotoBoothFleetStats = {

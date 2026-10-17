@@ -75,7 +75,14 @@ func (h *AdminPhotoBoothHandler) ListBooths(w http.ResponseWriter, r *http.Reque
 		if err != nil {
 			h.logger.Error("admin effective config", "err", err, "booth", b.Code)
 		}
-		out = append(out, adminBoothDTO(b, eff, tokens))
+		// Carried on the list so a console reload — or a second admin on
+		// another laptop — still shows the code the operator is holding,
+		// rather than silently inviting them to mint a second one.
+		pairing, err := h.booths.ActivePairingCodeFor(r.Context(), b.ID)
+		if err != nil {
+			h.logger.Error("admin active pairing", "err", err, "booth", b.Code)
+		}
+		out = append(out, adminBoothDTO(b, eff, tokens, pairing))
 	}
 
 	response.JSON(w, http.StatusOK, map[string]any{
@@ -153,7 +160,7 @@ func (h *AdminPhotoBoothHandler) CreateBooth(w http.ResponseWriter, r *http.Requ
 	}
 	h.audit(r, "photobooth.booth_created", "Booth "+b.Code+" dibuat",
 		map[string]any{"booth_id": b.ID.String(), "code": b.Code})
-	response.JSON(w, http.StatusCreated, adminBoothDTO(b, nil, nil))
+	response.JSON(w, http.StatusCreated, adminBoothDTO(b, nil, nil, nil))
 }
 
 // PUT /api/v1/admin/photobooth/booths/{id}
@@ -209,7 +216,7 @@ func (h *AdminPhotoBoothHandler) UpdateBooth(w http.ResponseWriter, r *http.Requ
 	}
 	h.audit(r, "photobooth.booth_updated", "Booth "+b.Code+" diperbarui",
 		map[string]any{"booth_id": b.ID.String(), "code": b.Code, "status": b.Status})
-	response.JSON(w, http.StatusOK, adminBoothDTO(b, nil, nil))
+	response.JSON(w, http.StatusOK, adminBoothDTO(b, nil, nil, nil))
 }
 
 // === Device tokens ===
@@ -255,6 +262,75 @@ func (h *AdminPhotoBoothHandler) IssueToken(w http.ResponseWriter, r *http.Reque
 		// Shown once. The client must tell the operator to copy it now.
 		"token": raw,
 	})
+}
+
+// === Pairing ===
+
+type pairingCodeReq struct {
+	Label string `json:"label"`
+}
+
+// POST /api/v1/admin/photobooth/booths/{id}/pairing-code
+//
+// Mints a short code the operator reads to the tablet, instead of asking them
+// to transcribe a 64-character device token. The token still exists — the
+// tablet fetches it itself at redemption — but it never passes through a
+// human, a clipboard, or a WhatsApp message.
+func (h *AdminPhotoBoothHandler) CreatePairingCode(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "id tidak valid")
+		return
+	}
+	var req pairingCodeReq
+	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<10)).Decode(&req)
+
+	b, err := h.booths.FindBoothByID(r.Context(), id)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "booth tidak ditemukan")
+		return
+	}
+	// A paused or retired booth would mint a code that redemption then
+	// refuses, which reads as a broken console rather than a disabled booth.
+	if b.Status != "active" {
+		response.Error(w, http.StatusConflict, "booth harus berstatus aktif untuk dihubungkan")
+		return
+	}
+
+	actor, _ := adminActorID(r)
+	pc, err := h.booths.CreatePairingCode(r.Context(), id,
+		truncate(strings.TrimSpace(req.Label), 60), actor)
+	if err != nil {
+		h.logger.Error("admin pairing code", "err", err, "booth", id)
+		response.Error(w, http.StatusInternalServerError, "gagal membuat kode pairing")
+		return
+	}
+	// The code itself is deliberately NOT audited: it is a live credential
+	// for the next fifteen minutes, and the audit log is readable by every
+	// admin. The booth and the actor are what an investigation needs.
+	h.audit(r, "photobooth.pairing_started",
+		"Kode pairing dibuat untuk booth "+b.Code,
+		map[string]any{"booth_id": id.String(), "code": b.Code})
+
+	response.JSON(w, http.StatusCreated, map[string]any{
+		"code":       pc.Code,
+		"expires_at": pc.ExpiresAt,
+	})
+}
+
+// DELETE /api/v1/admin/photobooth/booths/{id}/pairing-code
+func (h *AdminPhotoBoothHandler) CancelPairingCode(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "id tidak valid")
+		return
+	}
+	if err := h.booths.CancelPairingCode(r.Context(), id); err != nil {
+		h.logger.Error("admin cancel pairing", "err", err, "booth", id)
+		response.Error(w, http.StatusInternalServerError, "gagal membatalkan kode")
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // POST /api/v1/admin/photobooth/tokens/{tokenID}/revoke
@@ -385,7 +461,7 @@ func (h *AdminPhotoBoothHandler) ListSessions(w http.ResponseWriter, r *http.Req
 
 // === DTOs and helpers ===
 
-func adminBoothDTO(b *repository.Booth, eff *repository.EffectiveConfig, tokens []repository.DeviceToken) map[string]any {
+func adminBoothDTO(b *repository.Booth, eff *repository.EffectiveConfig, tokens []repository.DeviceToken, pairing *repository.PairingCode) map[string]any {
 	out := map[string]any{
 		"id":       b.ID,
 		"code":     b.Code,
@@ -423,6 +499,12 @@ func adminBoothDTO(b *repository.Booth, eff *repository.EffectiveConfig, tokens 
 			})
 		}
 		out["tokens"] = list
+	}
+	if pairing != nil {
+		out["pairing"] = map[string]any{
+			"code":       pairing.Code,
+			"expires_at": pairing.ExpiresAt,
+		}
 	}
 	return out
 }

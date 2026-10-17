@@ -89,6 +89,42 @@ cheapest crash recovery there is: if the process dies, Android relaunches the
 home app, which is us, rather than dropping a customer onto the Android
 launcher.
 
+## Pairing a tablet to a booth
+
+A fresh install knows nothing. It shows a six-key pad and waits.
+
+1. Dashboard SellOn → **Photo Booth** → pick the booth → **Hubungkan
+   perangkat**. A six-character code appears with a countdown.
+2. On the tablet, type that code. It pairs and goes straight to idle.
+
+The device token is 64 hex characters and never passes through a person: the
+tablet trades the code for it over TLS and stores it itself. The code is
+single-use and dies after 15 minutes, so the thing a human carries across the
+floor is worthless by the time anyone could misuse it.
+
+The alphabet has no `O`, `0`, `I`, `1` or `L`, because a code is read off one
+screen and typed on another by someone standing up.
+
+**Un-pairing** is "Cabut" on the device in the admin console. The next call
+the tablet makes answers 401, it wipes its stored token, and it returns to the
+keypad naming the booth it used to be — so a lost tablet stops selling the
+moment someone says so, not at some expiry.
+
+Which server a booth pairs against is compiled in, not typed at the booth:
+
+```bash
+flutter build apk --release \
+  --dart-define=DEMO=false \
+  --dart-define=API_BASE=https://sellon.id \
+  --dart-define=APP_VERSION=0.1.0
+```
+
+An operator who could point a tablet at an arbitrary host is one phone call
+away from pairing the fleet to someone else's server.
+
+`--dart-define=DEMO=true` (the default off-device) skips pairing entirely and
+runs the whole flow against fakes.
+
 ## Money rules this app must not break
 
 The server owns payment truth; the tablet only reads `payment_status`. Beyond

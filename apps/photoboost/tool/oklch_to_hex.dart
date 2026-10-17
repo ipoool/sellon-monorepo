@@ -116,14 +116,18 @@ void main() {
   // check drifts, the conversion is broken and every token is suspect.
   const expected = '#48BD54';
   final got = oklchToHex(_tokens['brand500']!);
-  stderr.writeln(got == expected
-      ? 'anchor ok: brand500 = $got'
-      : 'ANCHOR MISMATCH: brand500 = $got, expected $expected');
+  stderr.writeln(
+    got == expected
+        ? 'anchor ok: brand500 = $got'
+        : 'ANCHOR MISMATCH: brand500 = $got, expected $expected',
+  );
 
   _tokens.forEach((name, c) {
     final hex = oklchToHex(c);
     final argb = '0xFF${hex.substring(1)}';
-    print("  static const Color $name = Color($argb); "
-        "// oklch(${c.l} ${c.c} ${c.h})");
+    print(
+      "  static const Color $name = Color($argb); "
+      "// oklch(${c.l} ${c.c} ${c.h})",
+    );
   });
 }

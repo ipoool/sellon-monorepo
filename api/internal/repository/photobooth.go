@@ -363,6 +363,12 @@ func HashDeviceToken(raw string) string {
 // makes rotation safe (issue, provision the tablet, then revoke the old one)
 // rather than a flag day where a booth is briefly unable to sell.
 func (r *PhotoBoothRepo) IssueDeviceToken(ctx context.Context, boothID uuid.UUID, label string, createdBy uuid.UUID) (raw string, t *DeviceToken, err error) {
+	return insertDeviceToken(ctx, r.pool, boothID, label, createdBy)
+}
+
+// insertDeviceToken is the one place a booth credential comes into existence —
+// whether an admin issued it directly or a tablet redeemed a pairing code.
+func insertDeviceToken(ctx context.Context, q rowQuerier, boothID uuid.UUID, label string, createdBy uuid.UUID) (string, *DeviceToken, error) {
 	// 32 bytes of crypto/rand, hex-encoded. Deliberately not the base62
 	// helper used for table tokens: that one takes `byte % 62`, which is
 	// slightly biased, and a long-lived device credential is the wrong place
@@ -371,11 +377,11 @@ func (r *PhotoBoothRepo) IssueDeviceToken(ctx context.Context, boothID uuid.UUID
 	if _, err := rand.Read(buf); err != nil {
 		return "", nil, err
 	}
-	raw = "pbt_" + hex.EncodeToString(buf)
+	raw := "pbt_" + hex.EncodeToString(buf)
 	prefix := raw[:14]
 
 	var out DeviceToken
-	err = r.pool.QueryRow(ctx, `
+	err := q.QueryRow(ctx, `
 		INSERT INTO photobooth_device_tokens (booth_id, token_hash, token_prefix, label, created_by)
 		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id, booth_id, token_prefix, label, created_at, last_used_at, revoked_at

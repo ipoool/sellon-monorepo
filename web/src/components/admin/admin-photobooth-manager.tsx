@@ -1,17 +1,20 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   Camera,
+  CheckCircle2,
   Copy,
   KeyRound,
+  Link2,
   Loader2,
   Pause,
   Play,
   Plus,
   Printer,
   Settings2,
+  Smartphone,
   Wifi,
   WifiOff,
   X,
@@ -28,6 +31,7 @@ import type {
   PhotoBoothBooth,
   PhotoBoothConfig,
   PhotoBoothDeviceToken,
+  PhotoBoothPairingCode,
 } from "@/lib/types";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -70,6 +74,9 @@ export function AdminPhotoBoothManager({ booths, settings }: Props) {
   const [issued, setIssued] = useState<{ booth: string; token: string } | null>(
     null,
   );
+  // The booth whose pairing dialog is open. Held by id rather than by value
+  // so the dialog follows the refreshed row instead of a stale snapshot.
+  const [pairingId, setPairingId] = useState<string | null>(null);
 
   async function call(path: string, init: RequestInit) {
     const res = await fetch(`${apiBase}/api/v1/admin/photobooth${path}`, {
@@ -132,6 +139,32 @@ export function AdminPhotoBoothManager({ booths, settings }: Props) {
     }
   }
 
+  async function startPairing(b: PhotoBoothBooth) {
+    setBusyId(b.id);
+    try {
+      await call(`/booths/${b.id}/pairing-code`, { method: "POST" });
+      setPairingId(b.id);
+      startTransition(() => router.refresh());
+    } catch (e) {
+      showError(e instanceof Error ? e.message : "Gagal membuat kode pairing");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function cancelPairing(b: PhotoBoothBooth) {
+    setBusyId(b.id);
+    try {
+      await call(`/booths/${b.id}/pairing-code`, { method: "DELETE" });
+      setPairingId(null);
+      startTransition(() => router.refresh());
+    } catch (e) {
+      showError(e instanceof Error ? e.message : "Gagal membatalkan kode");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function revokeToken(t: PhotoBoothDeviceToken) {
     setBusyId(t.id);
     try {
@@ -144,6 +177,8 @@ export function AdminPhotoBoothManager({ booths, settings }: Props) {
       setBusyId(null);
     }
   }
+
+  const pairingBooth = booths.find((b) => b.id === pairingId) ?? null;
 
   return (
     <div className="flex flex-col gap-4">
@@ -180,8 +215,8 @@ export function AdminPhotoBoothManager({ booths, settings }: Props) {
             Belum ada booth
           </h2>
           <p className="mx-auto mt-2 max-w-md text-sm text-neutral-600">
-            Daftarkan unit pertama, lalu terbitkan token perangkat dan pasang
-            di tabletnya.
+            Daftarkan unit pertama, lalu hubungkan tabletnya dengan kode
+            pairing enam huruf.
           </p>
         </Card>
       ) : (
@@ -288,10 +323,43 @@ export function AdminPhotoBoothManager({ booths, settings }: Props) {
                       </dd>
                     </div>
                     <div>
-                      <dt className="text-xs text-neutral-500">Token aktif</dt>
-                      <dd className="text-neutral-700">{liveTokens.length}</dd>
+                      <dt className="text-xs text-neutral-500">Perangkat</dt>
+                      <dd className="text-neutral-700">
+                        {liveTokens.length > 0 ? (
+                          `${liveTokens.length} terhubung`
+                        ) : (
+                          <span className="text-warning">belum ada</span>
+                        )}
+                      </dd>
                     </div>
                   </dl>
+                )}
+
+                {/* An outstanding invitation is the one thing on this card
+                    that is expiring while you read it, so it says so where
+                    the eye already is rather than only inside a dialog. */}
+                {b.pairing && (
+                  <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2">
+                    <Smartphone
+                      className="size-4 shrink-0 text-brand-600"
+                      aria-hidden
+                    />
+                    <code className="font-mono text-base font-bold tracking-[0.2em] text-brand-800">
+                      {b.pairing.code}
+                    </code>
+                    <PairingCountdown
+                      expiresAt={b.pairing.expires_at}
+                      className="text-xs text-brand-700"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void cancelPairing(b)}
+                      disabled={busy}
+                      className="ml-auto rounded-md px-2 py-1 text-xs font-medium text-neutral-500 hover:bg-white hover:text-neutral-800 disabled:opacity-50"
+                    >
+                      Batalkan
+                    </button>
+                  </div>
                 )}
 
                 <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-neutral-100 pt-3">
@@ -305,16 +373,17 @@ export function AdminPhotoBoothManager({ booths, settings }: Props) {
                   </Button>
                   <Button
                     size="sm"
-                    variant="outline"
-                    onClick={() => issueToken(b)}
-                    disabled={busy || b.status === "retired"}
+                    onClick={() =>
+                      b.pairing ? setPairingId(b.id) : void startPairing(b)
+                    }
+                    disabled={busy || b.status !== "active"}
                   >
                     {busy ? (
                       <Loader2 className="size-3.5 animate-spin" aria-hidden />
                     ) : (
-                      <KeyRound className="size-3.5" aria-hidden />
+                      <Link2 className="size-3.5" aria-hidden />
                     )}
-                    Terbitkan token
+                    {b.pairing ? "Lihat kode" : "Hubungkan perangkat"}
                   </Button>
                   {b.status === "active" ? (
                     <Button
@@ -337,6 +406,20 @@ export function AdminPhotoBoothManager({ booths, settings }: Props) {
                       Aktifkan
                     </Button>
                   ) : null}
+                  {/* The old path, kept for scripted provisioning: an
+                      operator typing 64 hex characters into a tablet is
+                      exactly what pairing exists to avoid, so it no longer
+                      leads. */}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => issueToken(b)}
+                    disabled={busy || b.status === "retired"}
+                    title="Terbitkan token mentah tanpa pairing"
+                  >
+                    <KeyRound className="size-3.5" aria-hidden />
+                    Token manual
+                  </Button>
                   {b.status !== "retired" && (
                     <Button
                       size="sm"
@@ -380,6 +463,16 @@ export function AdminPhotoBoothManager({ booths, settings }: Props) {
             );
           })}
         </ul>
+      )}
+
+      {pairingBooth && (
+        <PairingDialog
+          booth={pairingBooth}
+          onCancel={() => void cancelPairing(pairingBooth)}
+          onRegenerate={() => void startPairing(pairingBooth)}
+          onClose={() => setPairingId(null)}
+          onRefresh={() => startTransition(() => router.refresh())}
+        />
       )}
 
       {issued && (
@@ -438,6 +531,165 @@ export function AdminPhotoBoothManager({ booths, settings }: Props) {
         <p className="text-xs text-neutral-400">Menyegarkan…</p>
       )}
     </div>
+  );
+}
+
+/// Seconds remaining on an invitation, ticking.
+///
+/// A static "berlaku 15 menit" is read once and then believed for an hour.
+/// What an operator standing at the booth actually needs to know is whether
+/// the code in their hand is still good right now.
+function PairingCountdown({
+  expiresAt,
+  className,
+  onExpire,
+}: {
+  expiresAt: string;
+  className?: string;
+  onExpire?: () => void;
+}) {
+  const [left, setLeft] = useState(() =>
+    Math.max(0, new Date(expiresAt).getTime() - Date.now()),
+  );
+
+  useEffect(() => {
+    const tick = () => {
+      const ms = Math.max(0, new Date(expiresAt).getTime() - Date.now());
+      setLeft(ms);
+      if (ms === 0) onExpire?.();
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+    // onExpire is intentionally not a dependency: it is a notification, and
+    // re-arming the interval on every parent render would reset the clock.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expiresAt]);
+
+  if (left === 0) return <span className={className}>kedaluwarsa</span>;
+  const total = Math.ceil(left / 1000);
+  const mm = Math.floor(total / 60);
+  const ss = String(total % 60).padStart(2, "0");
+  return (
+    <span className={className}>
+      berlaku {mm}:{ss} lagi
+    </span>
+  );
+}
+
+/// The screen an operator reads from while standing at the booth.
+///
+/// The device token is 64 hex characters; asking someone to transcribe that
+/// into a tablet is how a long-lived credential ends up pasted into a chat
+/// thread. So the human carries six characters instead, and the tablet
+/// fetches the real token itself.
+///
+/// It polls while open because the useful moment is the one after the
+/// operator types the code: the console says "terhubung" at the booth,
+/// instead of leaving them to walk back and refresh.
+function PairingDialog({
+  booth,
+  onCancel,
+  onRegenerate,
+  onClose,
+  onRefresh,
+}: {
+  booth: PhotoBoothBooth;
+  onCancel: () => void;
+  onRegenerate: () => void;
+  onClose: () => void;
+  onRefresh: () => void;
+}) {
+  const pairing: PhotoBoothPairingCode | undefined = booth.pairing;
+  const liveTokens = (booth.tokens ?? []).filter((t) => !t.revoked_at);
+  // No outstanding code and at least one live credential: the tablet took it.
+  const paired = !pairing && liveTokens.length > 0;
+
+  // Poll only while an invitation is actually outstanding. A dialog left open
+  // on a paired booth should cost nothing.
+  useEffect(() => {
+    if (!pairing) return;
+    const id = setInterval(onRefresh, 4000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pairing?.code]);
+
+  if (paired) {
+    return (
+      <Dialog onClose={onClose} title={`Booth ${booth.code} terhubung`}>
+        <div className="flex flex-col items-center py-4 text-center">
+          <div className="flex size-14 items-center justify-center rounded-full bg-success/10">
+            <CheckCircle2 className="size-7 text-success" aria-hidden />
+          </div>
+          <p className="mt-3 font-medium text-neutral-900">
+            Perangkat berhasil dihubungkan
+          </p>
+          <p className="mt-1 max-w-sm text-sm text-neutral-600">
+            Tablet sudah menyimpan tokennya sendiri dan siap menerima
+            pembayaran. Kalau tabletnya hilang, cabut perangkatnya dari kartu
+            booth — aksesnya berhenti saat itu juga.
+          </p>
+          <Button size="md" className="mt-4" onClick={onClose}>
+            Selesai
+          </Button>
+        </div>
+      </Dialog>
+    );
+  }
+
+  return (
+    <Dialog onClose={onClose} title={`Hubungkan tablet ke booth ${booth.code}`}>
+      {pairing ? (
+        <>
+          <p className="text-sm leading-relaxed text-neutral-600">
+            Buka aplikasi PhotoBoost di tablet, pilih{" "}
+            <strong className="text-neutral-900">Hubungkan ke booth</strong>,
+            lalu masukkan kode ini.
+          </p>
+
+          <div className="mt-4 rounded-xl border border-brand-200 bg-brand-50 px-4 py-6 text-center">
+            {/* Big, spaced, and monospaced: this is read across a counter and
+                typed on a touchscreen, not scanned. */}
+            <p className="font-mono text-4xl font-bold tracking-[0.35em] text-brand-800 sm:text-5xl">
+              {pairing.code}
+            </p>
+            <PairingCountdown
+              expiresAt={pairing.expires_at}
+              className="mt-3 block text-sm font-medium text-brand-700"
+              onExpire={onRefresh}
+            />
+          </div>
+
+          <p className="mt-3 text-xs leading-relaxed text-neutral-500">
+            Kode hanya bisa dipakai satu kali dan hangus setelah 15 menit.
+            Token perangkatnya diambil sendiri oleh tablet lewat koneksi
+            terenkripsi, jadi tidak perlu disalin ke mana-mana.
+          </p>
+
+          <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+            <Button size="sm" variant="ghost" onClick={onCancel}>
+              Batalkan kode
+            </Button>
+            <Button size="sm" variant="outline" onClick={onRegenerate}>
+              Ganti kode
+            </Button>
+            <Button size="sm" onClick={onClose}>
+              Tutup
+            </Button>
+          </div>
+        </>
+      ) : (
+        <div className="py-4 text-center">
+          <p className="text-sm text-neutral-600">
+            Kode pairing sudah tidak berlaku.
+          </p>
+          <Button size="md" className="mt-3" onClick={onRegenerate}>
+            <Link2 className="size-4" aria-hidden />
+            Buat kode baru
+          </Button>
+        </div>
+      )}
+    </Dialog>
   );
 }
 

@@ -329,11 +329,7 @@ export function AdminSubscriptionsTable({
                         Tolak
                       </Button>
                     </>
-                  ) : (
-                    <span className="text-xs text-neutral-400">
-                      {r.status === "paid" ? "Sudah aktif" : "Sudah ditolak"}
-                    </span>
-                  )}
+                  ) : null}
                 </div>
               </li>
             );
@@ -473,13 +469,7 @@ export function AdminSubscriptionsTable({
                               Tolak
                             </Button>
                           </>
-                        ) : (
-                          <span className="text-xs text-neutral-400">
-                            {r.status === "paid"
-                              ? "Sudah aktif"
-                              : "Sudah ditolak"}
-                          </span>
-                        )}
+                        ) : null}
                       </div>
                     </td>
                   </tr>

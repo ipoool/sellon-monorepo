@@ -517,3 +517,158 @@ func TestPhotoBoothTokenIsNotStoredRaw(t *testing.T) {
 		t.Fatalf("prefix %q is not a prefix, it is the whole token", prefix)
 	}
 }
+
+// === Pairing ===
+
+// A pairing code is a bearer credential for the fifteen minutes it lives, and
+// redeeming it mints a token that can charge real money. Two tablets racing on
+// one code must therefore produce exactly one token — otherwise a stranger who
+// shoulder-read the code off the admin's screen ends up authenticated as the
+// booth alongside the real one.
+func TestPhotoBoothPairingCodeIsSingleUseUnderRace(t *testing.T) {
+	ctx := context.Background()
+	_, repo, _ := pbRepos(t)
+	booth := freshBooth(t, repo)
+
+	pc, err := repo.CreatePairingCode(ctx, booth.ID, "Tablet A", uuid.Nil)
+	if err != nil {
+		t.Fatalf("create pairing code: %v", err)
+	}
+
+	const racers = 8
+	var wg sync.WaitGroup
+	tokens := make([]string, racers)
+	errs := make([]error, racers)
+	wg.Add(racers)
+	for i := 0; i < racers; i++ {
+		go func(i int) {
+			defer wg.Done()
+			tokens[i], _, errs[i] = repo.RedeemPairingCode(ctx, pc.Code, "racer")
+		}(i)
+	}
+	wg.Wait()
+
+	won := 0
+	for i := range tokens {
+		switch {
+		case errs[i] == nil:
+			won++
+			if tokens[i] == "" {
+				t.Error("redeem succeeded but returned an empty token")
+			}
+		case errors.Is(errs[i], repository.ErrPairingCodeInvalid):
+			// Expected: the losers.
+		default:
+			t.Fatalf("unexpected redeem error: %v", errs[i])
+		}
+	}
+	if won != 1 {
+		t.Fatalf("pairing code redeemed %d times, want exactly 1", won)
+	}
+}
+
+// A redeemed code stays dead. The booth keeps working; the code does not.
+func TestPhotoBoothPairingCodeRejectsReplay(t *testing.T) {
+	ctx := context.Background()
+	_, repo, _ := pbRepos(t)
+	booth := freshBooth(t, repo)
+
+	pc, err := repo.CreatePairingCode(ctx, booth.ID, "", uuid.Nil)
+	if err != nil {
+		t.Fatalf("create pairing code: %v", err)
+	}
+	if _, _, err := repo.RedeemPairingCode(ctx, pc.Code, "tablet"); err != nil {
+		t.Fatalf("first redeem: %v", err)
+	}
+	if _, _, err := repo.RedeemPairingCode(ctx, pc.Code, "tablet"); !errors.Is(err, repository.ErrPairingCodeInvalid) {
+		t.Fatalf("replay returned %v, want ErrPairingCodeInvalid", err)
+	}
+	if got, err := repo.ActivePairingCodeFor(ctx, booth.ID); err != nil || got != nil {
+		t.Fatalf("redeemed code still listed as active (%v, %v)", got, err)
+	}
+}
+
+// Issuing a second code retires the first. An admin who clicks twice because
+// the dialog scrolled must not leave two live credentials behind.
+func TestPhotoBoothPairingCodeSupersedesPrevious(t *testing.T) {
+	ctx := context.Background()
+	_, repo, _ := pbRepos(t)
+	booth := freshBooth(t, repo)
+
+	first, err := repo.CreatePairingCode(ctx, booth.ID, "", uuid.Nil)
+	if err != nil {
+		t.Fatalf("first code: %v", err)
+	}
+	second, err := repo.CreatePairingCode(ctx, booth.ID, "", uuid.Nil)
+	if err != nil {
+		t.Fatalf("second code: %v", err)
+	}
+	if first.Code == second.Code {
+		t.Fatal("second code equals the first")
+	}
+	if _, _, err := repo.RedeemPairingCode(ctx, first.Code, "tablet"); !errors.Is(err, repository.ErrPairingCodeInvalid) {
+		t.Fatalf("superseded code redeemed with %v, want ErrPairingCodeInvalid", err)
+	}
+	if _, _, err := repo.RedeemPairingCode(ctx, second.Code, "tablet"); err != nil {
+		t.Fatalf("current code failed to redeem: %v", err)
+	}
+}
+
+// A paused booth is one an operator deliberately took out of service. Pairing
+// a tablet to it would put it back in service without anyone saying so.
+func TestPhotoBoothPairingRefusesInactiveBooth(t *testing.T) {
+	ctx := context.Background()
+	pool, repo, _ := pbRepos(t)
+	booth := freshBooth(t, repo)
+
+	pc, err := repo.CreatePairingCode(ctx, booth.ID, "", uuid.Nil)
+	if err != nil {
+		t.Fatalf("create pairing code: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`UPDATE photobooth_booths SET status = 'paused' WHERE id = $1`, booth.ID); err != nil {
+		t.Fatalf("pause booth: %v", err)
+	}
+	if _, _, err := repo.RedeemPairingCode(ctx, pc.Code, "tablet"); !errors.Is(err, repository.ErrPairingCodeInvalid) {
+		t.Fatalf("paused booth paired with %v, want ErrPairingCodeInvalid", err)
+	}
+}
+
+// The token a redemption hands back must actually authenticate, and must
+// authenticate as the booth the code belonged to. A pairing flow that returns
+// a token the middleware then rejects fails at the booth, in front of a
+// customer, with no diagnosis available on site.
+func TestPhotoBoothPairingTokenAuthenticates(t *testing.T) {
+	ctx := context.Background()
+	_, repo, _ := pbRepos(t)
+	booth := freshBooth(t, repo)
+
+	pc, err := repo.CreatePairingCode(ctx, booth.ID, "Tablet depan", uuid.Nil)
+	if err != nil {
+		t.Fatalf("create pairing code: %v", err)
+	}
+	raw, paired, err := repo.RedeemPairingCode(ctx, pc.Code, "")
+	if err != nil {
+		t.Fatalf("redeem: %v", err)
+	}
+	if paired.ID != booth.ID {
+		t.Fatalf("paired to booth %s, want %s", paired.Code, booth.Code)
+	}
+
+	auth, err := repo.FindActiveBoothByTokenHash(ctx, repository.HashDeviceToken(raw))
+	if err != nil {
+		t.Fatalf("issued token does not authenticate: %v", err)
+	}
+	if auth.Booth.ID != booth.ID {
+		t.Fatalf("token authenticated as booth %s, want %s", auth.Booth.Code, booth.Code)
+	}
+
+	// Revoking is how an admin un-pairs a lost tablet; the device must lose
+	// access immediately rather than at some expiry.
+	if err := repo.RevokeDeviceToken(ctx, auth.TokenID, uuid.Nil); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	if _, err := repo.FindActiveBoothByTokenHash(ctx, repository.HashDeviceToken(raw)); !errors.Is(err, repository.ErrDeviceTokenInvalid) {
+		t.Fatalf("revoked token still authenticates (%v)", err)
+	}
+}
