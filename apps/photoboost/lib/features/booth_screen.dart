@@ -72,6 +72,7 @@ class BoothScreen extends StatelessWidget {
       count: count,
       camera: controller.camera,
       shotLabel: 'Foto ${shotIndex + 1} dari ${session.shotsPlanned}',
+      onShootNow: controller.shootNow,
     ),
     Capturing(:final shotIndex, :final session) => _FlashView(
       camera: controller.camera,
@@ -601,11 +602,13 @@ class _CountdownView extends StatelessWidget {
   const _CountdownView({
     required this.count,
     required this.shotLabel,
+    required this.onShootNow,
     this.camera,
   });
 
   final int count;
   final String shotLabel;
+  final VoidCallback onShootNow;
   final CameraSource? camera;
 
   @override
@@ -649,10 +652,26 @@ class _CountdownView extends StatelessWidget {
         Align(
           alignment: Alignment.bottomCenter,
           child: Padding(
-            padding: const EdgeInsets.only(bottom: 56),
-            child: Text(
-              'Siapkan pose terbaikmu',
-              style: SellonText.h3.copyWith(color: Colors.white),
+            padding: const EdgeInsets.only(bottom: 44),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Siapkan pose terbaikmu',
+                  style: SellonText.h3.copyWith(color: Colors.white),
+                ),
+                const SizedBox(height: SellonSpacing.md),
+                // For people who are already posed. The countdown keeps
+                // running behind it, so this adds an option without taking
+                // the default away.
+                PillButton(
+                  label: 'Foto sekarang',
+                  icon: Icons.camera_alt_rounded,
+                  variant: PillVariant.secondary,
+                  minWidth: 280,
+                  onPressed: onShootNow,
+                ),
+              ],
             ),
           ),
         ),

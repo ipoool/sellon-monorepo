@@ -7,6 +7,7 @@ import 'package:photoboost/printing/fake_printer.dart';
 import 'package:photoboost/printing/printer.dart';
 import 'package:photoboost/session/booth_controller.dart';
 import 'package:photoboost/session/booth_state.dart';
+import 'package:photoboost/session/timeouts.dart';
 
 /// Drives the machine the way a customer does, against the fakes. This is
 /// what proves the simulation actually reaches a photo rather than merely
@@ -18,6 +19,9 @@ import 'package:photoboost/session/booth_state.dart';
 const _slow = Timeout(Duration(minutes: 3));
 
 void main() {
+  _noCameraNoSale();
+  _shootNow();
+  _priceConsistency();
   // A binding is needed for dart:ui (the composite render), but these are
   // plain `test`s rather than `testWidgets`: the controller runs on real
   // Timers, and testWidgets' fake clock would never let an `await` on one
@@ -80,7 +84,10 @@ void main() {
       // There must be something to scan, or the customer is stuck.
       final waiting = c.state as AwaitingPayment;
       expect(waiting.session.qrString, isNotEmpty);
-      expect(waiting.session.amountCents, 2500000);
+      // Against the config, not a literal: pinning the number here is how a
+      // price change passes its own test while the booth quotes one amount
+      // and charges another.
+      expect(waiting.session.amountCents, c.config!.priceCents);
 
       await waitFor(c, (s) => s is Paid || s.isPaid);
 
@@ -215,4 +222,109 @@ void main() {
       expect(c.state, isA<PrintFailed>());
     },
   );
+}
+
+/// A booth with no camera must refuse the sale, not take it.
+void _noCameraNoSale() {
+  test('a dead camera stops the session before any money moves', () async {
+    final dir = Directory.systemTemp.createTempSync('pb-nocam');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final api = FakeBoothApi();
+    final camera = FakeCameraSource();
+    final c = BoothController(
+      api: api,
+      camera: camera,
+      printer: FakePrinter(),
+      mediaDir: dir,
+    );
+    addTearDown(c.dispose);
+    await c.start();
+
+    // Unplugged, permission revoked, claimed by another app — all the same
+    // from here.
+    await camera.close();
+
+    c.beginSession();
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+
+    expect(
+      c.state,
+      isA<Fatal>(),
+      reason: 'the booth started charging with no way to take a photo',
+    );
+    expect((c.state as Fatal).message, contains('Kamera'));
+  });
+}
+
+/// The shutter button must actually cut the countdown short.
+void _shootNow() {
+  test('pressing the shutter skips the rest of the countdown', () async {
+    final dir = Directory.systemTemp.createTempSync('pb-shoot');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final c = BoothController(
+      api: FakeBoothApi(),
+      camera: FakeCameraSource(),
+      printer: FakePrinter(),
+      mediaDir: dir,
+    );
+    addTearDown(c.dispose);
+    await c.start();
+
+    Future<void> until(bool Function(BoothState) ready, Duration limit) async {
+      final deadline = DateTime.now().add(limit);
+      while (!ready(c.state)) {
+        if (DateTime.now().isAfter(deadline)) {
+          fail('timed out waiting; state is ${c.state.runtimeType}');
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+    }
+
+    final began = DateTime.now();
+    c.beginSession();
+    await until((s) => s is GetReady, const Duration(seconds: 30));
+
+    // Fire immediately. Without this the countdown runs its full length, so
+    // reaching the first shot materially faster is the proof.
+    c.shootNow();
+    await until((s) => s is ShotTaken, const Duration(seconds: 20));
+    final elapsed = DateTime.now().difference(began);
+
+    expect((c.state as ShotTaken).shots.length, 1);
+    expect(
+      elapsed,
+      lessThan(Timeouts.shotCountdown + const Duration(seconds: 8)),
+      reason: 'the countdown ran to completion despite the shutter press',
+    );
+
+    // Outside a countdown it must be inert, not fire a stray shot.
+    c.shootNow();
+    expect(c.state, isA<ShotTaken>());
+  });
+}
+
+/// The booth must charge what it advertises.
+///
+/// The server guarantees this by deriving a session's amount from its own
+/// config and never accepting a price from the client. The fake has to keep
+/// the same promise, or every screen built against it is built on a lie —
+/// which is how the idle screen came to quote Rp 5.000 while the QR asked
+/// for Rp 25.000.
+void _priceConsistency() {
+  test('the session charges exactly what the config advertises', () async {
+    final api = FakeBoothApi();
+    final config = await api.fetchConfig();
+    final session = await api.createSession(idempotencyKey: 'price-check');
+
+    expect(
+      session.amountCents,
+      config.priceCents,
+      reason: 'the QR asks for a different amount than the idle screen quotes',
+    );
+    expect(
+      session.shotsPlanned,
+      config.shotsCount,
+      reason: 'the booth promises a different number of shots than it takes',
+    );
+  });
 }

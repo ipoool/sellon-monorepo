@@ -60,6 +60,10 @@ class BoothController extends ChangeNotifier {
 
   final _shots = <File>[];
   PhotoFilter _filter = PhotoFilter.normal;
+
+  /// Completed by shootNow() to cut a countdown short. Null when no shot is
+  /// counting down.
+  Completer<void>? _skipCountdown;
   Timer? _ticker;
   Timer? _pollTimer;
   bool _busy = false;
@@ -77,6 +81,19 @@ class BoothController extends ChangeNotifier {
   /// Customer pressed Mulai.
   Future<void> beginSession() async {
     if (_busy || _state is! Idle) return;
+    // Never take money the booth cannot honour. With a fake camera this was
+    // unreachable; a real one can be unplugged, denied permission, or claimed
+    // by another app, and a customer who pays into a booth that cannot shoot
+    // is the worst outcome this app can produce.
+    if (!_camera.isAvailable) {
+      _set(
+        const Fatal(
+          'Kamera tidak terdeteksi. Hubungi petugas — '
+          'tidak ada uang yang terpotong.',
+        ),
+      );
+      return;
+    }
     _busy = true;
     _set(const CreatingSession());
     try {
@@ -165,10 +182,20 @@ class BoothController extends ChangeNotifier {
   /// still arranging themselves, had no way to see what they got until the
   /// end. Now each shot lands on screen and they press Lanjut when ready.
   Future<void> _captureShot(BoothSession session, int index) async {
+    final skip = Completer<void>();
+    _skipCountdown = skip;
     for (var c = Timeouts.shotCountdown.inSeconds; c > 0; c--) {
       _set(GetReady(session, shotIndex: index, count: c));
-      await Future<void>.delayed(const Duration(seconds: 1));
+      // Race the tick against the customer pressing the shutter. A countdown
+      // helps people who need a beat to pose and gets in the way of people
+      // who are already posed — this serves both without a setting.
+      await Future.any([
+        Future<void>.delayed(const Duration(seconds: 1)),
+        skip.future,
+      ]);
+      if (skip.isCompleted) break;
     }
+    _skipCountdown = null;
     _set(Capturing(session, shotIndex: index));
 
     try {
@@ -188,6 +215,16 @@ class BoothController extends ChangeNotifier {
     );
 
     _awaitContinue(session);
+  }
+
+  /// Fires the shutter now, skipping whatever is left of the countdown.
+  ///
+  /// Safe to call at any other moment: outside a countdown there is nothing
+  /// to complete, so a stray tap does nothing rather than taking a photo of
+  /// a screen nobody is posing for.
+  void shootNow() {
+    final skip = _skipCountdown;
+    if (skip != null && !skip.isCompleted) skip.complete();
   }
 
   /// Parks on the review screen until the customer presses Lanjut, or the

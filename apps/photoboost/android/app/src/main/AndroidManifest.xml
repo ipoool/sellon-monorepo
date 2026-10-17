@@ -1,4 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- The booth is a camera. Declared as not-required so the APK still
+         installs on a tablet whose camera will be an external webcam. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
     <application
         android:label="photoboost"
         android:name="${applicationName}"

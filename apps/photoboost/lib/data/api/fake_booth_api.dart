@@ -36,12 +36,20 @@ class FakeBoothApi implements BoothApi {
   final _byIdempotency = <String, String>{};
   var _seq = 0;
 
+  // The booth's price and shot count live here ONCE, because the server
+  // derives a session's amount from its config (handler/booth.go: price is
+  // never taken from the client) and a fake that hardcodes them separately
+  // can quote one price on the idle screen and charge another on the QR —
+  // which is exactly what it did.
+  static const _priceCents = 500000; // Rp 5.000
+  static const _shotsCount = 4;
+
   @override
   Future<BoothConfig> fetchConfig() async {
     await Future<void>.delayed(latency);
     return BoothConfig(
-      priceCents: 500000, // Rp 5.000 — matches the platform default
-      shotsCount: 4,
+      priceCents: _priceCents,
+      shotsCount: _shotsCount,
       printCopies: 1,
       sessionTimeoutSeconds: 300,
       qrisExpiryMinutes: 10,
@@ -72,8 +80,8 @@ class FakeBoothApi implements BoothApi {
     final number = 'PB-DEMO-${_stamp()}-${_suffix()}';
     final s = _FakeSession(
       number: number,
-      amountCents: 2500000,
-      shotsPlanned: 4,
+      amountCents: _priceCents,
+      shotsPlanned: _shotsCount,
       frameId: frameId,
     );
     _sessions[number] = s;

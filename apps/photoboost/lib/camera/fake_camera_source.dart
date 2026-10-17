@@ -38,6 +38,12 @@ class FakeCameraSource implements CameraSource {
     _availability.add(false);
   }
 
+  /// No preview: CameraStage falls back to its dark placeholder, which is
+  /// also what a booth with a dead camera shows. Tests and demo mode get the
+  /// layout without a camera plugin in the way.
+  @override
+  Widget? buildPreview({bool mirror = true}) => null;
+
   @override
   Future<File> capture(String destinationPath) async {
     if (!_open) throw StateError('kamera belum dibuka');

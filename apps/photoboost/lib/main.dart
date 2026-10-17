@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'camera/camera_source.dart';
+import 'camera/device_camera_source.dart';
 import 'camera/fake_camera_source.dart';
 import 'data/api/booth_api.dart';
 import 'data/api/fake_booth_api.dart';
@@ -38,6 +39,13 @@ const kAppVersion = String.fromEnvironment(
   'APP_VERSION',
   defaultValue: '0.1.0',
 );
+
+/// Use the drawn placeholder camera instead of the device's own.
+///
+/// Defaults to the real camera even in demo mode, because the preview is the
+/// thing most worth looking at when demoing. Pass
+/// --dart-define=FAKE_CAMERA=true on a machine with no camera.
+const kUseFakeCamera = bool.fromEnvironment('FAKE_CAMERA');
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -129,9 +137,13 @@ class _BoothHostState extends State<BoothHost> {
   }
 
   Future<void> _startSelling(BoothApi api) async {
-    // Camera and printer are still fakes: the hardware spike has not landed,
-    // and the rest of the app is deliberately buildable without it.
-    final CameraSource camera = FakeCameraSource();
+    // The tablet's own camera, with a live preview. Demo mode keeps the fake
+    // so the flow still runs on a desktop with no camera at all.
+    //
+    // The printer is still a fake: the Bluetooth transport has not landed.
+    final CameraSource camera = kUseFakeCamera
+        ? FakeCameraSource()
+        : DeviceCameraSource();
     final BoothPrinter printer = FakePrinter();
 
     final mediaDir = Directory('${Directory.systemTemp.path}/photoboost-media');

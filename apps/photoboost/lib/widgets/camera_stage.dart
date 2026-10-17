@@ -28,26 +28,32 @@ class CameraStage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final available = source?.isAvailable ?? false;
+    final preview = source?.buildPreview(mirror: mirror);
     return Stack(
       fit: StackFit.expand,
       children: [
         const ColoredBox(color: Color(0xFF05100A)),
-        // Placeholder stage. Replaced by the preview Texture once the
-        // platform side can hand one over.
-        Center(
-          child: Transform.flip(
-            flipX: mirror,
-            child: DecoratedBox(
-              decoration: const BoxDecoration(
-                gradient: RadialGradient(
-                  radius: 0.9,
-                  colors: [Color(0xFF16301F), Color(0xFF05100A)],
+        // The live feed when there is one. Without it the stage falls back
+        // to a dark gradient — which is also exactly what should appear if
+        // the camera drops mid-session, so there is no separate error state
+        // to build.
+        if (preview != null)
+          Positioned.fill(child: preview)
+        else
+          Center(
+            child: Transform.flip(
+              flipX: mirror,
+              child: DecoratedBox(
+                decoration: const BoxDecoration(
+                  gradient: RadialGradient(
+                    radius: 0.9,
+                    colors: [Color(0xFF16301F), Color(0xFF05100A)],
+                  ),
                 ),
+                child: const SizedBox.expand(),
               ),
-              child: const SizedBox.expand(),
             ),
           ),
-        ),
         if (!available)
           Align(
             alignment: Alignment.topCenter,

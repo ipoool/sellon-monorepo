@@ -17,8 +17,31 @@ Built and tested:
 - SellOn theme ported to Dart, the state-machine types, the camera and
   printer abstractions, and the thermal raster pipeline
 
-Not built yet: the Bluetooth transport and the real UVC camera. See the plan
-for the milestone order.
+Not built yet: the Bluetooth transport, and the UVC path for an external
+webcam. See the plan for the milestone order.
+
+## Camera
+
+`DeviceCameraSource` drives the tablet's own camera through the first-party
+`camera` plugin, with a live preview behind every capture screen — people
+need to see where they are in frame before the shutter fires.
+
+This is **not** the USB webcam path. Android never exposes
+`LENS_FACING_EXTERNAL` for UVC devices, so `availableCameras()` will not
+list one; an external webcam needs its own `CameraSource`. That interface is
+why this is a one-file addition rather than a rewrite.
+
+The booth refuses to start a session when the camera is unavailable. A
+customer who pays into a booth that cannot shoot is the worst outcome this
+app can produce, and a real camera — unlike the fake everything was built
+against — can be unplugged, denied permission, or claimed by another app.
+
+Running on an emulator: `flutter emulators --launch Pixel_Tablet_API_VanillaIceCream`,
+then `flutter run -d emulator-5554 --dart-define=DEMO=true`. Grant the camera
+permission (`adb shell pm grant id.sellon.photoboost android.permission.CAMERA`)
+or the first launch sits on the permission dialog. The emulator's virtual
+camera renders a test scene, which is enough to verify framing and capture.
+On a machine with no camera at all, add `--dart-define=FAKE_CAMERA=true`.
 
 ## What the booth sells today
 

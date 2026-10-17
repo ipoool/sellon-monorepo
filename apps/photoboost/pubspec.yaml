@@ -39,6 +39,13 @@ dependencies:
   # path to app-private storage from pure Dart. First-party Flutter plugin,
   # and the only dependency pairing needs — HTTP is dart:io.
   path_provider: ^2.1.5
+  # The tablet's own camera, and a live preview. First-party Flutter plugin.
+  #
+  # Note this does NOT cover a USB webcam: Android never exposes
+  # LENS_FACING_EXTERNAL for UVC devices, so an external camera still needs
+  # its own CameraSource implementation. The interface exists for exactly
+  # that reason — this is one implementation of it, not the only one.
+  camera: ^0.12.1
 
 dev_dependencies:
   flutter_test:

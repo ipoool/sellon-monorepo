@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:flutter/widgets.dart';
+
 /// Where photos come from.
 ///
 /// This interface exists because the camera is the riskiest part of the
@@ -25,6 +27,14 @@ abstract class CameraSource {
   Future<void> open();
 
   Future<void> close();
+
+  /// The live preview, or null when this source cannot show one.
+  ///
+  /// Part of the camera's contract rather than a screen's problem: a booth
+  /// where people cannot see themselves before the shutter fires produces
+  /// four photos of someone looking at the wrong part of the screen. The
+  /// capture screens build their overlays on top of whatever this returns.
+  Widget? buildPreview({bool mirror = true});
 
   /// Capture one still to a file on disk.
   ///
