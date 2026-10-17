@@ -49,27 +49,34 @@ class PillButton extends StatelessWidget {
       ),
     };
 
+    final radius = BorderRadius.circular(SellonRadii.pill);
+    final glow = variant == PillVariant.primary && enabled
+        ? BoothSurface.accentGlow(0.8)
+        : null;
+
     return Semantics(
       button: true,
       enabled: enabled,
       label: label,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onPressed,
-          borderRadius: BorderRadius.circular(SellonRadii.pill),
-          child: Ink(
-            decoration: BoxDecoration(
-              color: bg,
-              borderRadius: BorderRadius.circular(SellonRadii.pill),
-              border: border == null
-                  ? null
-                  : Border.all(color: border, width: 1.5),
-              // The one thing to press is the brightest thing on screen.
-              boxShadow: variant == PillVariant.primary && enabled
-                  ? BoothSurface.accentGlow(0.8)
-                  : null,
-            ),
+      // The glow sits on a plain DecoratedBox OUTSIDE the Material, not on an
+      // Ink decoration inside it. Ink paints into the Material's own layer,
+      // where a boxShadow is not clipped to the pill — under Impeller that
+      // surfaced as a hard-edged rectangle sitting behind every primary
+      // button. Skia hid it, so it only showed up on the tablet.
+      child: DecoratedBox(
+        decoration: BoxDecoration(borderRadius: radius, boxShadow: glow),
+        child: Material(
+          color: bg,
+          // Shape plus clipBehavior is what keeps the ripple inside the pill
+          // now that the fill lives on the Material rather than on an Ink.
+          shape: StadiumBorder(
+            side: border == null
+                ? BorderSide.none
+                : BorderSide(color: border, width: 1.5),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onPressed,
             child: Container(
               constraints: BoxConstraints(minHeight: 64, minWidth: minWidth),
               padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
