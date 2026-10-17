@@ -4,6 +4,8 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
+import 'photo_filter.dart';
+
 /// Lays out the finished photo strip.
 ///
 /// Renders TWICE from the same code: once at screen resolution for the
@@ -47,6 +49,7 @@ class CompositeRenderer {
     required String boothName,
     required String sessionNumber,
     ui.Image? frame,
+    PhotoFilter filter = PhotoFilter.normal,
     bool monochrome = false,
   }) async {
     final height = heightFor(width, shots.length, monochrome: monochrome);
@@ -68,7 +71,9 @@ class CompositeRenderer {
 
     for (final shot in shots) {
       final dst = Rect.fromLTWH(g, y, width - g * 2, cell);
-      _drawCover(canvas, shot, dst);
+      // The filter applies to the photograph only — a frame or sticker drawn
+      // on top keeps its own colours.
+      _drawCover(canvas, shot, dst, filter.colorFilter);
       if (frame != null) {
         canvas.drawImageRect(
           frame,
@@ -124,7 +129,12 @@ class CompositeRenderer {
 
   /// Cover-fit: fills the cell and crops the overflow, so a 4:3 webcam frame
   /// never letterboxes into bands of solid white.
-  void _drawCover(Canvas canvas, ui.Image img, Rect dst) {
+  void _drawCover(
+    Canvas canvas,
+    ui.Image img,
+    Rect dst, [
+    ui.ColorFilter? colorFilter,
+  ]) {
     final iw = img.width.toDouble(), ih = img.height.toDouble();
     final scale = (dst.width / iw) > (dst.height / ih)
         ? dst.width / iw
@@ -138,7 +148,7 @@ class CompositeRenderer {
     );
     canvas.save();
     canvas.clipRect(dst);
-    canvas.drawImageRect(img, src, dst, Paint());
+    canvas.drawImageRect(img, src, dst, Paint()..colorFilter = colorFilter);
     canvas.restore();
   }
 

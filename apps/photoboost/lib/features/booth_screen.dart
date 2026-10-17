@@ -4,11 +4,15 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
+import '../camera/camera_source.dart';
+import '../compose/photo_filter.dart';
 import '../session/booth_controller.dart';
 import '../session/booth_state.dart';
+import '../theme/booth_surface.dart';
 import '../theme/colors.dart';
 import '../theme/shadows.dart';
 import '../theme/typography.dart';
+import '../widgets/camera_stage.dart';
 import '../widgets/motion.dart';
 import '../widgets/pill_button.dart';
 import '../widgets/qr_view.dart';
@@ -61,9 +65,11 @@ class BoothScreen extends StatelessWidget {
     Paid() => const _PaidView(),
     GetReady(:final shotIndex, :final count, :final session) => _CountdownView(
       count: count,
+      camera: controller.camera,
       shotLabel: 'Foto ${shotIndex + 1} dari ${session.shotsPlanned}',
     ),
     Capturing(:final shotIndex, :final session) => _FlashView(
+      camera: controller.camera,
       shotLabel: 'Foto ${shotIndex + 1} dari ${session.shotsPlanned}',
     ),
     ShotTaken(
@@ -80,11 +86,13 @@ class BoothScreen extends StatelessWidget {
         onContinue: controller.continueCapture,
         onRetake: controller.retakeShot,
       ),
-    Decorating(:final shots, :final frameId) => _DecorateView(
+    Decorating(:final shots, :final frameId, :final filter) => _DecorateView(
       shots: shots,
       selected: frameId,
       frames: controller.config?.frames ?? const [],
+      filter: filter,
       onPick: controller.chooseFrame,
+      onPickFilter: controller.chooseFilter,
       onConfirm: controller.confirmFrame,
     ),
     Previewing() => _PreviewView(
@@ -97,7 +105,10 @@ class BoothScreen extends StatelessWidget {
       reason: reason,
       onDone: controller.reset,
     ),
-    ThankYou(:final secondsLeft) => _ThankYouView(secondsLeft: secondsLeft),
+    ThankYou(:final secondsLeft, :final shareUrl) => _ThankYouView(
+      secondsLeft: secondsLeft,
+      shareUrl: shareUrl,
+    ),
     Unregistered(:final reason) => _FatalView(message: reason),
     Fatal(:final message) => _FatalView(message: message),
   };
@@ -107,16 +118,13 @@ class _BrandWash extends StatelessWidget {
   const _BrandWash();
 
   @override
-  Widget build(BuildContext context) => Positioned.fill(
+  Widget build(BuildContext context) => const Positioned.fill(
     child: DecoratedBox(
       decoration: BoxDecoration(
         gradient: RadialGradient(
-          center: const Alignment(0, -1.1),
-          radius: 1.4,
-          colors: [
-            SellonColors.brand100.withValues(alpha: 0.85),
-            SellonColors.neutral50,
-          ],
+          center: Alignment(0, -0.9),
+          radius: 1.5,
+          colors: [BoothSurface.raised, BoothSurface.base],
         ),
       ),
     ),
@@ -263,8 +271,8 @@ class _Step extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final fill = Color.lerp(
-      SellonColors.brand300,
-      SellonColors.brand600,
+      BoothSurface.accentSoft,
+      BoothSurface.accentStrong,
       Curves.easeOut.transform(lit),
     )!;
     return Transform.translate(
@@ -291,8 +299,8 @@ class _Step extends StatelessWidget {
               textAlign: TextAlign.center,
               style: SellonText.label.copyWith(
                 color: Color.lerp(
-                  SellonColors.neutral500,
-                  SellonColors.neutral900,
+                  BoothSurface.textMuted,
+                  BoothSurface.textPrimary,
                   lit,
                 ),
               ),
@@ -441,7 +449,10 @@ class _PaymentView extends StatelessWidget {
     children: [
       Text('PEMBAYARAN', style: SellonText.eyebrow),
       const SizedBox(height: SellonSpacing.sm),
-      Text('Scan QRIS untuk mulai', style: SellonText.h1),
+      Text(
+        'Scan QRIS untuk mulai',
+        style: SellonText.h1.copyWith(color: BoothSurface.textPrimary),
+      ),
       const SizedBox(height: SellonSpacing.lg),
       Row(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -462,7 +473,12 @@ class _PaymentView extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text('Total bayar', style: SellonText.label),
-              Text(_rupiah(amountCents), style: SellonText.figure),
+              Text(
+                _rupiah(amountCents),
+                style: SellonText.figure.copyWith(
+                  color: BoothSurface.textPrimary,
+                ),
+              ),
               const SizedBox(height: SellonSpacing.md),
               Text(
                 'Buka aplikasi bank atau e-wallet,\nlalu scan kode ini.',
@@ -526,7 +542,10 @@ class _ExpiredView extends StatelessWidget {
         size: 88,
       ),
       const SizedBox(height: SellonSpacing.md),
-      Text('Waktu pembayaran habis', style: SellonText.h1),
+      Text(
+        'Waktu pembayaran habis',
+        style: SellonText.h1.copyWith(color: BoothSurface.textPrimary),
+      ),
       const SizedBox(height: SellonSpacing.sm),
       Text(
         'Tidak ada uang yang terpotong. Silakan mulai lagi.',
@@ -551,7 +570,10 @@ class _PaidView extends StatelessWidget {
         size: 96,
       ),
       const SizedBox(height: SellonSpacing.md),
-      Text('Pembayaran diterima', style: SellonText.h1),
+      Text(
+        'Pembayaran diterima',
+        style: SellonText.h1.copyWith(color: BoothSurface.textPrimary),
+      ),
       const SizedBox(height: SellonSpacing.sm),
       Text(
         'Bersiap ya, fotonya dimulai sebentar lagi.',
@@ -561,44 +583,93 @@ class _PaidView extends StatelessWidget {
   );
 }
 
+/// The countdown, over the live camera: the customer sees themselves
+/// full-bleed with the number as an overlay, rather than reading a page.
 class _CountdownView extends StatelessWidget {
-  const _CountdownView({required this.count, required this.shotLabel});
+  const _CountdownView({
+    required this.count,
+    required this.shotLabel,
+    this.camera,
+  });
+
   final int count;
   final String shotLabel;
+  final CameraSource? camera;
 
   @override
-  Widget build(BuildContext context) => _Centered(
-    children: [
-      Text(shotLabel, style: SellonText.eyebrow),
-      const SizedBox(height: SellonSpacing.md),
-      Text(
-        '$count',
-        style: SellonText.displayXl.copyWith(
-          fontSize: 220,
-          color: SellonColors.brand600,
-          height: 1,
+  Widget build(BuildContext context) => CameraStage(
+    source: camera,
+    child: Stack(
+      children: [
+        Align(
+          alignment: Alignment.topCenter,
+          child: Padding(
+            padding: const EdgeInsets.only(top: 40),
+            child: Text(
+              shotLabel,
+              style: SellonText.eyebrow.copyWith(color: BoothSurface.accent),
+            ),
+          ),
         ),
-      ),
-      const SizedBox(height: SellonSpacing.md),
-      Text('Siap-siap!', style: SellonText.h2),
-    ],
+        Center(
+          child: Container(
+            width: 220,
+            height: 220,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.75),
+                width: 4,
+              ),
+              color: Colors.black.withValues(alpha: 0.25),
+            ),
+            child: Text(
+              '$count',
+              style: SellonText.displayXl.copyWith(
+                fontSize: 140,
+                color: Colors.white,
+                height: 1,
+              ),
+            ),
+          ),
+        ),
+        Align(
+          alignment: Alignment.bottomCenter,
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 56),
+            child: Text(
+              'Siapkan pose terbaikmu',
+              style: SellonText.h3.copyWith(color: Colors.white),
+            ),
+          ),
+        ),
+      ],
+    ),
   );
 }
 
+/// The shutter. A white wipe reads as a camera firing; a spinner would read
+/// as the booth hanging.
 class _FlashView extends StatelessWidget {
-  const _FlashView({required this.shotLabel});
+  const _FlashView({required this.shotLabel, this.camera});
+
   final String shotLabel;
+  final CameraSource? camera;
 
   @override
-  Widget build(BuildContext context) => Container(
-    color: Colors.white,
-    child: _Centered(
-      children: [
-        Text(shotLabel, style: SellonText.eyebrow),
-        const SizedBox(height: SellonSpacing.md),
-        Text('Cekrek!', style: SellonText.displayXl),
-      ],
-    ),
+  Widget build(BuildContext context) => Stack(
+    fit: StackFit.expand,
+    children: [
+      CameraStage(source: camera),
+      const ColoredBox(color: Colors.white),
+      Center(
+        child: Text(
+          'Cekrek!',
+          style: SellonText.displayXl.copyWith(color: SellonColors.neutral900),
+        ),
+      ),
+    ],
   );
 }
 
@@ -625,7 +696,10 @@ class _ShotsView extends StatelessWidget {
     children: [
       Text('FOTO ${shots.length} DARI $total', style: SellonText.eyebrow),
       const SizedBox(height: SellonSpacing.sm),
-      Text(isLast ? 'Semua foto selesai!' : 'Bagus!', style: SellonText.h1),
+      Text(
+        isLast ? 'Semua foto selesai!' : 'Bagus!',
+        style: SellonText.h1.copyWith(color: BoothSurface.textPrimary),
+      ),
       const SizedBox(height: SellonSpacing.lg),
       Row(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -676,8 +750,9 @@ class _ShotsView extends StatelessWidget {
 }
 
 class _Thumb extends StatelessWidget {
-  const _Thumb({this.file, this.highlight = false});
+  const _Thumb({this.file, this.highlight = false, this.filter});
   final File? file;
+  final PhotoFilter? filter;
 
   /// The shot just taken grows and takes a brand border, so the customer
   /// knows which of the four they are being asked about.
@@ -690,21 +765,29 @@ class _Thumb extends StatelessWidget {
     width: highlight ? 200 : 170,
     height: highlight ? 150 : 128,
     decoration: BoxDecoration(
-      color: Colors.white,
+      color: BoothSurface.card,
       borderRadius: BorderRadius.circular(SellonRadii.card),
       border: Border.all(
-        color: highlight ? SellonColors.brand500 : SellonColors.neutral200,
-        width: highlight ? 3 : 2,
+        color: highlight ? BoothSurface.accent : BoothSurface.border,
+        width: highlight ? 3 : 1.5,
       ),
-      boxShadow: file == null
-          ? null
-          : (highlight ? SellonShadows.elevated : SellonShadows.card),
+      boxShadow: file != null && highlight
+          ? BoothSurface.accentGlow(0.6)
+          : null,
     ),
     clipBehavior: Clip.antiAlias,
     child: file == null
-        ? const Icon(Icons.photo_outlined, color: SellonColors.neutral300)
-        : Image.file(file!, fit: BoxFit.cover),
+        ? const Icon(Icons.photo_outlined, color: BoothSurface.textMuted)
+        : _filtered(Image.file(file!, fit: BoxFit.cover)),
   );
+
+  /// A thumbnail always shows the treatment that will actually be printed,
+  /// so the choice is judged on the customer's own face.
+  Widget _filtered(Widget child) {
+    final cf = filter?.colorFilter;
+    if (cf == null) return child;
+    return ColorFiltered(colorFilter: cf, child: child);
+  }
 }
 
 class _DecorateView extends StatelessWidget {
@@ -712,52 +795,140 @@ class _DecorateView extends StatelessWidget {
     required this.shots,
     required this.selected,
     required this.frames,
+    required this.filter,
     required this.onPick,
+    required this.onPickFilter,
     required this.onConfirm,
   });
 
   final List<File> shots;
   final String? selected;
   final List frames;
+  final PhotoFilter filter;
   final ValueChanged<String> onPick;
+  final ValueChanged<PhotoFilter> onPickFilter;
   final VoidCallback onConfirm;
 
   @override
   Widget build(BuildContext context) => _Centered(
-    maxWidth: 1040,
+    maxWidth: 1100,
     children: [
-      Text('PILIH BINGKAI', style: SellonText.eyebrow),
+      Text('PERCANTIK FOTOMU', style: SellonText.eyebrow),
       const SizedBox(height: SellonSpacing.sm),
-      Text('Mau yang mana?', style: SellonText.h1),
-      const SizedBox(height: SellonSpacing.lg),
-      Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          for (final f in frames)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: _FrameChip(
-                label: f.name as String,
-                selected: f.id == selected,
-                onTap: () => onPick(f.id as String),
-              ),
-            ),
-        ],
+      Text(
+        'Pilih bingkai & filter',
+        style: SellonText.h1.copyWith(color: BoothSurface.textPrimary),
       ),
       const SizedBox(height: SellonSpacing.lg),
+
+      // Thumbnails show the filter applied, so the choice is judged on the
+      // customer's own face rather than on an abstract swatch.
       Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           for (final s in shots.take(4))
             Padding(
               padding: const EdgeInsets.all(6),
-              child: _Thumb(file: s),
+              child: _Thumb(file: s, filter: filter),
             ),
         ],
       ),
+      const SizedBox(height: SellonSpacing.lg),
+
+      Text('BINGKAI', style: SellonText.eyebrow),
+      const SizedBox(height: SellonSpacing.sm),
+      Wrap(
+        alignment: WrapAlignment.center,
+        spacing: 12,
+        runSpacing: 12,
+        children: [
+          for (final f in frames)
+            _FrameChip(
+              label: f.name as String,
+              selected: f.id == selected,
+              onTap: () => onPick(f.id as String),
+            ),
+        ],
+      ),
+      const SizedBox(height: SellonSpacing.lg),
+
+      Text('FILTER', style: SellonText.eyebrow),
+      const SizedBox(height: SellonSpacing.sm),
+      Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          for (final f in PhotoFilter.values)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: _FilterChip(
+                filter: f,
+                sample: shots.isEmpty ? null : shots.first,
+                selected: f == filter,
+                onTap: () => onPickFilter(f),
+              ),
+            ),
+        ],
+      ),
+
       const SizedBox(height: SellonSpacing.xl),
-      PillButton(label: 'Lanjut', minWidth: 300, onPressed: onConfirm),
+      PillButton(label: 'Lanjut', minWidth: 320, onPressed: onConfirm),
     ],
+  );
+}
+
+/// A filter choice, previewed on the customer's own first shot.
+class _FilterChip extends StatelessWidget {
+  const _FilterChip({
+    required this.filter,
+    required this.selected,
+    required this.onTap,
+    this.sample,
+  });
+
+  final PhotoFilter filter;
+  final bool selected;
+  final VoidCallback onTap;
+  final File? sample;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    onTap: onTap,
+    borderRadius: BorderRadius.circular(999),
+    child: Column(
+      children: [
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          width: selected ? 92 : 80,
+          height: selected ? 92 : 80,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: selected ? BoothSurface.accent : BoothSurface.border,
+              width: selected ? 3 : 1.5,
+            ),
+            boxShadow: selected ? BoothSurface.accentGlow(0.5) : null,
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: sample == null
+              ? const ColoredBox(color: BoothSurface.card)
+              : ColorFiltered(
+                  // A null filter still needs a widget in the tree, so
+                  // normal gets an explicit identity rather than a branch.
+                  colorFilter:
+                      filter.colorFilter ??
+                      const ColorFilter.mode(Colors.transparent, BlendMode.dst),
+                  child: Image.file(sample!, fit: BoxFit.cover),
+                ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          filter.label,
+          style: SellonText.label.copyWith(
+            color: selected ? BoothSurface.accent : BoothSurface.textMuted,
+          ),
+        ),
+      ],
+    ),
   );
 }
 
@@ -808,7 +979,10 @@ class _PreviewView extends StatelessWidget {
     children: [
       Text('HASILNYA', style: SellonText.eyebrow),
       const SizedBox(height: SellonSpacing.sm),
-      Text('Sudah pas?', style: SellonText.h1),
+      Text(
+        'Sudah pas?',
+        style: SellonText.h1.copyWith(color: BoothSurface.textPrimary),
+      ),
       const SizedBox(height: SellonSpacing.md),
       // The same renderer the printer uses, at screen width. What is on
       // this screen is what comes out of the printer.
@@ -855,7 +1029,10 @@ class _PrintingView extends StatelessWidget {
     children: [
       const IconChip(icon: Icons.print_rounded, size: 96),
       const SizedBox(height: SellonSpacing.lg),
-      Text('Sedang mencetak…', style: SellonText.h1),
+      Text(
+        'Sedang mencetak…',
+        style: SellonText.h1.copyWith(color: BoothSurface.textPrimary),
+      ),
       const SizedBox(height: SellonSpacing.md),
       ClipRRect(
         borderRadius: BorderRadius.circular(SellonRadii.pill),
@@ -897,7 +1074,10 @@ class _PrintFailedView extends StatelessWidget {
         size: 88,
       ),
       const SizedBox(height: SellonSpacing.md),
-      Text('Gagal mencetak', style: SellonText.h1),
+      Text(
+        'Gagal mencetak',
+        style: SellonText.h1.copyWith(color: BoothSurface.textPrimary),
+      ),
       const SizedBox(height: SellonSpacing.sm),
       Text(
         'Fotomu aman dan sudah dibayar.\nTunjukkan kode ini ke petugas '
@@ -907,7 +1087,7 @@ class _PrintFailedView extends StatelessWidget {
       ),
       const SizedBox(height: SellonSpacing.lg),
       TintedPanel(
-        tint: SellonColors.neutral100,
+        tint: BoothSurface.card,
         pattern: false,
         padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 28),
         child: SelectableText(
@@ -929,22 +1109,84 @@ class _PrintFailedView extends StatelessWidget {
 }
 
 class _ThankYouView extends StatelessWidget {
-  const _ThankYouView({required this.secondsLeft});
+  const _ThankYouView({required this.secondsLeft, this.shareUrl});
+
   final int secondsLeft;
+
+  /// Null until the upload lands, or for good if it failed. The screen just
+  /// omits the QR: the customer has their print either way, and an error
+  /// about a copy they may not have wanted would only worry them.
+  final String? shareUrl;
 
   @override
   Widget build(BuildContext context) => _Centered(
+    maxWidth: 900,
     children: [
       const IconChip(
         icon: Icons.favorite_rounded,
-        fill: SellonColors.brand500,
-        size: 96,
+        fill: BoothSurface.accentStrong,
+        size: 88,
       ),
-      const SizedBox(height: SellonSpacing.lg),
-      Text('Makasih ya!', style: SellonText.displayXl),
-      const SizedBox(height: SellonSpacing.sm),
+      const SizedBox(height: SellonSpacing.md),
+      Text(
+        'Makasih ya!',
+        style: SellonText.displayXl.copyWith(color: BoothSurface.textPrimary),
+      ),
+      const SizedBox(height: SellonSpacing.xs),
       Text('Ambil fotomu di bawah printer.', style: SellonText.body),
       const SizedBox(height: SellonSpacing.lg),
+
+      if (shareUrl != null) ...[
+        TintedPanel(
+          padding: const EdgeInsets.symmetric(horizontal: 36, vertical: 28),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  // White behind the code: a dark QR on a dark panel will
+                  // not scan.
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(SellonRadii.card),
+                ),
+                child: QrView(data: shareUrl!, size: 190),
+              ),
+              const SizedBox(width: SellonSpacing.lg),
+              SizedBox(
+                width: 300,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'MAU SIMPAN DI HP?',
+                      style: SellonText.eyebrow.copyWith(
+                        color: BoothSurface.accent,
+                      ),
+                    ),
+                    const SizedBox(height: SellonSpacing.xs),
+                    Text(
+                      'Scan QR ini',
+                      style: SellonText.h2.copyWith(
+                        color: BoothSurface.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: SellonSpacing.xs),
+                    Text(
+                      'Buka kamera HP, arahkan ke kode, lalu simpan fotonya. '
+                      'Link berlaku 7 hari.',
+                      style: SellonText.body,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: SellonSpacing.lg),
+      ],
+
       Text('Kembali ke awal dalam $secondsLeft detik', style: SellonText.label),
     ],
   );
@@ -963,7 +1205,10 @@ class _FatalView extends StatelessWidget {
         size: 88,
       ),
       const SizedBox(height: SellonSpacing.md),
-      Text('Booth belum siap', style: SellonText.h1),
+      Text(
+        'Booth belum siap',
+        style: SellonText.h1.copyWith(color: BoothSurface.textPrimary),
+      ),
       const SizedBox(height: SellonSpacing.sm),
       Text(message, textAlign: TextAlign.center, style: SellonText.body),
     ],

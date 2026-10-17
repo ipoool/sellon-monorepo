@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../theme/booth_surface.dart';
 import '../theme/colors.dart';
 import '../theme/shadows.dart';
 
@@ -10,7 +11,7 @@ class TintedPanel extends StatelessWidget {
   const TintedPanel({
     super.key,
     required this.child,
-    this.tint = SellonColors.brand50,
+    this.tint = BoothSurface.card,
     this.radius = SellonRadii.panel,
     this.padding = const EdgeInsets.all(32),
     this.pattern = true,
@@ -27,7 +28,11 @@ class TintedPanel extends StatelessWidget {
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
       child: Container(
-        color: tint,
+        decoration: BoxDecoration(
+          color: tint,
+          border: Border.all(color: BoothSurface.border),
+          borderRadius: BorderRadius.circular(radius),
+        ),
         child: CustomPaint(
           painter: pattern ? _DotPainter() : null,
           child: Padding(padding: padding, child: child),
@@ -43,7 +48,9 @@ class _DotPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = const Color(0x12000000);
+    // Light dots on a dark panel; the web theme's dark-on-light would
+    // vanish entirely here.
+    final paint = Paint()..color = const Color(0x14FFFFFF);
     for (var y = 1.0; y < size.height; y += _spacing) {
       for (var x = 1.0; x < size.width; x += _spacing) {
         canvas.drawCircle(Offset(x, y), _radius, paint);

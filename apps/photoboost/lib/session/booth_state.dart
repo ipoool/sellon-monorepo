@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import '../compose/photo_filter.dart';
 import '../data/api/session_dto.dart';
 
 /// The booth is one long-lived machine, so its state is one sealed type
@@ -88,17 +89,31 @@ class ShotTaken extends BoothState {
 }
 
 class Decorating extends BoothState {
-  const Decorating(this.session, {required this.shots, this.frameId});
+  const Decorating(
+    this.session, {
+    required this.shots,
+    this.frameId,
+    this.filter = PhotoFilter.normal,
+  });
+
   final BoothSession session;
   final List<File> shots;
   final String? frameId;
+  final PhotoFilter filter;
 }
 
 class Previewing extends BoothState {
-  const Previewing(this.session, {required this.shots, this.frameId});
+  const Previewing(
+    this.session, {
+    required this.shots,
+    this.frameId,
+    this.filter = PhotoFilter.normal,
+  });
+
   final BoothSession session;
   final List<File> shots;
   final String? frameId;
+  final PhotoFilter filter;
 }
 
 class Printing extends BoothState {

@@ -1,31 +1,35 @@
 import 'package:flutter/material.dart';
 
+import 'booth_surface.dart';
 import 'colors.dart';
 import 'typography.dart';
 
 /// Assembles the SellOn look into a ThemeData for the booth.
 ///
-/// Light only: a photo booth lives under mall lighting and a dark kiosk reads
-/// as switched off.
+/// Dark: the booth shows a camera feed behind its UI, and a bright page
+/// washes the preview out and reflects off the screen under mall lighting.
+/// The brand hue is unchanged, so it still reads as SellOn.
 ThemeData buildSellonTheme() {
-  final base = ThemeData.light(useMaterial3: true);
+  final base = ThemeData.dark(useMaterial3: true);
   return base.copyWith(
-    scaffoldBackgroundColor: SellonColors.neutral50,
+    scaffoldBackgroundColor: BoothSurface.base,
     colorScheme: base.colorScheme.copyWith(
-      primary: SellonColors.brand600,
+      primary: BoothSurface.accentStrong,
       onPrimary: Colors.white,
-      secondary: SellonColors.brand500,
-      surface: Colors.white,
-      onSurface: SellonColors.neutral900,
+      secondary: BoothSurface.accent,
+      surface: BoothSurface.card,
+      onSurface: BoothSurface.textPrimary,
       error: SellonColors.danger,
     ),
     textTheme: base.textTheme.copyWith(
-      displayLarge: SellonText.displayXl,
-      headlineLarge: SellonText.h1,
-      headlineMedium: SellonText.h2,
-      titleLarge: SellonText.h3,
-      bodyLarge: SellonText.body,
-      labelLarge: SellonText.label,
+      displayLarge: SellonText.displayXl.copyWith(
+        color: BoothSurface.textPrimary,
+      ),
+      headlineLarge: SellonText.h1.copyWith(color: BoothSurface.textPrimary),
+      headlineMedium: SellonText.h2.copyWith(color: BoothSurface.textPrimary),
+      titleLarge: SellonText.h3.copyWith(color: BoothSurface.textPrimary),
+      bodyLarge: SellonText.body.copyWith(color: BoothSurface.textSecondary),
+      labelLarge: SellonText.label.copyWith(color: BoothSurface.textMuted),
     ),
     splashFactory: InkRipple.splashFactory,
   );

@@ -13,6 +13,7 @@ import 'dart:ui' as ui;
 
 import '../camera/camera_source.dart';
 import '../compose/composite_renderer.dart';
+import '../compose/photo_filter.dart';
 import '../data/api/booth_api.dart';
 import '../data/api/session_dto.dart';
 import '../printing/printer.dart';
@@ -53,7 +54,12 @@ class BoothController extends ChangeNotifier {
   BoothConfig? _config;
   BoothConfig? get config => _config;
 
+  /// Exposed so the capture screens can render the live preview behind
+  /// their overlays.
+  CameraSource get camera => _camera;
+
   final _shots = <File>[];
+  PhotoFilter _filter = PhotoFilter.normal;
   Timer? _ticker;
   Timer? _pollTimer;
   bool _busy = false;
@@ -80,6 +86,7 @@ class BoothController extends ChangeNotifier {
       var session = await _api.createSession(idempotencyKey: key);
       session = await _api.charge(session.sessionNumber);
       _shots.clear();
+      _filter = PhotoFilter.normal;
       _startPaymentWatch(session);
     } catch (e) {
       _set(Fatal('Gagal memulai sesi: $e'));
@@ -237,11 +244,25 @@ class BoothController extends ChangeNotifier {
 
   void _startDecorating(BoothSession session) {
     final first = _config?.frames.firstOrNull?.id;
-    _set(Decorating(session, shots: List.of(_shots), frameId: first));
+    _set(
+      Decorating(
+        session,
+        shots: List.of(_shots),
+        frameId: first,
+        filter: _filter,
+      ),
+    );
     // Advance, never cancel: picking nothing means picking the default.
     _timeout(Timeouts.decorateIdle, () {
       if (_state case Decorating(frameId: final f)) {
-        _set(Previewing(session, shots: List.of(_shots), frameId: f));
+        _set(
+          Previewing(
+            session,
+            shots: List.of(_shots),
+            frameId: f,
+            filter: _filter,
+          ),
+        );
         _armPreviewTimeout(session, f);
       }
     });
@@ -249,7 +270,20 @@ class BoothController extends ChangeNotifier {
 
   void chooseFrame(String frameId) {
     if (_state case Decorating(session: final s, shots: final sh)) {
-      _set(Decorating(s, shots: sh, frameId: frameId));
+      _set(Decorating(s, shots: sh, frameId: frameId, filter: _filter));
+    }
+  }
+
+  /// Picks a colour treatment. Applied to the preview, the print and the
+  /// soft copy from one definition, so they cannot disagree.
+  void chooseFilter(PhotoFilter f) {
+    _filter = f;
+    if (_state case Decorating(
+      session: final s,
+      shots: final sh,
+      frameId: final fr,
+    )) {
+      _set(Decorating(s, shots: sh, frameId: fr, filter: f));
     }
   }
 
@@ -260,7 +294,7 @@ class BoothController extends ChangeNotifier {
       frameId: final f,
     )) {
       _ticker?.cancel();
-      _set(Previewing(s, shots: sh, frameId: f));
+      _set(Previewing(s, shots: sh, frameId: f, filter: _filter));
       _armPreviewTimeout(s, f);
     }
   }
@@ -407,6 +441,7 @@ class BoothController extends ChangeNotifier {
         Printing(session: final s) => s.sessionNumber,
         _ => '',
       },
+      filter: _filter,
       monochrome: !_printer.capabilities.isColor,
     );
   }
@@ -427,6 +462,7 @@ class BoothController extends ChangeNotifier {
         Previewing(session: final s) => s.sessionNumber,
         _ => '',
       },
+      filter: _filter,
     );
   }
 

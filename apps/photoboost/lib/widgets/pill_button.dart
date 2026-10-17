@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../theme/colors.dart';
+import '../theme/booth_surface.dart';
 import '../theme/shadows.dart';
 import '../theme/typography.dart';
 
@@ -33,19 +33,19 @@ class PillButton extends StatelessWidget {
     final enabled = onPressed != null;
     final (bg, fg, border) = switch (variant) {
       PillVariant.primary => (
-        enabled ? SellonColors.brand600 : SellonColors.neutral300,
-        Colors.white,
+        enabled ? BoothSurface.accentStrong : BoothSurface.border,
+        enabled ? Colors.white : BoothSurface.textMuted,
         null,
       ),
       PillVariant.secondary => (
-        Colors.white,
-        SellonColors.brand700,
-        SellonColors.brand300,
+        BoothSurface.card,
+        BoothSurface.accent,
+        BoothSurface.border,
       ),
       PillVariant.ghost => (
         Colors.transparent,
-        SellonColors.neutral600,
-        SellonColors.neutral200,
+        BoothSurface.textSecondary,
+        BoothSurface.border,
       ),
     };
 
@@ -65,8 +65,9 @@ class PillButton extends StatelessWidget {
               border: border == null
                   ? null
                   : Border.all(color: border, width: 1.5),
+              // The one thing to press is the brightest thing on screen.
               boxShadow: variant == PillVariant.primary && enabled
-                  ? SellonShadows.soft
+                  ? BoothSurface.accentGlow(0.8)
                   : null,
             ),
             child: Container(
