@@ -67,10 +67,24 @@ class Capturing extends BoothState {
   final int shotIndex;
 }
 
+/// A shot is on screen and the customer decides when to continue.
+///
+/// [secondsLeft] counts down a safety net, not a deadline: when it reaches
+/// zero the flow ADVANCES on its own, because a paid session must never be
+/// left parked on a review screen.
 class ShotTaken extends BoothState {
-  const ShotTaken(this.session, {required this.shots});
+  const ShotTaken(
+    this.session, {
+    required this.shots,
+    required this.secondsLeft,
+  });
+
   final BoothSession session;
   final List<File> shots;
+  final int secondsLeft;
+
+  /// True when this was the last shot the customer paid for.
+  bool get isLast => shots.length >= session.shotsPlanned;
 }
 
 class Decorating extends BoothState {
@@ -102,9 +116,16 @@ class PrintFailed extends BoothState {
 }
 
 class ThankYou extends BoothState {
-  const ThankYou(this.session, {required this.secondsLeft});
+  const ThankYou(this.session, {required this.secondsLeft, this.shareUrl});
+
   final BoothSession session;
   final int secondsLeft;
+
+  /// Where the QR points, so the customer can take the soft copy home.
+  /// Null when the upload failed — they still have the print, so the screen
+  /// simply omits the QR rather than apologising for something they may not
+  /// have wanted anyway.
+  final String? shareUrl;
 }
 
 /// Something unrecoverable, before any money was taken.

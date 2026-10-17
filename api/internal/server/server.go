@@ -164,8 +164,8 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	photoBooths := repository.NewPhotoBoothRepo(pool)
 	photoBoothSessions := repository.NewPhotoBoothSessionRepo(pool)
 	boothHandler := handler.NewBoothHandler(
-		photoBooths, photoBoothSessions, midtransClient,
-		cfg.PlatformMidtransServerKey, logger,
+		photoBooths, photoBoothSessions, midtransClient, storageClient,
+		cfg.PlatformMidtransServerKey, publicWebURL, logger,
 	)
 	adminPhotoBoothHandler := handler.NewAdminPhotoBoothHandler(
 		photoBooths, photoBoothSessions, users, platformAuditRepo, logger,
@@ -265,6 +265,10 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 		// Public table QR resolution (scan a table → store + table).
 		r.Get("/tables/resolve/{token}", tableHandler.Resolve)
 
+		// Soft-copy download. Public — the 32-byte token in the URL is the
+		// only credential, the same posture the digital-delivery links take.
+		r.With(limitCheckout).Get("/photobooth/photo/{token}", boothHandler.PublicPhoto)
+
 		// PhotoBoost tablets. A device realm of its own: bearer device token,
 		// no user row, no cookie. See middleware.RequireBooth.
 		r.Route("/booth", func(r chi.Router) {
@@ -276,6 +280,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 			r.With(limitBoothWrite).Post("/sessions/{number}/charge", boothHandler.Charge)
 			r.With(limitBoothWrite).Post("/sessions/{number}/shots", boothHandler.Shots)
 			r.With(limitBoothWrite).Post("/sessions/{number}/complete", boothHandler.Complete)
+			r.With(limitBoothWrite).Post("/sessions/{number}/photo", boothHandler.UploadPhoto)
 		})
 
 		// Public storefront (no auth)

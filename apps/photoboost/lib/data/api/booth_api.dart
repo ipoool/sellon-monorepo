@@ -30,9 +30,27 @@ abstract class BoothApi {
     String failureReason,
   });
 
+  /// Uploads the finished strip and returns the link its QR points at, or
+  /// null when the soft copy could not be stored. Null is not an error the
+  /// customer should see: they already have the print.
+  Future<PhotoShare?> uploadPhoto(String sessionNumber, List<int> pngBytes);
+
   Future<void> heartbeat({
     required String appVersion,
     required bool printerOk,
     required bool paperLow,
   });
+}
+
+/// Where a customer can fetch their soft copy, and for how long.
+class PhotoShare {
+  const PhotoShare({required this.shareUrl, required this.expiresAt});
+
+  final String shareUrl;
+  final DateTime? expiresAt;
+
+  factory PhotoShare.fromJson(Map<String, dynamic> j) => PhotoShare(
+    shareUrl: j['share_url'] as String? ?? '',
+    expiresAt: DateTime.tryParse(j['expires_at'] as String? ?? ''),
+  );
 }

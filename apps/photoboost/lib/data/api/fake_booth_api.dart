@@ -151,6 +151,25 @@ class FakeBoothApi implements BoothApi {
   }
 
   @override
+  Future<PhotoShare?> uploadPhoto(
+    String sessionNumber,
+    List<int> pngBytes,
+  ) async {
+    await Future<void>.delayed(latency);
+    final s = _require(sessionNumber);
+    if (s.paymentStatus != 'paid') return null;
+    return PhotoShare(
+      shareUrl: 'https://sellon.id/foto/${_fakeToken(sessionNumber)}',
+      expiresAt: DateTime.now().add(const Duration(days: 7)),
+    );
+  }
+
+  String _fakeToken(String seed) {
+    final r = Random(seed.hashCode);
+    return List.generate(64, (_) => '0123456789abcdef'[r.nextInt(16)]).join();
+  }
+
+  @override
   Future<void> heartbeat({
     required String appVersion,
     required bool printerOk,

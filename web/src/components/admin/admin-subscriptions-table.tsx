@@ -223,17 +223,20 @@ export function AdminSubscriptionsTable({
           </p>
         </Card>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-card">
-          <table className="w-full text-left text-sm">
+        <div className="overflow-x-auto rounded-xl border border-neutral-200 bg-white shadow-card">
+          {/* min-w forces a horizontal scroll instead of crushing the
+              columns: a timestamp broken across three lines is harder to
+              read than one that sits past the edge. */}
+          <table className="w-full min-w-[1080px] text-left text-sm">
             <thead className="bg-neutral-50 text-xs font-semibold uppercase tracking-wider text-neutral-500">
               <tr>
                 <th className="px-5 py-3">Pemilik & Toko</th>
-                <th className="px-5 py-3">Paket</th>
-                <th className="px-5 py-3">Nominal</th>
-                <th className="px-5 py-3">Metode</th>
-                <th className="px-5 py-3">Status</th>
-                <th className="px-5 py-3">Diminta</th>
-                <th className="px-5 py-3 text-right">Aksi</th>
+                <th className="whitespace-nowrap px-5 py-3">Paket</th>
+                <th className="whitespace-nowrap px-5 py-3">Nominal</th>
+                <th className="whitespace-nowrap px-5 py-3">Metode</th>
+                <th className="whitespace-nowrap px-5 py-3">Status</th>
+                <th className="whitespace-nowrap px-5 py-3">Diminta</th>
+                <th className="whitespace-nowrap px-5 py-3 text-right">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-200">
@@ -269,31 +272,31 @@ export function AdminSubscriptionsTable({
                         </div>
                       </div>
                     </td>
-                    <td className="px-5 py-3">
+                    <td className="whitespace-nowrap px-5 py-3">
                       <Badge variant="brand">
                         {planLabel[r.plan] ?? r.plan}
                       </Badge>
-                      <p className="mt-1 text-xs text-neutral-600">
+                      <p className="mt-1.5 text-xs text-neutral-600">
                         {r.months} bulan
                       </p>
                     </td>
-                    <td className="px-5 py-3 font-medium text-neutral-900">
+                    <td className="whitespace-nowrap px-5 py-3 font-medium text-neutral-900">
                       {formatRupiah(r.amount_cents)}
                     </td>
-                    <td className="px-5 py-3 text-neutral-700">
+                    <td className="whitespace-nowrap px-5 py-3 text-neutral-700">
                       {providerLabel[r.provider] ?? (r.provider || "—")}
                     </td>
-                    <td className="px-5 py-3">
+                    <td className="whitespace-nowrap px-5 py-3">
                       <Badge variant={sb.variant}>{sb.label}</Badge>
                       {r.paid_at && (
-                        <p className="mt-1 text-xs text-neutral-500">
+                        <p className="mt-1.5 text-xs text-neutral-500">
                           {formatDateTime(r.paid_at)}
                         </p>
                       )}
                     </td>
-                    <td className="px-5 py-3 text-xs text-neutral-600">
+                    <td className="whitespace-nowrap px-5 py-3 text-xs text-neutral-600">
                       <span className="inline-flex items-center gap-1">
-                        <Clock className="size-3" aria-hidden />
+                        <Clock className="size-3 shrink-0" aria-hidden />
                         {formatDateTime(r.created_at)}
                       </span>
                     </td>

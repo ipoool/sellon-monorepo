@@ -149,34 +149,90 @@ class BoothController extends ChangeNotifier {
   }
 
   Future<void> _runCapture(BoothSession session) async {
-    final total = session.shotsPlanned;
-    for (var i = 0; i < total; i++) {
-      // 3..2..1
-      for (var c = Timeouts.shotCountdown.inSeconds; c > 0; c--) {
-        _set(GetReady(session, shotIndex: i, count: c));
-        await Future<void>.delayed(const Duration(seconds: 1));
-      }
-      _set(Capturing(session, shotIndex: i));
+    await _captureShot(session, _shots.length);
+  }
 
-      try {
-        final path = '${_mediaDir.path}/${session.sessionNumber}/shot-$i.png';
-        final file = await _camera.capture(path);
-        // Flushed to disk before the UI moves on: a shot held only in memory
-        // dies with the process, and the customer has already paid for it.
-        _shots.add(file);
-      } catch (e) {
-        debugPrint('capture failed: $e');
-      }
-
-      _set(ShotTaken(session, shots: List.of(_shots)));
-      unawaited(
-        _api
-            .reportShots(session.sessionNumber, _shots.length)
-            .catchError((_) => session),
-      );
-      await Future<void>.delayed(Timeouts.betweenShots);
+  /// Takes one shot, then stops and waits for the customer.
+  ///
+  /// Shooting all four back to back meant a customer who blinked, or who was
+  /// still arranging themselves, had no way to see what they got until the
+  /// end. Now each shot lands on screen and they press Lanjut when ready.
+  Future<void> _captureShot(BoothSession session, int index) async {
+    for (var c = Timeouts.shotCountdown.inSeconds; c > 0; c--) {
+      _set(GetReady(session, shotIndex: index, count: c));
+      await Future<void>.delayed(const Duration(seconds: 1));
     }
-    _startDecorating(session);
+    _set(Capturing(session, shotIndex: index));
+
+    try {
+      final path = '${_mediaDir.path}/${session.sessionNumber}/shot-$index.png';
+      final file = await _camera.capture(path);
+      // Flushed to disk before the UI moves on: a shot held only in memory
+      // dies with the process, and the customer has already paid for it.
+      _shots.add(file);
+    } catch (e) {
+      debugPrint('capture failed: $e');
+    }
+
+    unawaited(
+      _api
+          .reportShots(session.sessionNumber, _shots.length)
+          .catchError((_) => session),
+    );
+
+    _awaitContinue(session);
+  }
+
+  /// Parks on the review screen until the customer presses Lanjut, or the
+  /// safety timeout advances for them.
+  void _awaitContinue(BoothSession session) {
+    _set(
+      ShotTaken(
+        session,
+        shots: List.of(_shots),
+        secondsLeft: Timeouts.shotReviewIdle.inSeconds,
+      ),
+    );
+
+    _countdown(
+      seconds: Timeouts.shotReviewIdle.inSeconds,
+      onTick: (left) {
+        if (_state case ShotTaken(session: final s, shots: final sh)) {
+          _set(ShotTaken(s, shots: sh, secondsLeft: left));
+        }
+      },
+      onDone: continueCapture,
+    );
+  }
+
+  /// "Lanjut foto" — the next shot, or on to choosing a frame.
+  void continueCapture() {
+    if (_state case ShotTaken(session: final session)) {
+      _ticker?.cancel();
+      if (_shots.length >= session.shotsPlanned) {
+        _startDecorating(session);
+      } else {
+        unawaited(_captureShot(session, _shots.length));
+      }
+    }
+  }
+
+  /// Retakes the shot just taken. The file is dropped and the counter walks
+  /// back; the server's count is monotonic, so it simply stays where it is
+  /// until the replacement is reported.
+  Future<void> retakeShot() async {
+    if (_state case ShotTaken(session: final session)) {
+      _ticker?.cancel();
+      if (_shots.isNotEmpty) {
+        final f = _shots.removeLast();
+        try {
+          await f.delete();
+        } catch (_) {
+          // A stale file on disk is harmless; the strip reads from _shots.
+        }
+      }
+      unawaited(_captureShot(session, _shots.length));
+    }
   }
 
   void _startDecorating(BoothSession session) {
@@ -252,7 +308,12 @@ class BoothController extends ChangeNotifier {
               frameId: frameId ?? '',
             )
             .catchError((_) => session);
+
+        // Thank-you screen first, QR when the upload lands. Uploading before
+        // showing anything would leave the customer watching a progress bar
+        // after their photo has already come out of the printer.
         _startThankYou(session);
+        unawaited(_shareSoftCopy(session));
       } catch (e) {
         await _failPrint(session, '$e');
       }
@@ -276,10 +337,40 @@ class BoothController extends ChangeNotifier {
     _countdown(
       seconds: Timeouts.thankYouReset.inSeconds,
       onTick: (left) {
-        if (_state is ThankYou) _set(ThankYou(session, secondsLeft: left));
+        // Preserve the share link across ticks: it arrives mid-countdown.
+        if (_state case ThankYou(shareUrl: final url)) {
+          _set(ThankYou(session, secondsLeft: left, shareUrl: url));
+        }
       },
       onDone: reset,
     );
+  }
+
+  /// Uploads the strip so the customer can scan the QR and keep a copy.
+  ///
+  /// Rendered fresh at 1080px in colour rather than reusing the print
+  /// composite: that one is sized to the printer's 576 dots and drops the
+  /// caption for the thermal driver. A keepsake on a phone deserves better
+  /// than a receipt-width image.
+  ///
+  /// Best-effort by design: a storage outage must not cost anyone their
+  /// print, which already happened by the time this runs.
+  Future<void> _shareSoftCopy(BoothSession session) async {
+    try {
+      final composite = await renderPreview(1080);
+      final data = await composite.toByteData(format: ui.ImageByteFormat.png);
+      if (data == null) return;
+      final share = await _api.uploadPhoto(
+        session.sessionNumber,
+        data.buffer.asUint8List(),
+      );
+      if (share == null || share.shareUrl.isEmpty) return;
+      if (_state case ThankYou(secondsLeft: final left)) {
+        _set(ThankYou(session, secondsLeft: left, shareUrl: share.shareUrl));
+      }
+    } catch (e) {
+      debugPrint('soft copy upload failed: $e');
+    }
   }
 
   /// Back to idle. Only legal once the session is finished one way or the

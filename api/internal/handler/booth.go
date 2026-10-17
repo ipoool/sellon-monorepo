@@ -16,6 +16,7 @@ import (
 	"github.com/sellon/sellon/api/internal/payments"
 	"github.com/sellon/sellon/api/internal/pkg/response"
 	"github.com/sellon/sellon/api/internal/repository"
+	"github.com/sellon/sellon/api/internal/storage"
 )
 
 // BoothHandler serves the PhotoBoost tablets. Every route here is behind
@@ -25,7 +26,9 @@ type BoothHandler struct {
 	booths    *repository.PhotoBoothRepo
 	sessions  *repository.PhotoBoothSessionRepo
 	midtrans  *payments.MidtransClient
+	storage   storage.Client
 	serverKey string // the PLATFORM key: PhotoBoost is the platform's own business
+	webOrigin string // where the QR on the thank-you screen points
 	logger    *slog.Logger
 }
 
@@ -33,14 +36,22 @@ func NewBoothHandler(
 	booths *repository.PhotoBoothRepo,
 	sessions *repository.PhotoBoothSessionRepo,
 	midtrans *payments.MidtransClient,
+	storageCli storage.Client,
 	platformServerKey string,
+	webOrigin string,
 	logger *slog.Logger,
 ) *BoothHandler {
 	return &BoothHandler{
 		booths: booths, sessions: sessions, midtrans: midtrans,
-		serverKey: platformServerKey, logger: logger,
+		storage: storageCli, serverKey: platformServerKey,
+		webOrigin: webOrigin, logger: logger,
 	}
 }
+
+// How long a soft copy stays downloadable. Long enough that a customer who
+// forgot to scan can be helped the next day; short enough that the platform
+// is not an indefinite archive of strangers' faces.
+const photoTTL = 7 * 24 * time.Hour
 
 // Reconcile throttles. A session that has just been charged gets a grace
 // period before we start asking Midtrans about it, and then at most one
@@ -454,4 +465,111 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max]
+}
+
+// POST /api/v1/booth/sessions/{number}/photo
+//
+// The booth uploads the finished strip and gets back the URL its QR should
+// point at, so the customer can take the soft copy home.
+func (h *BoothHandler) UploadPhoto(w http.ResponseWriter, r *http.Request) {
+	b := h.booth(r)
+	number := chi.URLParam(r, "number")
+
+	if !h.storage.IsConfigured() {
+		response.Error(w, http.StatusServiceUnavailable, "penyimpanan belum dikonfigurasi")
+		return
+	}
+	if err := r.ParseMultipartForm(12 << 20); err != nil {
+		response.Error(w, http.StatusBadRequest, "file terlalu besar atau rusak")
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "file tidak ada")
+		return
+	}
+	defer file.Close()
+
+	body, err := io.ReadAll(io.LimitReader(file, 12<<20))
+	if err != nil || len(body) == 0 {
+		response.Error(w, http.StatusBadRequest, "file tidak terbaca")
+		return
+	}
+	contentType := header.Header.Get("Content-Type")
+	ext := "jpg"
+	switch contentType {
+	case "image/png":
+		ext = "png"
+	case "image/jpeg", "image/jpg":
+		contentType, ext = "image/jpeg", "jpg"
+	default:
+		response.Error(w, http.StatusBadRequest, "format harus PNG atau JPEG")
+		return
+	}
+
+	// Keyed by booth, mirroring the per-store prefix the seller uploads use:
+	// one booth's output can be audited or purged as a unit.
+	key, err := storage.RandomKey("photobooth/"+b.Booth.ID.String(), ext)
+	if err != nil {
+		h.logger.Error("photo key", "err", err)
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	res, err := h.storage.Upload(r.Context(), key, contentType, body)
+	if err != nil {
+		h.logger.Error("photo upload", "err", err, "session", number)
+		response.Error(w, http.StatusBadGateway, "gagal menyimpan foto")
+		return
+	}
+
+	s, err := h.sessions.AttachPhoto(r.Context(), b.Booth.ID, number, res.PublicURL, photoTTL)
+	if errors.Is(err, repository.ErrSessionNotPaid) {
+		response.Error(w, http.StatusConflict, "sesi belum lunas")
+		return
+	}
+	if err != nil {
+		h.logger.Error("attach photo", "err", err, "session", number)
+		response.Error(w, http.StatusInternalServerError, "gagal menyimpan foto")
+		return
+	}
+
+	token := ""
+	if s.PhotoToken != nil {
+		token = *s.PhotoToken
+	}
+	response.JSON(w, http.StatusOK, map[string]any{
+		"token": token,
+		// The full URL, built server-side: the booth should not have to know
+		// the canonical origin, and getting it wrong would print a dead QR.
+		"share_url":  strings.TrimRight(h.webOrigin, "/") + "/foto/" + token,
+		"expires_at": s.PhotoExpiresAt,
+	})
+}
+
+// GET /api/v1/photobooth/photo/{token}
+//
+// Public: a customer scans the QR on the thank-you screen and lands here
+// through the web page. Possession of the 32-byte token is the whole claim,
+// so the response carries the image and nothing that identifies the session,
+// the booth, or what was paid.
+func (h *BoothHandler) PublicPhoto(w http.ResponseWriter, r *http.Request) {
+	token := strings.TrimSpace(chi.URLParam(r, "token"))
+	if len(token) < 32 {
+		response.Error(w, http.StatusNotFound, "foto tidak ditemukan")
+		return
+	}
+	p, err := h.sessions.FindPhotoByToken(r.Context(), token)
+	if errors.Is(err, repository.ErrPhotoExpired) {
+		response.Error(w, http.StatusGone, "link foto sudah kedaluwarsa")
+		return
+	}
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "foto tidak ditemukan")
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]any{
+		"image_url":  p.ImageURL,
+		"taken_at":   p.TakenAt,
+		"expires_at": p.ExpiresAt,
+	})
 }

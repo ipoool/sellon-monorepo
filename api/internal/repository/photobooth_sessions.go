@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -76,9 +77,11 @@ type PhotoBoothSession struct {
 	RefundAmountCents *int64
 	RefundReason      string
 
-	ResultURL     string
-	AppVersion    string
-	FailureReason string
+	ResultURL      string
+	PhotoToken     *string
+	PhotoExpiresAt *time.Time
+	AppVersion     string
+	FailureReason  string
 
 	CreatedAt    time.Time
 	ChargedAt    *time.Time
@@ -99,7 +102,7 @@ const sessionCols = `
 	qr_string, qr_url, qr_expires_at, charge_pending,
 	needs_review, review_reason,
 	refunded_at, refund_amount_cents, refund_reason,
-	result_url, app_version, failure_reason,
+	result_url, photo_token, photo_expires_at, app_version, failure_reason,
 	created_at, charged_at, paid_at, captured_at, printed_at, completed_at,
 	expired_at, reconciled_at, updated_at`
 
@@ -113,7 +116,7 @@ func scanSession(row pgx.Row) (*PhotoBoothSession, error) {
 		&s.QRString, &s.QRURL, &s.QRExpiresAt, &s.ChargePending,
 		&s.NeedsReview, &s.ReviewReason,
 		&s.RefundedAt, &s.RefundAmountCents, &s.RefundReason,
-		&s.ResultURL, &s.AppVersion, &s.FailureReason,
+		&s.ResultURL, &s.PhotoToken, &s.PhotoExpiresAt, &s.AppVersion, &s.FailureReason,
 		&s.CreatedAt, &s.ChargedAt, &s.PaidAt, &s.CapturedAt, &s.PrintedAt,
 		&s.CompletedAt, &s.ExpiredAt, &s.ReconciledAt, &s.UpdatedAt,
 	); err != nil {
@@ -568,7 +571,7 @@ func (r *PhotoBoothSessionRepo) AdminListSessions(ctx context.Context, f AdminSe
 			&s.QRString, &s.QRURL, &s.QRExpiresAt, &s.ChargePending,
 			&s.NeedsReview, &s.ReviewReason,
 			&s.RefundedAt, &s.RefundAmountCents, &s.RefundReason,
-			&s.ResultURL, &s.AppVersion, &s.FailureReason,
+			&s.ResultURL, &s.PhotoToken, &s.PhotoExpiresAt, &s.AppVersion, &s.FailureReason,
 			&s.CreatedAt, &s.ChargedAt, &s.PaidAt, &s.CapturedAt, &s.PrintedAt,
 			&s.CompletedAt, &s.ExpiredAt, &s.ReconciledAt, &s.UpdatedAt,
 			&row.BoothCodeJoined, &row.BoothNameJoined,
@@ -611,4 +614,77 @@ func (r *PhotoBoothSessionRepo) FleetStats(ctx context.Context) (*BoothStats, er
 		return nil, err
 	}
 	return &s, nil
+}
+
+// AttachPhoto records the uploaded soft copy and mints the token the QR on
+// the thank-you screen points at.
+//
+// Only a PAID session may carry a photo: the image is the thing the customer
+// bought, and an unpaid row offering a download would be a way to take photos
+// for free.
+func (r *PhotoBoothSessionRepo) AttachPhoto(
+	ctx context.Context,
+	boothID uuid.UUID,
+	number, resultURL string,
+	ttl time.Duration,
+) (*PhotoBoothSession, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return nil, err
+	}
+	token := hex.EncodeToString(buf)
+	expires := time.Now().Add(ttl)
+
+	s, err := scanSession(r.pool.QueryRow(ctx, `
+		UPDATE photobooth_sessions
+		SET result_url = $3,
+		    -- Keep the first token: a retried upload must not invalidate a
+		    -- QR the customer is already pointing their phone at.
+		    photo_token = COALESCE(photo_token, $4),
+		    photo_expires_at = COALESCE(photo_expires_at, $5),
+		    updated_at = now()
+		WHERE booth_id = $1 AND session_number = $2 AND payment_status = 'paid'
+		RETURNING `+sessionCols,
+		boothID, number, resultURL, token, expires))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrSessionNotPaid
+	}
+	return s, err
+}
+
+// PublicPhoto is what the download page may see: the image and nothing else.
+// No session number, no booth, no amount — the token proves possession of the
+// link, not an identity.
+type PublicPhoto struct {
+	ImageURL  string
+	ExpiresAt time.Time
+	TakenAt   time.Time
+}
+
+// ErrPhotoExpired means the link was valid but has aged out.
+var ErrPhotoExpired = errors.New("photo expired")
+
+func (r *PhotoBoothSessionRepo) FindPhotoByToken(ctx context.Context, token string) (*PublicPhoto, error) {
+	var p PublicPhoto
+	var expires *time.Time
+	var takenAt *time.Time
+	err := r.pool.QueryRow(ctx, `
+		SELECT result_url, photo_expires_at, COALESCE(printed_at, completed_at, created_at)
+		FROM photobooth_sessions
+		WHERE photo_token = $1 AND result_url <> ''
+	`, token).Scan(&p.ImageURL, &expires, &takenAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrSessionNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if expires == nil || expires.Before(time.Now()) {
+		return nil, ErrPhotoExpired
+	}
+	p.ExpiresAt = *expires
+	if takenAt != nil {
+		p.TakenAt = *takenAt
+	}
+	return &p, nil
 }

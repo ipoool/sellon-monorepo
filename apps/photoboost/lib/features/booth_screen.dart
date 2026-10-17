@@ -66,10 +66,20 @@ class BoothScreen extends StatelessWidget {
     Capturing(:final shotIndex, :final session) => _FlashView(
       shotLabel: 'Foto ${shotIndex + 1} dari ${session.shotsPlanned}',
     ),
-    ShotTaken(:final shots, :final session) => _ShotsView(
-      shots: shots,
-      total: session.shotsPlanned,
-    ),
+    ShotTaken(
+      :final shots,
+      :final session,
+      :final secondsLeft,
+      :final isLast,
+    ) =>
+      _ShotsView(
+        shots: shots,
+        total: session.shotsPlanned,
+        secondsLeft: secondsLeft,
+        isLast: isLast,
+        onContinue: controller.continueCapture,
+        onRetake: controller.retakeShot,
+      ),
     Decorating(:final shots, :final frameId) => _DecorateView(
       shots: shots,
       selected: frameId,
@@ -593,42 +603,102 @@ class _FlashView extends StatelessWidget {
 }
 
 class _ShotsView extends StatelessWidget {
-  const _ShotsView({required this.shots, required this.total});
+  const _ShotsView({
+    required this.shots,
+    required this.total,
+    required this.secondsLeft,
+    required this.isLast,
+    required this.onContinue,
+    required this.onRetake,
+  });
+
   final List<File> shots;
   final int total;
+  final int secondsLeft;
+  final bool isLast;
+  final VoidCallback onContinue;
+  final VoidCallback onRetake;
 
   @override
   Widget build(BuildContext context) => _Centered(
+    maxWidth: 1040,
     children: [
-      Text('${shots.length} DARI $total', style: SellonText.eyebrow),
-      const SizedBox(height: SellonSpacing.md),
+      Text('FOTO ${shots.length} DARI $total', style: SellonText.eyebrow),
+      const SizedBox(height: SellonSpacing.sm),
+      Text(isLast ? 'Semua foto selesai!' : 'Bagus!', style: SellonText.h1),
+      const SizedBox(height: SellonSpacing.lg),
       Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           for (var i = 0; i < total; i++)
             Padding(
               padding: const EdgeInsets.all(8),
-              child: _Thumb(file: i < shots.length ? shots[i] : null),
+              child: _Thumb(
+                file: i < shots.length ? shots[i] : null,
+                // The shot just taken is the one being judged.
+                highlight: i == shots.length - 1,
+              ),
             ),
         ],
+      ),
+      const SizedBox(height: SellonSpacing.xl),
+      Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          PillButton(
+            label: 'Ulangi',
+            icon: Icons.refresh_rounded,
+            variant: PillVariant.secondary,
+            onPressed: onRetake,
+          ),
+          const SizedBox(width: SellonSpacing.md),
+          PillButton(
+            label: isLast ? 'Pilih bingkai' : 'Lanjut foto',
+            icon: isLast
+                ? Icons.auto_awesome_rounded
+                : Icons.photo_camera_rounded,
+            minWidth: 300,
+            onPressed: onContinue,
+          ),
+        ],
+      ),
+      const SizedBox(height: SellonSpacing.md),
+      // Phrased as what will happen, not as a threat: the session is paid
+      // and advances on its own, it never expires here.
+      Text(
+        isLast
+            ? 'Lanjut otomatis dalam $secondsLeft detik'
+            : 'Foto berikutnya otomatis dalam $secondsLeft detik',
+        style: SellonText.label,
       ),
     ],
   );
 }
 
 class _Thumb extends StatelessWidget {
-  const _Thumb({this.file});
+  const _Thumb({this.file, this.highlight = false});
   final File? file;
 
+  /// The shot just taken grows and takes a brand border, so the customer
+  /// knows which of the four they are being asked about.
+  final bool highlight;
+
   @override
-  Widget build(BuildContext context) => Container(
-    width: 170,
-    height: 128,
+  Widget build(BuildContext context) => AnimatedContainer(
+    duration: const Duration(milliseconds: 260),
+    curve: Curves.easeOutCubic,
+    width: highlight ? 200 : 170,
+    height: highlight ? 150 : 128,
     decoration: BoxDecoration(
       color: Colors.white,
       borderRadius: BorderRadius.circular(SellonRadii.card),
-      border: Border.all(color: SellonColors.neutral200, width: 2),
-      boxShadow: file == null ? null : SellonShadows.card,
+      border: Border.all(
+        color: highlight ? SellonColors.brand500 : SellonColors.neutral200,
+        width: highlight ? 3 : 2,
+      ),
+      boxShadow: file == null
+          ? null
+          : (highlight ? SellonShadows.elevated : SellonShadows.card),
     ),
     clipBehavior: Clip.antiAlias,
     child: file == null
