@@ -50,11 +50,15 @@ const kUseFakeCamera = bool.fromEnvironment('FAKE_CAMERA');
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Landscape only: the booth is a fixed installation, and a rotated kiosk is
-  // a broken kiosk.
+  // Both orientations. A booth is a fixed installation, but which way it is
+  // fixed is the operator's decision — a tall enclosure in a mall corridor
+  // is as ordinary as a wide one on a table, and locking to landscape made
+  // that a hardware problem instead of a setting.
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.landscapeLeft,
     DeviceOrientation.landscapeRight,
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
   ]);
   await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
 

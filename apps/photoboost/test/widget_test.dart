@@ -9,6 +9,35 @@ import 'package:photoboost/printing/fake_printer.dart';
 import 'package:photoboost/session/booth_controller.dart';
 
 void main() {
+  // A booth mounted portrait in a corridor is as ordinary as one on a table.
+  // The idle screen was a hard Row, which in portrait squeezed both halves
+  // until neither was legible — and nothing failed, so it would have been
+  // discovered by an operator at a venue.
+  testWidgets('the idle screen works in portrait too', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(800, 1280));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final controller = BoothController(
+      api: FakeBoothApi(),
+      camera: FakeCameraSource(),
+      printer: FakePrinter(),
+      mediaDir: Directory.systemTemp.createTempSync('pb-portrait'),
+    );
+    addTearDown(controller.dispose);
+    await tester.runAsync(controller.start);
+
+    await tester.pumpWidget(PhotoBoostApp(controller: controller));
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    // No overflow, and the pitch is still readable.
+    expect(tester.takeException(), isNull);
+    expect(find.text('Mulai'), findsOneWidget);
+    expect(find.text('Scan & bayar'), findsOneWidget);
+    expect(find.text('Ambil cetakan'), findsOneWidget);
+  });
+
   testWidgets('idle screen invites a passer-by to start', (tester) async {
     // A tablet, not a phone: the layout assumes landscape at this size.
     await tester.binding.setSurfaceSize(const Size(1280, 800));

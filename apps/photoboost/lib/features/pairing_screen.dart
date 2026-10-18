@@ -247,65 +247,55 @@ class _PairingScreenState extends State<PairingScreen> {
   /// The boxes are display only — the real input is a zero-size TextField
   /// behind them, so the platform keyboard does the typing while the screen
   /// still shows six slots filling up. Tapping anywhere here raises it.
+  /// One real, visible field.
+  ///
+  /// The first version drew six fake slots over a hidden TextField. That
+  /// looked right and cost an ANR: a focused zero-size field leaves Android
+  /// with no window to dispatch touches to, and the system killed the app on
+  /// the pairing screen — the first thing a technician ever sees. Six boxes
+  /// are not worth that; one wide field with spaced letters reads just as
+  /// clearly and is the widget the platform expects.
   Widget _slots() {
-    return GestureDetector(
-      onTap: () => _focus.requestFocus(),
-      behavior: HitTestBehavior.opaque,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          SizedBox(
-            width: 1,
-            height: 1,
-            child: TextField(
-              controller: _controller,
-              focusNode: _focus,
-              onChanged: _onChanged,
-              enabled: !_busy,
-              autocorrect: false,
-              enableSuggestions: false,
-              textCapitalization: TextCapitalization.characters,
-              // Visible characters, invisible field: a transparent cursor and
-              // text keep the system selection handles from floating over the
-              // slots.
-              showCursor: false,
-              cursorWidth: 0,
-              style: const TextStyle(color: Colors.transparent, fontSize: 1),
-              decoration: const InputDecoration(
-                border: InputBorder.none,
-                isDense: true,
-                contentPadding: EdgeInsets.zero,
-              ),
-            ),
+    return SizedBox(
+      width: 420,
+      child: TextField(
+        controller: _controller,
+        focusNode: _focus,
+        onChanged: _onChanged,
+        enabled: !_busy,
+        autocorrect: false,
+        enableSuggestions: false,
+        textCapitalization: TextCapitalization.characters,
+        textAlign: TextAlign.center,
+        maxLength: _codeLength,
+        style: SellonText.h1.copyWith(
+          color: BoothSurface.textPrimary,
+          letterSpacing: 14,
+        ),
+        cursorColor: BoothSurface.accent,
+        decoration: InputDecoration(
+          counterText: '',
+          hintText: '••••••',
+          hintStyle: SellonText.h1.copyWith(
+            color: BoothSurface.textMuted,
+            letterSpacing: 14,
           ),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: List.generate(_codeLength, (i) {
-              final filled = i < _code.length;
-              final next = i == _code.length && !_busy;
-              return Container(
-                width: 62,
-                height: 76,
-                margin: const EdgeInsets.symmetric(horizontal: 5),
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: filled ? BoothSurface.card : BoothSurface.raised,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(
-                    color: next ? BoothSurface.accent : BoothSurface.border,
-                    width: next ? 2 : 1,
-                  ),
-                ),
-                child: Text(
-                  filled ? _code[i] : '',
-                  style: SellonText.h1.copyWith(
-                    color: BoothSurface.textPrimary,
-                  ),
-                ),
-              );
-            }),
+          filled: true,
+          fillColor: BoothSurface.raised,
+          contentPadding: const EdgeInsets.symmetric(vertical: 18),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(16),
+            borderSide: const BorderSide(color: BoothSurface.border),
           ),
-        ],
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(16),
+            borderSide: const BorderSide(color: BoothSurface.accent, width: 2),
+          ),
+          disabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(16),
+            borderSide: const BorderSide(color: BoothSurface.border),
+          ),
+        ),
       ),
     );
   }

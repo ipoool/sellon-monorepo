@@ -196,81 +196,107 @@ class _IdleView extends StatelessWidget {
           constraints: const BoxConstraints(maxWidth: 1180),
           child: Padding(
             padding: const EdgeInsets.all(SellonSpacing.lg),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Expanded(
-                  flex: 5,
-                  child: Column(
+            // Side by side when there is width for it, stacked when there is
+            // not. A booth mounted portrait in a corridor is as ordinary as
+            // one on a table, and a Row would squeeze both halves to nothing
+            // rather than admit it had run out of room.
+            child: LayoutBuilder(
+              builder: (context, box) {
+                final wide = box.maxWidth > box.maxHeight;
+                final text = Column(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: wide
+                      ? CrossAxisAlignment.start
+                      : CrossAxisAlignment.center,
+                  children: [
+                    FadeInUp(
+                      child: Text('PHOTO BOOTH', style: SellonText.eyebrow),
+                    ),
+                    const SizedBox(height: SellonSpacing.sm),
+                    FadeInUp(
+                      delay: const Duration(milliseconds: 90),
+                      child: Text(
+                        'Foto seru,\nlangsung cetak.',
+                        style: SellonText.displayXl,
+                      ),
+                    ),
+                    const SizedBox(height: SellonSpacing.md),
+                    FadeInUp(
+                      delay: const Duration(milliseconds: 180),
+                      child: Text(
+                        '$shots foto, langsung jadi.',
+                        style: SellonText.body,
+                      ),
+                    ),
+                    const SizedBox(height: SellonSpacing.lg),
+                    FadeInUp(
+                      delay: const Duration(milliseconds: 260),
+                      child: SizedBox(
+                        width: 520,
+                        child: TintedPanel(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 24,
+                            vertical: 24,
+                          ),
+                          // The highlight walks the four steps so they
+                          // read as a sequence, not a row of buttons.
+                          child: StepPulse(
+                            count: _steps.length,
+                            builder: (context, i, t) {
+                              final (icon, label) = _steps[i];
+                              return _Step(icon: icon, label: label, lit: t);
+                            },
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: SellonSpacing.lg),
+                    FadeInUp(
+                      delay: const Duration(milliseconds: 340),
+                      child: Breathe(
+                        delay: const Duration(milliseconds: 900),
+                        child: PillButton(
+                          label: 'Mulai',
+                          icon: Icons.photo_camera_rounded,
+                          minWidth: 320,
+                          onPressed: onStart,
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+
+                // A sample strip, so what you get is visible before you pay
+                // rather than described in words.
+                const art = _SampleStrip();
+
+                if (!wide) {
+                  // Art above the pitch: the photographs are what stop
+                  // someone walking past, and in portrait they would
+                  // otherwise sit below the fold.
+                  return Column(
                     mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      FadeInUp(
-                        child: Text('PHOTO BOOTH', style: SellonText.eyebrow),
-                      ),
-                      const SizedBox(height: SellonSpacing.sm),
-                      FadeInUp(
-                        delay: const Duration(milliseconds: 90),
-                        child: Text(
-                          'Foto seru,\nlangsung cetak.',
-                          style: SellonText.displayXl,
-                        ),
-                      ),
-                      const SizedBox(height: SellonSpacing.md),
-                      FadeInUp(
-                        delay: const Duration(milliseconds: 180),
-                        child: Text(
-                          '$shots foto, langsung jadi.',
-                          style: SellonText.body,
-                        ),
-                      ),
+                      const Flexible(child: art),
                       const SizedBox(height: SellonSpacing.lg),
-                      FadeInUp(
-                        delay: const Duration(milliseconds: 260),
-                        child: SizedBox(
-                          width: 520,
-                          child: TintedPanel(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 24,
-                              vertical: 24,
-                            ),
-                            // The highlight walks the four steps so they
-                            // read as a sequence, not a row of buttons.
-                            child: StepPulse(
-                              count: _steps.length,
-                              builder: (context, i, t) {
-                                final (icon, label) = _steps[i];
-                                return _Step(icon: icon, label: label, lit: t);
-                              },
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: SellonSpacing.lg),
-                      FadeInUp(
-                        delay: const Duration(milliseconds: 340),
-                        child: Breathe(
-                          delay: const Duration(milliseconds: 900),
-                          child: PillButton(
-                            label: 'Mulai',
-                            icon: Icons.photo_camera_rounded,
-                            minWidth: 320,
-                            onPressed: onStart,
-                          ),
-                        ),
-                      ),
+                      text,
                     ],
-                  ),
-                ),
-                const SizedBox(width: SellonSpacing.lg),
-                // A sample strip, so what you get is visible before you
-                // pay rather than described in words.
-                //
-                // 5:4 rather than 6:4 — the text column was claiming width
-                // it never filled, which opened a dead channel between the
-                // button and the strip.
-                const Expanded(flex: 4, child: _SampleStrip()),
-              ],
+                  );
+                }
+
+                return Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    // 5:4 rather than 6:4 — the text column was claiming
+                    // width it never filled, which opened a dead channel
+                    // between the button and the strip.
+                    Expanded(flex: 5, child: text),
+                    const SizedBox(width: SellonSpacing.lg),
+                    const Expanded(flex: 4, child: art),
+                  ],
+                );
+              },
             ),
           ),
         ),
@@ -364,28 +390,37 @@ class _SampleStripState extends State<_SampleStrip>
         // three things drifting independently reads as a glitch, one pile
         // settling reads as paper.
         final sway = math.sin(_c.value * 2 * math.pi) * 0.012;
+        // FittedBox, not a bare SizedBox: the fan has a fixed intrinsic size
+        // and the column it sits in does not, so on a narrower tablet the
+        // third strip was simply cut off at the edge. Scaling down keeps the
+        // whole pile visible instead of hiding the part that proves there
+        // are three of them.
         return Center(
-          child: SizedBox(
-            width: _fanWidth,
-            height: _stripHeight + 44,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                for (var i = 0; i < _stripsInFan; i++)
-                  Positioned(
-                    left: i * _fanStep,
-                    top: _fanDrop[i],
-                    child: Transform.rotate(
-                      angle: _fanAngle[i] + sway,
-                      child: _PrintedStrip(
-                        // Each strip starts on a different photograph, so a
-                        // pile of three reads as three different customers'
-                        // prints rather than the same one copied.
-                        offset: i * 2,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: SizedBox(
+              width: _fanWidth,
+              height: _stripHeight + 44,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  for (var i = 0; i < _stripsInFan; i++)
+                    Positioned(
+                      left: i * _fanStep,
+                      top: _fanDrop[i],
+                      child: Transform.rotate(
+                        angle: _fanAngle[i] + sway,
+                        child: _PrintedStrip(
+                          // Each strip gets its OWN three photographs, so a
+                          // pile of three reads as three different customers'
+                          // prints. Stepping by 2 into a set of 4 repeated
+                          // most of them across the fan.
+                          offset: i * _stripCells,
+                        ),
                       ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
         );
@@ -397,12 +432,14 @@ class _SampleStripState extends State<_SampleStrip>
 // The fan. Three printed strips, overlapping, at slight angles — what the
 // booth actually hands people, piling up.
 const int _stripsInFan = 3;
-const double _stripWidth = 168;
-const double _stripHeight = 374;
-const double _fanStep = 104; // horizontal offset between strips
+const double _stripWidth = 228;
+const double _stripHeight = 500;
+// Tighter overlap than the strips are wide, so they read as a stack rather
+// than three separate things placed side by side.
+const double _fanStep = 128;
 const double _fanWidth = _stripWidth + _fanStep * (_stripsInFan - 1);
-const _fanAngle = [-0.085, 0.015, 0.075];
-const _fanDrop = [10.0, 0.0, 18.0];
+const _fanAngle = [-0.075, 0.012, 0.068];
+const _fanDrop = [14.0, 0.0, 24.0];
 
 /// One printed strip: three photographs on paper-white, captioned.
 class _PrintedStrip extends StatelessWidget {
@@ -415,10 +452,10 @@ class _PrintedStrip extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     width: _stripWidth,
-    padding: const EdgeInsets.fromLTRB(10, 10, 10, 14),
+    padding: const EdgeInsets.fromLTRB(12, 12, 12, 18),
     decoration: BoxDecoration(
       color: Colors.white,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(10),
       boxShadow: SellonShadows.popout,
     ),
     child: Column(
@@ -434,7 +471,7 @@ class _PrintedStrip extends StatelessWidget {
           'PHOTOBOOST',
           style: SellonText.eyebrow.copyWith(
             color: SellonColors.brand700,
-            fontSize: 8,
+            fontSize: 9,
           ),
         ),
       ],
@@ -457,8 +494,8 @@ class _SampleFrame extends StatelessWidget {
       borderRadius: BorderRadius.circular(5),
       child: Image.asset(
         'assets/samples/${(seed % _sampleCount) + 1}.jpg',
-        width: _stripWidth - 20,
-        height: (_stripWidth - 20) / 1.4,
+        width: _stripWidth - 24,
+        height: (_stripWidth - 24) / 1.4,
         fit: BoxFit.cover,
         // The strip sells the product, so it shows the product: real
         // photographs of people having fun, not coloured rectangles with
@@ -470,7 +507,11 @@ class _SampleFrame extends StatelessWidget {
 }
 
 /// How many sample photographs ship in assets/samples.
-const int _sampleCount = 4;
+///
+/// Nine, so three strips of three show nine different people rather than
+/// cycling the same handful — a fan of repeats reads as one print copied,
+/// which is the opposite of what the picture is for.
+const int _sampleCount = 9;
 
 /// How many of them the idle strip shows at once.
 const int _stripCells = 3;
@@ -939,100 +980,121 @@ class _DecorateViewState extends State<_DecorateView> {
       constraints: const BoxConstraints(maxWidth: 1180),
       child: Padding(
         padding: const EdgeInsets.all(SellonSpacing.lg),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Expanded(flex: 4, child: _StripPreview(image: _preview)),
-            const SizedBox(width: SellonSpacing.xl),
-            Expanded(
-              flex: 6,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text('SIAP CETAK', style: SellonText.eyebrow),
-                  const SizedBox(height: SellonSpacing.xs),
+        // Same reason as the idle screen: in portrait a Row would crush the
+        // preview to a sliver, and the preview is the only look the customer
+        // gets before paper is committed.
+        child: LayoutBuilder(
+          builder: (context, box) {
+            final wide = box.maxWidth > box.maxHeight;
+            final preview = _StripPreview(image: _preview);
+            final panel = Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: wide
+                  ? CrossAxisAlignment.start
+                  : CrossAxisAlignment.center,
+              children: [
+                Text('SIAP CETAK', style: SellonText.eyebrow),
+                const SizedBox(height: SellonSpacing.xs),
+                Text(
+                  kDecorationsEnabled
+                      ? 'Pilih bingkai & filter'
+                      : 'Beginilah hasilnya',
+                  style: SellonText.h1.copyWith(
+                    color: BoothSurface.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: SellonSpacing.sm),
+                if (!kDecorationsEnabled)
                   Text(
-                    kDecorationsEnabled
-                        ? 'Pilih bingkai & filter'
-                        : 'Beginilah hasilnya',
-                    style: SellonText.h1.copyWith(
-                      color: BoothSurface.textPrimary,
+                    'Kalau sudah pas, tekan Cetak.',
+                    style: SellonText.body.copyWith(
+                      color: BoothSurface.textSecondary,
                     ),
                   ),
+                const SizedBox(height: SellonSpacing.lg),
+
+                // Frames and filters are switched off while the booth runs
+                // on thermal paper. The screen stays, because it is the one
+                // place the customer sees the strip before it is committed
+                // to paper they already paid for.
+                if (kDecorationsEnabled) ...[
+                  Text('BINGKAI', style: SellonText.eyebrow),
                   const SizedBox(height: SellonSpacing.sm),
-                  if (!kDecorationsEnabled)
-                    Text(
-                      'Kalau sudah pas, tekan Cetak.',
-                      style: SellonText.body.copyWith(
-                        color: BoothSurface.textSecondary,
-                      ),
-                    ),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      for (final f in widget.frames)
+                        _FrameChip(
+                          label: f.name as String,
+                          selected: f.id == widget.selected,
+                          onTap: () => widget.onPick(f.id as String),
+                        ),
+                    ],
+                  ),
                   const SizedBox(height: SellonSpacing.lg),
 
-                  // Frames and filters are switched off while the booth runs
-                  // on thermal paper. The screen stays, because it is the one
-                  // place the customer sees the strip before it is committed
-                  // to paper they already paid for.
-                  if (kDecorationsEnabled) ...[
-                    Text('BINGKAI', style: SellonText.eyebrow),
-                    const SizedBox(height: SellonSpacing.sm),
-                    Wrap(
-                      spacing: 12,
-                      runSpacing: 12,
-                      children: [
-                        for (final f in widget.frames)
-                          _FrameChip(
-                            label: f.name as String,
-                            selected: f.id == widget.selected,
-                            onTap: () => widget.onPick(f.id as String),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: SellonSpacing.lg),
-
-                    Text('FILTER', style: SellonText.eyebrow),
-                    const SizedBox(height: SellonSpacing.sm),
-                    Row(
-                      children: [
-                        for (final f in PhotoFilter.values)
-                          Padding(
-                            padding: const EdgeInsets.only(right: 14),
-                            child: _FilterChip(
-                              filter: f,
-                              sample: widget.shots.isEmpty
-                                  ? null
-                                  : widget.shots.first,
-                              selected: f == widget.filter,
-                              onTap: () => widget.onPickFilter(f),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ],
-
-                  const SizedBox(height: SellonSpacing.xl),
+                  Text('FILTER', style: SellonText.eyebrow),
+                  const SizedBox(height: SellonSpacing.sm),
                   Row(
                     children: [
-                      PillButton(
-                        label: 'Kembali',
-                        icon: Icons.arrow_back_rounded,
-                        variant: PillVariant.secondary,
-                        onPressed: widget.onBack,
-                      ),
-                      const SizedBox(width: SellonSpacing.sm),
-                      PillButton(
-                        label: 'Cetak',
-                        icon: Icons.print_rounded,
-                        minWidth: 260,
-                        onPressed: widget.onPrint,
-                      ),
+                      for (final f in PhotoFilter.values)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 14),
+                          child: _FilterChip(
+                            filter: f,
+                            sample: widget.shots.isEmpty
+                                ? null
+                                : widget.shots.first,
+                            selected: f == widget.filter,
+                            onTap: () => widget.onPickFilter(f),
+                          ),
+                        ),
                     ],
                   ),
                 ],
-              ),
-            ),
-          ],
+
+                const SizedBox(height: SellonSpacing.xl),
+                Row(
+                  children: [
+                    PillButton(
+                      label: 'Kembali',
+                      icon: Icons.arrow_back_rounded,
+                      variant: PillVariant.secondary,
+                      onPressed: widget.onBack,
+                    ),
+                    const SizedBox(width: SellonSpacing.sm),
+                    PillButton(
+                      label: 'Cetak',
+                      icon: Icons.print_rounded,
+                      minWidth: 260,
+                      onPressed: widget.onPrint,
+                    ),
+                  ],
+                ),
+              ],
+            );
+
+            if (!wide) {
+              return Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Flexible(child: preview),
+                  const SizedBox(height: SellonSpacing.lg),
+                  panel,
+                ],
+              );
+            }
+
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(flex: 4, child: preview),
+                const SizedBox(width: SellonSpacing.xl),
+                Expanded(flex: 6, child: panel),
+              ],
+            );
+          },
         ),
       ),
     ),
