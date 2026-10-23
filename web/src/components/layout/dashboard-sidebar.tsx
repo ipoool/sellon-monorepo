@@ -50,7 +50,6 @@ type NavItem = {
   badge?: string;
   disabled?: boolean;
   external?: boolean;
-  bisnisOnly?: boolean;
 };
 
 // isItemActive: a nav item is active when the path matches exactly, or (for
@@ -528,8 +527,9 @@ function NavGroup({
   isOpen?: boolean;
   onToggle?: (next: boolean) => void;
 }) {
-  const { locked, openGate } = useBisnisGate();
-  const groupLocked = !!bisnisOnly && locked;
+  // The POS group hangs off the kasir package.
+  const { has, openGate } = useBisnisGate();
+  const groupLocked = !!bisnisOnly && !has("pos");
   const containsActive = groupHasActive(items, pathname);
   const open = !collapsible || containsActive || (isOpen ?? false);
   const labelClass =
@@ -540,7 +540,7 @@ function NavGroup({
         {groupLocked ? (
           <button
             type="button"
-            onClick={() => openGate("Kasir POS")}
+            onClick={() => openGate("pos", "Kasir POS")}
             className={cn("text-left", labelClass)}
           >
             {label}
@@ -602,14 +602,15 @@ function NavGroup({
             );
           }
 
-          // Bisnis-only items stay visible but pop the upgrade dialog on
-          // click (no navigation) for non-Bisnis sellers.
-          if (groupLocked || (!!item.bisnisOnly && locked)) {
+          // A locked group stays visible but pops the dialog on click
+          // instead of navigating, so the seller learns what unlocks it
+          // rather than finding the menu item simply gone.
+          if (groupLocked) {
             return (
               <li key={item.label}>
                 <button
                   type="button"
-                  onClick={() => openGate(item.label)}
+                  onClick={() => openGate("pos", item.label)}
                   className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-neutral-700 transition-colors hover:bg-neutral-100"
                 >
                   <Icon className="size-4 shrink-0 text-neutral-500" aria-hidden />

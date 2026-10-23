@@ -104,7 +104,14 @@ export default async function DashboardLayout({
       {/* Surface the active tier to the dashboard sidebar (and any
           other client components that want to gate by plan) without
           prop-drilling through every page. */}
-      <PlanProvider value={sub?.plan ?? "free"}>
+      <PlanProvider
+        value={{
+          plan: sub?.plan ?? "free",
+          features: sub?.features ?? [],
+          addons: sub?.addons ?? [],
+          catalog: sub?.addon_catalog ?? [],
+        }}
+      >
         <BisnisGateProvider>
           {/* Which optional menu groups the seller enabled during profiling —
               consumed by the sidebar to show/hide groups. Defaults all-true so

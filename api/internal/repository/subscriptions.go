@@ -578,6 +578,71 @@ func (r *SubscriptionRepo) CreatePendingInvoice(
 	return scanInvoice(row)
 }
 
+// CreatePendingInvoiceWithLines is the manual-transfer twin of
+// CreateCheckoutInvoiceWithLines.
+//
+// Both payment paths write the same breakdown, because an add-on that is
+// charged through Midtrans and free through a bank transfer is a hole
+// nobody finds until the accounting does.
+func (r *SubscriptionRepo) CreatePendingInvoiceWithLines(
+	ctx context.Context,
+	storeID, subscriptionID uuid.UUID,
+	amountCents int64,
+	plan string,
+	months int,
+	notes string,
+	lines []InvoiceLine,
+) (*SubscriptionInvoice, error) {
+	if months <= 0 {
+		months = 1
+	}
+	if plan == "" {
+		plan = "pro"
+	}
+
+	var sum int64
+	for _, l := range lines {
+		sum += l.AmountCents
+	}
+	if len(lines) > 0 && sum != amountCents {
+		return nil, ErrInvoiceLinesMismatch
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	inv, err := scanInvoice(tx.QueryRow(ctx, `
+		INSERT INTO subscription_invoices
+		    (store_id, subscription_id, amount_cents, status, notes,
+		     provider, plan, months)
+		VALUES ($1, $2, $3, 'pending', $4, 'manual_transfer', $5, $6)
+		RETURNING `+invoiceCols,
+		storeID, subscriptionID, amountCents, notes, plan, months))
+	if err != nil {
+		return nil, err
+	}
+
+	for i, l := range lines {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO subscription_invoice_lines
+			    (invoice_id, kind, code, description, months,
+			     unit_price_cents, amount_cents, sort_order)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+			inv.ID, l.Kind, l.Code, l.Description, l.Months,
+			l.UnitPriceCents, l.AmountCents, i); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return inv, nil
+}
+
 // SetInvoicePaymentProof attaches an uploaded receipt to a PENDING invoice.
 //
 // Guarded on status, not read-then-write: once ops has marked the invoice

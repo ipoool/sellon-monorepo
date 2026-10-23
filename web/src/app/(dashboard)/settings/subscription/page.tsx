@@ -2,11 +2,13 @@ import { Crown, Check, Calendar, Receipt } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { AddonsManager } from "@/components/dashboard/addons-manager";
 import { BerlanggananActions } from "@/components/dashboard/berlangganan-actions";
 import { serverApi } from "@/lib/server-api";
 import { formatRupiah, formatDateID } from "@/lib/format";
 import { quotaBullets } from "@/lib/plan-bullets";
 import type {
+  Addon,
   PublicPlan,
   Subscription,
   SubscriptionInvoice,
@@ -39,12 +41,13 @@ const invoiceStatusBadge: Record<
 };
 
 export default async function BerlanggananPage() {
-  const [data, plansRes] = await Promise.all([
+  const [data, plansRes, addonsRes] = await Promise.all([
     serverApi<{
       subscription: Subscription;
       invoices: SubscriptionInvoice[];
     }>("/api/v1/subscription"),
     serverApi<{ plans: PublicPlan[] }>("/api/v1/plans"),
+    serverApi<{ addons: Addon[] }>("/api/v1/subscription/addons"),
   ]);
   const sub: Subscription = data?.subscription ?? {
     plan: "free",
@@ -57,6 +60,7 @@ export default async function BerlanggananPage() {
     bisnis_price_cents: 299_000_00,
   };
   const invoices = data?.invoices ?? [];
+  const addons = addonsRes?.addons ?? [];
   const plans = plansRes?.plans ?? [];
   // Stable lookup by tier for the comparison cards.
   const planByTier = new Map(plans.map((p) => [p.tier, p]));
@@ -127,6 +131,11 @@ export default async function BerlanggananPage() {
           </div>
         </div>
       </Card>
+
+      {/* Packages, directly under the plan: this is the answer to "I pay
+          for Bisnis but only use two things", so it belongs where someone
+          looking at their bill will see it. */}
+      <AddonsManager addons={addons} plan={sub.plan} />
 
       {/* Plan comparison */}
       {!isPaid && plans.length > 0 && (

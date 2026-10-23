@@ -710,6 +710,60 @@ export type Subscription = {
   pro_price_cents: number;
   bisnis_price_cents: number;
   quotas?: Record<string, QuotaUsage>;
+  /** Gated features this store unlocks, from its plan AND its add-ons. */
+  features?: GatedFeature[];
+  /** Add-on codes the store currently holds. */
+  addons?: AddonCode[];
+  /**
+   * The sellable packages. Served with the subscription so a locked screen
+   * can name the package that unlocks it — the feature-to-package mapping
+   * is owned by the API, deliberately not copied into the frontend where
+   * it would drift.
+   */
+  addon_catalog?: AddonCatalogEntry[];
+};
+
+/** Features that cost money. Mirrors domain/feature in the API. */
+export type GatedFeature =
+  | "pos"
+  | "ai_analytics"
+  | "printer"
+  | "checkout_fields"
+  | "table_qr"
+  | "membership"
+  | "loyalty"
+  | "meta_integration";
+
+export type AddonCode = "kasir" | "ai" | "membership";
+
+export type AddonCatalogEntry = {
+  code: AddonCode;
+  name: string;
+  monthly_price_cents: number;
+  features: GatedFeature[];
+};
+
+/** One package as the seller sees it, with their own ownership state. */
+export type Addon = AddonCatalogEntry & {
+  description: string;
+  yearly_price_cents: number;
+  /** The store holds it right now. */
+  active: boolean;
+  /** Working, but not yet on any invoice. */
+  in_free_tail: boolean;
+  /** When the free period ends; null once billed or never granted. */
+  free_until: string | null;
+};
+
+/** One charge on an invoice: the plan, or an add-on. */
+export type InvoiceLine = {
+  id: string;
+  kind: "plan" | "addon";
+  code: string;
+  description: string;
+  months: number;
+  unit_price_cents: number;
+  amount_cents: number;
 };
 
 export type SubscriptionInvoice = {

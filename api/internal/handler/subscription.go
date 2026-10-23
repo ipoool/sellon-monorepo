@@ -136,6 +136,11 @@ type subscriptionDTO struct {
 	// Add-on codes the store currently holds, so the UI can show what is
 	// already bought without a second call.
 	Addons []string `json:"addons"`
+	// The catalogue, so a locked screen can name the package that unlocks
+	// it. Served from here because the dashboard layout already fetches
+	// this endpoint, and because a feature→package map copied into the
+	// frontend is a map that drifts.
+	AddonCatalog []addonCatalogEntry `json:"addon_catalog"`
 }
 
 type invoiceDTO struct {
@@ -151,6 +156,40 @@ type invoiceDTO struct {
 	// a pending request, so they know not to send it again.
 	PaymentProofURL string `json:"payment_proof_url"`
 	CreatedAt       string `json:"created_at"`
+}
+
+// addonCatalogEntry is the minimum a locked screen needs to offer the
+// right thing: what it is called, what it costs, and what it contains.
+type addonCatalogEntry struct {
+	Code              string   `json:"code"`
+	Name              string   `json:"name"`
+	MonthlyPriceCents int64    `json:"monthly_price_cents"`
+	Features          []string `json:"features"`
+}
+
+// addonCatalog reads the sellable packages. Returns nil on error rather
+// than failing the response: a billing page without upsell copy is a worse
+// day than a 500.
+func (h *SubscriptionHandler) addonCatalog(r *http.Request) []addonCatalogEntry {
+	list, err := h.addons.ListAddons(r.Context(), false)
+	if err != nil {
+		h.logger.Error("addon catalog", "err", err)
+		return nil
+	}
+	out := make([]addonCatalogEntry, 0, len(list))
+	for _, a := range list {
+		fs := feature.AddonFeatures(feature.Addon(a.Code))
+		codes := make([]string, 0, len(fs))
+		for _, f := range fs {
+			codes = append(codes, string(f))
+		}
+		out = append(out, addonCatalogEntry{
+			Code: a.Code, Name: a.Name,
+			MonthlyPriceCents: a.MonthlyPriceCents,
+			Features:          codes,
+		})
+	}
+	return out
 }
 
 // entFor resolves what a store may use. Falls back to the plan alone on a
@@ -263,6 +302,7 @@ func (h *SubscriptionHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	dto := toSubDTO(sub, proCents, bisnisCents, h.entFor(r, store.ID, sub.Plan))
+	dto.AddonCatalog = h.addonCatalog(r)
 	productCount, _ := h.products.CountAll(r.Context(), store.ID)
 	orderCount, _ := h.orders.CountThisMonth(r.Context(), store.ID)
 	dto.Quotas = map[string]quotaUsage{
@@ -373,6 +413,12 @@ func (h *SubscriptionHandler) RequestUpgrade(w http.ResponseWriter, r *http.Requ
 	}
 
 	amount := h.priceForMonths(r.Context(), tier, months)
+	lines, amount, qerr := h.quoteFor(r, store.ID, tier, months, amount)
+	if qerr != nil {
+		h.logger.Error("upgrade request: quote", "err", qerr)
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
 	planLabel := "Pro"
 	if tier == "bisnis" {
 		planLabel = "Bisnis"
@@ -383,7 +429,8 @@ func (h *SubscriptionHandler) RequestUpgrade(w http.ResponseWriter, r *http.Requ
 		// tier ("P") in the slot meant for the months count.
 		notes = "Upgrade " + planLabel + " · " + intToStr(months) + " bulan"
 	}
-	invoice, err := h.subs.CreatePendingInvoice(r.Context(), store.ID, sub.ID, amount, tier, months, notes)
+	invoice, err := h.subs.CreatePendingInvoiceWithLines(
+		r.Context(), store.ID, sub.ID, amount, tier, months, notes, lines)
 	if err != nil {
 		h.logger.Error("create pending invoice", "err", err)
 		response.Error(w, http.StatusInternalServerError, "gagal mencatat permintaan upgrade")
@@ -559,47 +606,11 @@ func (h *SubscriptionHandler) Checkout(w http.ResponseWriter, r *http.Request) {
 	}
 	notes := "Upgrade " + planLabel + " · " + intToStr(months) + " bulan · " + orderID
 
-	// The plan is one line; every add-on the store holds is another.
-	//
-	// Add-ons are billed at RENEWAL, not when they are switched on — so
-	// this is where an add-on activated mid-period finally gets charged,
-	// as a whole month. There is no proration anywhere in this path, which
-	// is why every figure on the invoice is one a seller can check.
-	lines := []repository.InvoiceLine{{
-		Kind: "plan", Code: tier,
-		Description:    "SellOn " + planLabel,
-		Months:         months,
-		UnitPriceCents: amountCents / int64(months),
-		AmountCents:    amountCents,
-	}}
-	// Bisnis already bundles everything, so charging add-ons on top would
-	// bill the same features twice.
-	if tier != "bisnis" {
-		held, aerr := h.addons.ListForStore(r.Context(), store.ID)
-		if aerr != nil {
-			h.logger.Error("checkout: list addons", "err", aerr)
-			response.Error(w, http.StatusInternalServerError, "internal error")
-			return
-		}
-		for _, row := range held {
-			a, ferr := h.addons.FindAddon(r.Context(), row.AddonCode)
-			if ferr != nil {
-				// A retired add-on the store still holds. Skip it rather
-				// than charge for something no longer sold.
-				h.logger.Warn("checkout: skipping unknown addon",
-					"code", row.AddonCode, "err", ferr)
-				continue
-			}
-			amt := a.PriceForMonths(months)
-			lines = append(lines, repository.InvoiceLine{
-				Kind: "addon", Code: a.Code,
-				Description:    a.Name,
-				Months:         months,
-				UnitPriceCents: amt / int64(months),
-				AmountCents:    amt,
-			})
-			amountCents += amt
-		}
+	lines, amountCents, qerr := h.quoteFor(r, store.ID, tier, months, amountCents)
+	if qerr != nil {
+		h.logger.Error("checkout: quote", "err", qerr)
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
 	}
 
 	inv, err := h.subs.CreateCheckoutInvoiceWithLines(r.Context(), store.ID, sub.ID,
@@ -812,6 +823,69 @@ func (h *SubscriptionHandler) sendUpgradeRequestEmail(
 		Text:    text,
 		HTML:    htmlBody,
 	})
+}
+
+// quoteFor builds an invoice breakdown: the plan, plus every add-on the
+// store holds. Returns the lines and the new total.
+//
+// Shared by BOTH payment paths on purpose. It used to live inline in the
+// Snap checkout, which meant a seller paying by manual transfer was billed
+// for the plan alone and kept their add-ons for nothing — the kind of hole
+// that is only ever found by someone's accountant.
+//
+// Add-ons are billed at RENEWAL, never prorated. This is where one
+// switched on mid-period is finally charged, as a whole month, so every
+// figure on the invoice is one a seller can check on a calculator.
+func (h *SubscriptionHandler) quoteFor(
+	r *http.Request,
+	storeID uuid.UUID,
+	tier string,
+	months int,
+	planAmount int64,
+) ([]repository.InvoiceLine, int64, error) {
+	planLabel := "Pro"
+	if tier == "bisnis" {
+		planLabel = "Bisnis"
+	}
+	lines := []repository.InvoiceLine{{
+		Kind: "plan", Code: tier,
+		Description:    "SellOn " + planLabel,
+		Months:         months,
+		UnitPriceCents: planAmount / int64(months),
+		AmountCents:    planAmount,
+	}}
+	total := planAmount
+
+	// Bisnis already bundles everything, so charging add-ons on top would
+	// bill the same features twice.
+	if tier == "bisnis" {
+		return lines, total, nil
+	}
+
+	held, err := h.addons.ListForStore(r.Context(), storeID)
+	if err != nil {
+		return nil, 0, err
+	}
+	for _, row := range held {
+		a, ferr := h.addons.FindAddon(r.Context(), row.AddonCode)
+		if ferr != nil {
+			// A retired add-on the store still holds. Skip it rather than
+			// charge for something no longer sold.
+			h.logger.Warn("quote: skipping unknown addon",
+				"code", row.AddonCode, "err", ferr)
+			continue
+		}
+		amt := a.PriceForMonths(months)
+		lines = append(lines, repository.InvoiceLine{
+			Kind: "addon", Code: a.Code,
+			Description:    a.Name,
+			Months:         months,
+			UnitPriceCents: amt / int64(months),
+			AmountCents:    amt,
+		})
+		total += amt
+	}
+	return lines, total, nil
 }
 
 // snapItemsFor mirrors the invoice breakdown into Midtrans line items.

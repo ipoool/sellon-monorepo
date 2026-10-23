@@ -64,9 +64,11 @@ const PLACEMENTS: {
 ];
 
 export function SellerBannersManager({ initial }: { initial: SellerBanner[] }) {
-  // `locked` is true below the Bisnis tier → order-meja / antrian placements
-  // open the upgrade dialog instead of switching (BE also returns 402).
-  const { locked, openGate } = useBisnisGate();
+  // Dine-in and queue banner placements belong to the kasir package, via
+  // table_qr. Without it those tabs open the lock dialog instead of
+  // switching (the BE also answers 402).
+  const { has, openGate } = useBisnisGate();
+  const locked = !has("table_qr");
   // Flat client-managed list (server is source of truth, we mutate locally per
   // API response). The active placement tab filters what's shown + uploaded.
   const [items, setItems] = useState<SellerBanner[]>(() =>
@@ -123,7 +125,7 @@ export function SellerBannersManager({ initial }: { initial: SellerBanner[] }) {
     // Defense-in-depth: never POST a Bisnis-only placement on a locked plan
     // (the form is hidden in this state; the BE also returns 402).
     if (lockedActive) {
-      openGate(`Banner ${meta.label}`);
+      openGate("table_qr", `Banner ${meta.label}`);
       return;
     }
     if (!file) {
@@ -266,7 +268,7 @@ export function SellerBannersManager({ initial }: { initial: SellerBanner[] }) {
                 // banners (e.g. after a downgrade) → still let the seller open
                 // the tab to manage/delete them; new uploads stay blocked below.
                 if (tabLocked && n === 0) {
-                  openGate(`Banner ${label}`);
+                  openGate("table_qr", `Banner ${label}`);
                   return;
                 }
                 setPlacement(key);
@@ -319,7 +321,7 @@ export function SellerBannersManager({ initial }: { initial: SellerBanner[] }) {
             </div>
             <Button
               type="button"
-              onClick={() => openGate(`Banner ${meta.label}`)}
+              onClick={() => openGate("table_qr", `Banner ${meta.label}`)}
               className="shrink-0"
             >
               <Crown className="size-4" aria-hidden />
