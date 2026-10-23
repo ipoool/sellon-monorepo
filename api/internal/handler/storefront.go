@@ -300,7 +300,8 @@ func (h *StorefrontHandler) gateMetaPixel(ctx context.Context, store *repository
 	if dto.MetaPixelID == "" {
 		return
 	}
-	if plan, err := h.subs.GetPlan(ctx, store.ID); err == nil && !feature.HasFeature(plan, feature.MetaIntegration) {
+	if plan, err := h.subs.GetPlan(ctx, store.ID); err == nil &&
+		!feature.EntitlementsFor(plan, nil).Has(feature.MetaIntegration) {
 		dto.MetaPixelID = ""
 	}
 }

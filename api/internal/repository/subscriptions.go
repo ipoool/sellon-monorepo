@@ -467,6 +467,22 @@ func (r *SubscriptionRepo) SettleInvoice(ctx context.Context, invoiceID uuid.UUI
 		return nil, nil, err
 	}
 
+	// End the free tail on any add-on this invoice charged.
+	//
+	// Inside the settle transaction, because "the seller has now paid for
+	// this add-on" and "the subscription period moved" are one fact. A
+	// guarded UPDATE, so a replayed settle cannot rewrite the date.
+	if _, err := tx.Exec(ctx, `
+		UPDATE store_addons sa
+		SET first_billed_at = now()
+		FROM subscription_invoice_lines l
+		WHERE l.invoice_id = $1 AND l.kind = 'addon'
+		  AND sa.store_id = $2 AND sa.addon_code = l.code
+		  AND sa.cancelled_at IS NULL AND sa.first_billed_at IS NULL
+	`, inv.ID, inv.StoreID); err != nil {
+		return nil, nil, err
+	}
+
 	// Partner commission, if this store's owner came from one.
 	//
 	// Inside this transaction, so a commission can only exist for an invoice
@@ -929,4 +945,111 @@ func (r *SubscriptionRepo) AdminMarkInvoiceFailed(
 		return ErrInvoiceNotPending
 	}
 	return nil
+}
+
+// === Invoice line items ===
+
+// InvoiceLine is one charge on an invoice: the plan, or an add-on.
+type InvoiceLine struct {
+	ID          uuid.UUID
+	Kind        string // "plan" | "addon"
+	Code        string
+	Description string
+
+	Months         int
+	UnitPriceCents int64
+	AmountCents    int64
+	SortOrder      int
+}
+
+// ErrInvoiceLinesMismatch means the lines do not add up to the invoice
+// total. Returned rather than written, because an invoice whose breakdown
+// contradicts its total is the one thing a seller will always notice.
+var ErrInvoiceLinesMismatch = errors.New("invoice lines do not sum to the total")
+
+// CreateCheckoutInvoiceWithLines writes a pending invoice and its breakdown
+// in one transaction.
+//
+// The sum is checked here rather than trusted from the caller: the total is
+// what Midtrans charges and the lines are what the seller reads, and the
+// only way those two can never disagree is if nothing can write them apart.
+func (r *SubscriptionRepo) CreateCheckoutInvoiceWithLines(
+	ctx context.Context,
+	storeID, subscriptionID uuid.UUID,
+	amountCents int64,
+	provider, providerOrderID, plan string,
+	months int,
+	notes string,
+	lines []InvoiceLine,
+) (*SubscriptionInvoice, error) {
+	if months <= 0 {
+		months = 1
+	}
+
+	var sum int64
+	for _, l := range lines {
+		sum += l.AmountCents
+	}
+	if len(lines) > 0 && sum != amountCents {
+		return nil, ErrInvoiceLinesMismatch
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	inv, err := scanInvoice(tx.QueryRow(ctx, `
+		INSERT INTO subscription_invoices
+		    (store_id, subscription_id, amount_cents, status, notes,
+		     provider, provider_order_id, months, plan)
+		VALUES ($1, $2, $3, 'pending', $4, $5, $6, $7, $8)
+		RETURNING `+invoiceCols, storeID, subscriptionID, amountCents, notes,
+		provider, providerOrderID, months, plan))
+	if err != nil {
+		return nil, err
+	}
+
+	for i, l := range lines {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO subscription_invoice_lines
+			    (invoice_id, kind, code, description, months,
+			     unit_price_cents, amount_cents, sort_order)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+			inv.ID, l.Kind, l.Code, l.Description, l.Months,
+			l.UnitPriceCents, l.AmountCents, i); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return inv, nil
+}
+
+// ListInvoiceLines returns an invoice's breakdown in display order.
+func (r *SubscriptionRepo) ListInvoiceLines(ctx context.Context, invoiceID uuid.UUID) ([]InvoiceLine, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, kind, code, description, months,
+		       unit_price_cents, amount_cents, sort_order
+		FROM subscription_invoice_lines
+		WHERE invoice_id = $1
+		ORDER BY sort_order, code`, invoiceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []InvoiceLine{}
+	for rows.Next() {
+		var l InvoiceLine
+		if err := rows.Scan(&l.ID, &l.Kind, &l.Code, &l.Description, &l.Months,
+			&l.UnitPriceCents, &l.AmountCents, &l.SortOrder); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
 }

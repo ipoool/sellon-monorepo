@@ -29,12 +29,16 @@ type SellerBannerHandler struct {
 	banners *repository.SellerBannerRepo
 	stores  *repository.StoreRepo
 	subs    *repository.SubscriptionRepo
+	addons  *repository.AddonRepo
 	storage storage.Client
 	logger  *slog.Logger
 }
 
-func NewSellerBannerHandler(banners *repository.SellerBannerRepo, stores *repository.StoreRepo, subs *repository.SubscriptionRepo, storageCli storage.Client, logger *slog.Logger) *SellerBannerHandler {
-	return &SellerBannerHandler{banners: banners, stores: stores, subs: subs, storage: storageCli, logger: logger}
+func NewSellerBannerHandler(banners *repository.SellerBannerRepo, stores *repository.StoreRepo, subs *repository.SubscriptionRepo, addons *repository.AddonRepo, storageCli storage.Client, logger *slog.Logger) *SellerBannerHandler {
+	return &SellerBannerHandler{
+		banners: banners, stores: stores, subs: subs, addons: addons,
+		storage: storageCli, logger: logger,
+	}
 }
 
 // bannerPlacementBisnisOnly reports whether a placement is a dine-in / queue
@@ -127,7 +131,12 @@ func (h *SellerBannerHandler) Create(w http.ResponseWriter, r *http.Request) {
 			response.Error(w, http.StatusInternalServerError, "internal error")
 			return
 		}
-		if !feature.HasFeature(sub.Plan, feature.TableQR) {
+		ent, eerr := h.addons.EntitlementsFor(r.Context(), store.ID, sub.Plan)
+		if eerr != nil {
+			response.Error(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		if !ent.Has(feature.TableQR) {
 			response.JSON(w, http.StatusPaymentRequired, map[string]any{
 				"code":       "FEATURE_LOCKED",
 				"message":    "Banner untuk Order Meja & Antrian Pesanan tersedia di paket Bisnis",
@@ -322,8 +331,14 @@ func (h *SellerBannerHandler) PublicList(w http.ResponseWriter, r *http.Request)
 	// surfacing leftover table_order/customer_queue banners publicly; storefront
 	// stays open to all tiers. Fail open on a plan-lookup error so a paying
 	// Bisnis seller never loses their banners to a transient DB blip.
+	// Fails OPEN on a lookup error, as before: a seller who paid for the
+	// kasir must not lose their dine-in banners to a transient DB blip.
 	plan, planErr := h.subs.GetPlan(r.Context(), store.ID)
-	allowBisnis := planErr != nil || feature.HasFeature(plan, feature.TableQR)
+	allowBisnis := planErr != nil
+	if !allowBisnis {
+		ent, eerr := h.addons.EntitlementsFor(r.Context(), store.ID, plan)
+		allowBisnis = eerr != nil || ent.Has(feature.TableQR)
+	}
 
 	groups := emptyBannerGroups()
 	for _, b := range rows {

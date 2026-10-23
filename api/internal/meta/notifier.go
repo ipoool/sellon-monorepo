@@ -58,7 +58,8 @@ func (n *Notifier) OnPaymentPaid(ctx context.Context, storeID, orderID uuid.UUID
 	// seller-banner public-leak fix). Fail open on a lookup error so a paying
 	// store never loses tracking to a transient DB blip.
 	if n.subs != nil {
-		if plan, perr := n.subs.GetPlan(ctx, storeID); perr == nil && !feature.HasFeature(plan, feature.MetaIntegration) {
+		if plan, perr := n.subs.GetPlan(ctx, storeID); perr == nil &&
+			!feature.EntitlementsFor(plan, nil).Has(feature.MetaIntegration) {
 			return
 		}
 	}

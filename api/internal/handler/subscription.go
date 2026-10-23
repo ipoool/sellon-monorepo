@@ -25,6 +25,7 @@ import (
 
 type SubscriptionHandler struct {
 	subs              *repository.SubscriptionRepo
+	addons            *repository.AddonRepo
 	stores            *repository.StoreRepo
 	products          *repository.ProductRepo
 	orders            *repository.OrderRepo
@@ -43,6 +44,7 @@ type SubscriptionHandler struct {
 
 func NewSubscriptionHandler(
 	subs *repository.SubscriptionRepo,
+	addons *repository.AddonRepo,
 	stores *repository.StoreRepo,
 	products *repository.ProductRepo,
 	orders *repository.OrderRepo,
@@ -58,7 +60,7 @@ func NewSubscriptionHandler(
 	logger *slog.Logger,
 ) *SubscriptionHandler {
 	return &SubscriptionHandler{
-		subs: subs, stores: stores, products: products, orders: orders,
+		subs: subs, addons: addons, stores: stores, products: products, orders: orders,
 		users:              users,
 		plans:              plans,
 		midtrans:           midtrans,
@@ -129,7 +131,11 @@ type subscriptionDTO struct {
 	ProPriceCents      int64                 `json:"pro_price_cents"`
 	BisnisPriceCents   int64                 `json:"bisnis_price_cents"`
 	Quotas             map[string]quotaUsage `json:"quotas"`
-	Features           []string              `json:"features"` // gated features this plan unlocks
+	// Gated features this store unlocks, from plan AND add-ons.
+	Features []string `json:"features"`
+	// Add-on codes the store currently holds, so the UI can show what is
+	// already bought without a second call.
+	Addons []string `json:"addons"`
 }
 
 type invoiceDTO struct {
@@ -147,15 +153,34 @@ type invoiceDTO struct {
 	CreatedAt       string `json:"created_at"`
 }
 
+// entFor resolves what a store may use. Falls back to the plan alone on a
+// lookup error rather than failing the whole response: a seller opening
+// their billing page during a DB blip should see their plan, not a 500.
+func (h *SubscriptionHandler) entFor(r *http.Request, storeID uuid.UUID, plan string) feature.Entitlements {
+	ent, err := h.addons.EntitlementsFor(r.Context(), storeID, plan)
+	if err != nil {
+		h.logger.Error("entitlements lookup", "err", err, "store_id", storeID.String())
+		return feature.EntitlementsFor(plan, nil)
+	}
+	return ent
+}
+
 // toSubDTO builds the response DTO. Pricing is injected from the
 // caller so we don't have to plumb the plans repo through a free
 // function — handlers that already have ctx + repo can do the lookup.
-func toSubDTO(s *repository.Subscription, proCents, bisnisCents int64) subscriptionDTO {
+func toSubDTO(s *repository.Subscription, proCents, bisnisCents int64, ent feature.Entitlements) subscriptionDTO {
+	codes := make([]string, 0, len(ent.Addons))
+	for _, a := range feature.AddonOrder {
+		if ent.Addons[a] {
+			codes = append(codes, string(a))
+		}
+	}
 	out := subscriptionDTO{
 		Plan: s.Plan, Status: s.Status,
 		ProPriceCents:    proCents,
 		BisnisPriceCents: bisnisCents,
-		Features:         feature.ForPlan(s.Plan),
+		Features:         ent.Granted(),
+		Addons:           codes,
 	}
 	formatPtr := func(t *time.Time) *string {
 		if t == nil {
@@ -214,7 +239,8 @@ func (h *SubscriptionHandler) Get(w http.ResponseWriter, r *http.Request) {
 				Plan: "free", Status: "active",
 				ProPriceCents:    proCents,
 				BisnisPriceCents: bisnisCents,
-				Features:         feature.ForPlan("free"),
+				Features:         feature.EntitlementsFor("free", nil).Granted(),
+				Addons:           []string{},
 			},
 			"invoices": []invoiceDTO{},
 		})
@@ -236,7 +262,7 @@ func (h *SubscriptionHandler) Get(w http.ResponseWriter, r *http.Request) {
 		out = append(out, toInvoiceDTO(inv))
 	}
 
-	dto := toSubDTO(sub, proCents, bisnisCents)
+	dto := toSubDTO(sub, proCents, bisnisCents, h.entFor(r, store.ID, sub.Plan))
 	productCount, _ := h.products.CountAll(r.Context(), store.ID)
 	orderCount, _ := h.orders.CountThisMonth(r.Context(), store.ID)
 	dto.Quotas = map[string]quotaUsage{
@@ -440,7 +466,8 @@ func (h *SubscriptionHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, map[string]any{
 		"subscription": toSubDTO(sub,
 			h.priceForPlan(r.Context(), "pro"),
-			h.priceForPlan(r.Context(), "bisnis")),
+			h.priceForPlan(r.Context(), "bisnis"),
+			h.entFor(r, store.ID, sub.Plan)),
 	})
 }
 
@@ -467,7 +494,8 @@ func (h *SubscriptionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, map[string]any{
 		"subscription": toSubDTO(sub,
 			h.priceForPlan(r.Context(), "pro"),
-			h.priceForPlan(r.Context(), "bisnis")),
+			h.priceForPlan(r.Context(), "bisnis"),
+			h.entFor(r, store.ID, sub.Plan)),
 	})
 }
 
@@ -531,8 +559,51 @@ func (h *SubscriptionHandler) Checkout(w http.ResponseWriter, r *http.Request) {
 	}
 	notes := "Upgrade " + planLabel + " · " + intToStr(months) + " bulan · " + orderID
 
-	inv, err := h.subs.CreateCheckoutInvoice(r.Context(), store.ID, sub.ID,
-		amountCents, "midtrans", orderID, tier, months, notes,
+	// The plan is one line; every add-on the store holds is another.
+	//
+	// Add-ons are billed at RENEWAL, not when they are switched on — so
+	// this is where an add-on activated mid-period finally gets charged,
+	// as a whole month. There is no proration anywhere in this path, which
+	// is why every figure on the invoice is one a seller can check.
+	lines := []repository.InvoiceLine{{
+		Kind: "plan", Code: tier,
+		Description:    "SellOn " + planLabel,
+		Months:         months,
+		UnitPriceCents: amountCents / int64(months),
+		AmountCents:    amountCents,
+	}}
+	// Bisnis already bundles everything, so charging add-ons on top would
+	// bill the same features twice.
+	if tier != "bisnis" {
+		held, aerr := h.addons.ListForStore(r.Context(), store.ID)
+		if aerr != nil {
+			h.logger.Error("checkout: list addons", "err", aerr)
+			response.Error(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		for _, row := range held {
+			a, ferr := h.addons.FindAddon(r.Context(), row.AddonCode)
+			if ferr != nil {
+				// A retired add-on the store still holds. Skip it rather
+				// than charge for something no longer sold.
+				h.logger.Warn("checkout: skipping unknown addon",
+					"code", row.AddonCode, "err", ferr)
+				continue
+			}
+			amt := a.PriceForMonths(months)
+			lines = append(lines, repository.InvoiceLine{
+				Kind: "addon", Code: a.Code,
+				Description:    a.Name,
+				Months:         months,
+				UnitPriceCents: amt / int64(months),
+				AmountCents:    amt,
+			})
+			amountCents += amt
+		}
+	}
+
+	inv, err := h.subs.CreateCheckoutInvoiceWithLines(r.Context(), store.ID, sub.ID,
+		amountCents, "midtrans", orderID, tier, months, notes, lines,
 	)
 	if err != nil {
 		h.logger.Error("checkout: create invoice", "err", err)
@@ -558,14 +629,10 @@ func (h *SubscriptionHandler) Checkout(w http.ResponseWriter, r *http.Request) {
 		CustomerEmail: customerEmail,
 		CustomerPhone: store.WhatsAppNumber,
 		ServerKey:     h.platformServerKey,
-		Items: []payments.SnapItem{
-			{
-				ID:       "sellon-" + tier,
-				Name:     "SellOn " + planLabel + " — " + intToStr(months) + " bulan",
-				Price:    amountCents,
-				Quantity: 1,
-			},
-		},
+		// One Snap item per invoice line, so the Midtrans receipt reads
+		// the same as the invoice. Their gross_amount must equal the sum
+		// of item prices or the charge is rejected outright.
+		Items: snapItemsFor(lines, months),
 	})
 	if err != nil {
 		h.logger.Error("midtrans snap subs", "err", err, "order_id", orderID)
@@ -745,4 +812,22 @@ func (h *SubscriptionHandler) sendUpgradeRequestEmail(
 		Text:    text,
 		HTML:    htmlBody,
 	})
+}
+
+// snapItemsFor mirrors the invoice breakdown into Midtrans line items.
+//
+// Midtrans rejects a transaction whose gross_amount does not equal the sum
+// of its items, which makes this the second place the lines have to add up
+// — and a useful backstop on the first.
+func snapItemsFor(lines []repository.InvoiceLine, months int) []payments.SnapItem {
+	out := make([]payments.SnapItem, 0, len(lines))
+	for _, l := range lines {
+		out = append(out, payments.SnapItem{
+			ID:       "sellon-" + l.Kind + "-" + l.Code,
+			Name:     l.Description + " — " + intToStr(months) + " bulan",
+			Price:    l.AmountCents,
+			Quantity: 1,
+		})
+	}
+	return out
 }

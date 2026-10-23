@@ -134,7 +134,9 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	tableHandler := handler.NewTableHandler(tableRepo, stores, subscriptions, auditLogger, logger)
 	kdsHandler := handler.NewKDSHandler(kitchenRepo, stores, broker, logger)
 	bannerHandler := handler.NewBannerHandler(bannerRepo, storageClient, logger)
-	sellerBannerHandler := handler.NewSellerBannerHandler(sellerBannerRepo, stores, subscriptions, storageClient, logger)
+	addonRepo := repository.NewAddonRepo(pool)
+	addonHandler := handler.NewAddonHandler(addonRepo, subscriptions, stores, auditLogger, logger)
+	sellerBannerHandler := handler.NewSellerBannerHandler(sellerBannerRepo, stores, subscriptions, addonRepo, storageClient, logger)
 	paymentHandler := handler.NewPaymentHandler(gateways, stores, encryptor, midtransClient, auditLogger, logger, cfg.WebhookBaseURL)
 	dashHandler := handler.NewDashboardHandler(stores, products, orders, customers, logger)
 	storefrontHandler := handler.NewStorefrontHandler(
@@ -153,7 +155,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	promoHandler := handler.NewPromoHandler(promos, stores, subscriptions, planRepo, auditLogger, logger)
 	reportsHandler := handler.NewReportsHandler(stores, reports, orders, subscriptions, anthropicClient, logger)
 	subscriptionHandler := handler.NewSubscriptionHandler(
-		subscriptions, stores, products, orders, users, planRepo,
+		subscriptions, addonRepo, stores, products, orders, users, planRepo,
 		midtransClient, cfg.PlatformMidtransServerKey,
 		storageClient, mailer, cfg.BillingNotifyEmail, publicWebURL,
 		auditLogger, logger,
@@ -352,7 +354,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 
 				// feat gates a route (group) behind a Bisnis-tier feature.
 				feat := func(f feature.Feature) func(http.Handler) http.Handler {
-					return middleware.RequireFeature(f, stores, subscriptions)
+					return middleware.RequireFeature(f, stores, subscriptions, addonRepo)
 				}
 
 				r.Get("/dashboard/stats", dashHandler.Stats)
@@ -555,6 +557,13 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 					r.Post("/checkout", subscriptionHandler.Checkout)
 					r.Post("/cancel", subscriptionHandler.Cancel)
 					r.Post("/resume", subscriptionHandler.Resume)
+
+					// Add-ons: Bisnis features sold one at a time on top of
+					// Pro. Activating charges nothing now — it joins the
+					// next renewal invoice.
+					r.Get("/addons", addonHandler.List)
+					r.Post("/addons/{code}", addonHandler.Activate)
+					r.Delete("/addons/{code}", addonHandler.Cancel)
 				})
 
 				r.Route("/staff", func(r chi.Router) {

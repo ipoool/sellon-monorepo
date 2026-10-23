@@ -56,7 +56,8 @@ func (h *StorefrontHandler) MetaFeed(w http.ResponseWriter, r *http.Request) {
 		writeEmptyFeed(w)
 		return
 	}
-	if plan, perr := h.subs.GetPlan(r.Context(), store.ID); perr == nil && !feature.HasFeature(plan, feature.MetaIntegration) {
+	if plan, perr := h.subs.GetPlan(r.Context(), store.ID); perr == nil &&
+		!feature.EntitlementsFor(plan, nil).Has(feature.MetaIntegration) {
 		writeEmptyFeed(w)
 		return
 	}
