@@ -554,9 +554,14 @@ class _PaymentView extends StatelessWidget {
         style: SellonText.h1.copyWith(color: BoothSurface.textPrimary),
       ),
       const SizedBox(height: SellonSpacing.lg),
-      Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.center,
+      // The QR and the amount sit side by side when there is width and
+      // stack when there is not — in portrait a Row squeezed the QR to the
+      // point where a phone camera could not lock onto it.
+      Wrap(
+        alignment: WrapAlignment.center,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: SellonSpacing.xl,
+        runSpacing: SellonSpacing.lg,
         children: [
           Container(
             padding: const EdgeInsets.all(20),
@@ -567,7 +572,6 @@ class _PaymentView extends StatelessWidget {
             ),
             child: QrView(data: qrData, size: 300),
           ),
-          const SizedBox(width: SellonSpacing.xl),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
@@ -819,8 +823,11 @@ class _ShotsView extends StatelessWidget {
         style: SellonText.h1.copyWith(color: BoothSurface.textPrimary),
       ),
       const SizedBox(height: SellonSpacing.lg),
-      Row(
-        mainAxisAlignment: MainAxisAlignment.center,
+      // Wrap, not Row: four fixed-width thumbnails do not fit a portrait
+      // tablet, and a Row answers that with an overflow stripe rather than
+      // a second line.
+      Wrap(
+        alignment: WrapAlignment.center,
         children: [
           for (var i = 0; i < total; i++)
             Padding(
@@ -835,8 +842,10 @@ class _ShotsView extends StatelessWidget {
         ],
       ),
       const SizedBox(height: SellonSpacing.xl),
-      Row(
-        mainAxisAlignment: MainAxisAlignment.center,
+      Wrap(
+        alignment: WrapAlignment.center,
+        spacing: SellonSpacing.md,
+        runSpacing: SellonSpacing.sm,
         children: [
           PillButton(
             label: 'Ulangi',
@@ -844,7 +853,6 @@ class _ShotsView extends StatelessWidget {
             variant: PillVariant.secondary,
             onPressed: onRetake,
           ),
-          const SizedBox(width: SellonSpacing.md),
           PillButton(
             // On the last shot this leads to the preview, not the printer —
             // "Lihat hasil" says that, where "Cetak" would promise paper one
@@ -1360,8 +1368,11 @@ class _ThankYouView extends StatelessWidget {
       if (shareUrl != null) ...[
         TintedPanel(
           padding: const EdgeInsets.symmetric(horizontal: 36, vertical: 28),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
+          child: Wrap(
+            alignment: WrapAlignment.center,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: SellonSpacing.lg,
+            runSpacing: SellonSpacing.md,
             children: [
               Column(
                 mainAxisSize: MainAxisSize.min,
@@ -1382,7 +1393,6 @@ class _ThankYouView extends StatelessWidget {
                   Text('Link berlaku 7 hari', style: SellonText.label),
                 ],
               ),
-              const SizedBox(width: SellonSpacing.lg),
               SizedBox(
                 width: 300,
                 child: Column(

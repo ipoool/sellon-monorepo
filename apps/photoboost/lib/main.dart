@@ -60,7 +60,17 @@ void main() async {
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
   ]);
-  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  // edgeToEdge, not immersiveSticky.
+  //
+  // immersiveSticky re-asserts itself whenever anything else takes the
+  // window — including the soft keyboard. On the pairing screen that became
+  // a fight the IME kept losing (onFailed at PHASE_CLIENT_VIEW_SERVED), and
+  // the retry loop starved input dispatch until Android killed the app.
+  //
+  // A booth still needs the system bars out of the way; edgeToEdge draws
+  // under them without claiming exclusive ownership of the window. True
+  // kiosk lockdown is lock-task's job, not a UI mode's.
+  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
   runApp(const PhotoBoostApp());
 }

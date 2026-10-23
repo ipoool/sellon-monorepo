@@ -73,11 +73,16 @@ class _PairingScreenState extends State<PairingScreen> {
   @override
   void initState() {
     super.initState();
-    // Raise the keyboard on arrival: this screen has exactly one thing to
-    // do, and making the technician tap a field first is a step for nothing.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _focus.requestFocus();
-    });
+    // Deliberately NOT auto-focusing.
+    //
+    // Requesting focus on arrival fought immersiveSticky: the system kept
+    // reclaiming the window, the IME kept answering onFailed at
+    // PHASE_CLIENT_VIEW_SERVED, and the retry loop starved input dispatch
+    // until Android killed the app with "isn't responding". A saved step is
+    // not worth a booth that freezes on the first screen a technician sees.
+    //
+    // The field is large, labelled, and there is a button that opens the
+    // keyboard. Tapping it once is the cost.
   }
 
   @override
