@@ -582,7 +582,7 @@ export function AnalyticsDashboard({
             <Lock className="size-7" aria-hidden />
           </div>
           <h2 className="mt-4 font-display text-xl font-semibold text-neutral-900">
-            Keuangan & Arus Kas tersedia di paket Bisnis
+            Keuangan & Arus Kas ada di paket Analisa AI
           </h2>
           <p className="mx-auto mt-2 max-w-md text-sm text-neutral-600">
             Buka laba kotor & margin, chart tren pendapatan, arus kas masuk/keluar,
@@ -592,7 +592,7 @@ export function AnalyticsDashboard({
           <Link href="/settings/subscription" className="mt-5 inline-block">
             <Button size="sm">
               <Zap className="size-4" aria-hidden />
-              Upgrade ke Bisnis
+              Aktifkan Analisa AI
             </Button>
           </Link>
         </Card>

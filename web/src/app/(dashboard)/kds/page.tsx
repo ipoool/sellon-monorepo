@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { KitchenBoard } from "@/components/pos/kitchen-board";
-import { getMe, getPlan } from "@/lib/server-auth";
+import { getMe, hasFeature } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import type { DineInSettings, KitchenOrder } from "@/lib/types";
 
@@ -12,7 +12,7 @@ export default async function KDSPage() {
   const me = await getMe();
   if (!me) redirect("/login");
   // Dine-in / KDS is a Bisnis feature.
-  if ((await getPlan()) !== "bisnis") redirect("/settings/subscription");
+  if (!(await hasFeature("table_qr"))) redirect("/settings/subscription");
   // The board only exists when the seller turned KDS on in Meja & QR settings.
   // With it off, dine-in orders skip the kitchen pipeline entirely, so there's
   // nothing to display — send them to the setting instead.

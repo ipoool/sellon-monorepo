@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { getMe, getPlan } from "@/lib/server-auth";
+import { getMe, hasFeature } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import { formatRupiah } from "@/lib/format";
 import { UpgradePrompt } from "@/components/ui/upgrade-prompt";
@@ -60,7 +60,7 @@ export default async function POSTransactionsPage({
 }) {
   const me = await getMe();
   if (!me) redirect("/login");
-  if ((await getPlan()) !== "bisnis")
+  if (!(await hasFeature("pos")))
     return <UpgradePrompt feature="Riwayat Transaksi POS" />;
 
   const sp = await searchParams;

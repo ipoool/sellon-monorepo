@@ -44,8 +44,13 @@ export default async function POSPage() {
   ]);
 
   const plan = subRes?.subscription?.plan ?? "free";
+  // Gate on the entitlement, not the tier. Kasir is sold as an add-on on
+  // top of Pro, and the API already grants `pos` to a store holding it —
+  // asking for "bisnis" here locked a paying customer out of the exact
+  // package on their invoice.
+  const hasPOS = (subRes?.subscription?.features ?? []).includes("pos");
 
-  if (plan !== "bisnis") {
+  if (!hasPOS) {
     return (
       <div className="flex min-h-svh flex-col items-center justify-center gap-4 p-8 text-center">
         <div className="flex size-14 items-center justify-center rounded-full bg-amber-50 text-amber-600">
@@ -53,11 +58,14 @@ export default async function POSPage() {
         </div>
         <div className="max-w-md">
           <h1 className="font-display text-2xl font-semibold text-neutral-900">
-            Kasir POS hanya untuk paket Bisnis
+            Kasir POS ada di Paket Kasir
           </h1>
           <p className="mt-2 text-neutral-600">
-            Modul kasir untuk toko fisik: terima walk-in customer, kelola shift, cetak struk thermal,
-            split payment, dan banyak lagi. Upgrade ke Bisnis untuk membukanya.
+            Modul kasir untuk toko fisik: terima walk-in customer, kelola
+            shift, cetak struk thermal, split payment, dan banyak lagi.
+            {plan === "free"
+              ? " Berlangganan Pro dulu, lalu aktifkan Paket Kasir."
+              : " Aktifkan Paket Kasir untuk membukanya — bayar yang dipakai saja."}
           </p>
         </div>
         <div className="flex gap-3">
@@ -66,7 +74,7 @@ export default async function POSPage() {
             className="inline-flex items-center gap-2 rounded-lg bg-brand-700 px-6 py-3 text-sm font-semibold text-white hover:bg-brand-800"
           >
             <Zap className="size-4" aria-hidden />
-            Upgrade ke Bisnis
+            {plan === "free" ? "Lihat paket" : "Aktifkan Paket Kasir"}
           </Link>
           <Link
             href="/dashboard"

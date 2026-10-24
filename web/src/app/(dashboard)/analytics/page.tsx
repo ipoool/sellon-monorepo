@@ -55,9 +55,10 @@ export default async function LaporanAnalyticsPage({
 
   const report = reportRes ?? null;
   const overview = ovRes?.overview ?? null;
-  const plan = subRes?.subscription?.plan;
-  // Keuangan + Analisa AI are Bisnis-only; the sales summary stays open to all.
-  const isBisnis = plan === "bisnis";
+  // Keuangan + Analisa AI sit in the Analisa AI add-on; the sales summary
+  // stays open to all. Gate on the entitlement rather than the tier, so a
+  // Pro store that activated the package gets what it pays for.
+  const hasAI = (subRes?.subscription?.features ?? []).includes("ai_analytics");
 
   return (
     <DashboardShell
@@ -83,7 +84,7 @@ export default async function LaporanAnalyticsPage({
               <span className="hidden sm:inline">Export</span>
             </Button>
           </a>
-          <AnalyticsAiButton from={from} to={to} isPaid={isBisnis} />
+          <AnalyticsAiButton from={from} to={to} isPaid={hasAI} />
         </div>
       }
     >
@@ -93,7 +94,7 @@ export default async function LaporanAnalyticsPage({
         entries={cashRes?.entries ?? []}
         from={from}
         to={to}
-        isPaid={isBisnis}
+        isPaid={hasAI}
       />
     </DashboardShell>
   );

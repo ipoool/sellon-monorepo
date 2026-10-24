@@ -91,6 +91,11 @@ export function BisnisGateProvider({ children }: { children: ReactNode }) {
         aria-labelledby="feature-gate-title"
         className="fixed left-1/2 top-1/2 m-0 w-[min(440px,92vw)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border border-neutral-200 bg-white p-0 text-left shadow-popout backdrop:bg-neutral-900/50 backdrop:backdrop-blur-sm"
       >
+        {/* Body only while there is a subject. The <dialog> itself stays
+            mounted for showModal(), but rendering its contents with
+            `open === null` put the literal text "undefined belum aktif"
+            into the DOM of every dashboard page. */}
+        {open && (
         <div className="flex flex-col items-center px-6 pb-6 pt-8 text-center">
           <button
             type="button"
@@ -108,7 +113,7 @@ export function BisnisGateProvider({ children }: { children: ReactNode }) {
             id="feature-gate-title"
             className="mt-4 font-display text-lg font-semibold text-neutral-900"
           >
-            {pack ? `${open?.label} ada di ${pack.name}` : `${open?.label} belum aktif`}
+            {pack ? `${open.label} ada di ${pack.name}` : `${open.label} belum aktif`}
           </h2>
 
           {pack ? (
@@ -171,6 +176,7 @@ export function BisnisGateProvider({ children }: { children: ReactNode }) {
             </Button>
           </div>
         </div>
+        )}
       </dialog>
     </Ctx.Provider>
   );

@@ -1,5 +1,5 @@
 import { serverApi } from "@/lib/server-api";
-import { getPlan } from "@/lib/server-auth";
+import { hasFeature } from "@/lib/server-auth";
 import { CheckoutFieldsManager } from "@/components/dashboard/checkout-fields-manager";
 import { UpgradePrompt } from "@/components/ui/upgrade-prompt";
 import type { CheckoutConfig, Store } from "@/lib/types";
@@ -9,7 +9,7 @@ export const metadata = { title: "Field Checkout" };
 const DEFAULT_CONFIG: CheckoutConfig = { email_mode: "optional", fields: [] };
 
 export default async function CheckoutFieldsPage() {
-  if ((await getPlan()) !== "bisnis") {
+  if (!(await hasFeature("checkout_fields"))) {
     return <UpgradePrompt feature="Custom Field Checkout" />;
   }
   const data = await serverApi<{ store: Store | null }>("/api/v1/store");

@@ -1,5 +1,5 @@
 import { serverApi } from "@/lib/server-api";
-import { getPlan } from "@/lib/server-auth";
+import { hasFeature } from "@/lib/server-auth";
 import { LoyaltySettingsForm } from "@/components/dashboard/loyalty-settings-form";
 import { UpgradePrompt } from "@/components/ui/upgrade-prompt";
 
@@ -12,7 +12,7 @@ type LoyaltyConfig = {
 };
 
 export default async function LoyaltySettingsPage() {
-  if ((await getPlan()) !== "bisnis") {
+  if (!(await hasFeature("loyalty"))) {
     return <UpgradePrompt feature="Loyalti" />;
   }
   const res = await serverApi<{ config: LoyaltyConfig }>("/api/v1/pos/loyalty/config");

@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { OpenShiftLauncher } from "@/components/pos/open-shift-launcher";
-import { getMe, getPlan } from "@/lib/server-auth";
+import { getMe, hasFeature } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import { formatRupiah } from "@/lib/format";
 import { UpgradePrompt } from "@/components/ui/upgrade-prompt";
@@ -39,7 +39,7 @@ export default async function POSSessionsPage({
 }) {
   const me = await getMe();
   if (!me) redirect("/login");
-  if ((await getPlan()) !== "bisnis") return <UpgradePrompt feature="Riwayat Shift Kasir" />;
+  if (!(await hasFeature("pos"))) return <UpgradePrompt feature="Riwayat Shift Kasir" />;
 
   const sp = await searchParams;
   const params = new URLSearchParams();

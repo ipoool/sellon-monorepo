@@ -4,7 +4,7 @@ import { ArrowLeft, Clock, Download } from "lucide-react";
 
 import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { Badge } from "@/components/ui/badge";
-import { getMe, getPlan } from "@/lib/server-auth";
+import { getMe, hasFeature } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import { formatRupiah } from "@/lib/format";
 import { UpgradePrompt } from "@/components/ui/upgrade-prompt";
@@ -33,7 +33,7 @@ export default async function SessionDetailPage({
 }) {
   const me = await getMe();
   if (!me) redirect("/login");
-  if ((await getPlan()) !== "bisnis") return <UpgradePrompt feature="Detail Shift Kasir" />;
+  if (!(await hasFeature("pos"))) return <UpgradePrompt feature="Detail Shift Kasir" />;
 
   const { id } = await params;
   const [summaryRes, movementsRes, ordersRes] = await Promise.all([

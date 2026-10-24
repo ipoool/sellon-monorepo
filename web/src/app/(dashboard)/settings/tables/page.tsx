@@ -1,5 +1,5 @@
 import { serverApi } from "@/lib/server-api";
-import { getPlan } from "@/lib/server-auth";
+import { hasFeature } from "@/lib/server-auth";
 import { TablesManager } from "@/components/dashboard/tables-manager";
 import { UpgradePrompt } from "@/components/ui/upgrade-prompt";
 import type { RestaurantTable, DineInSettings, Store } from "@/lib/types";
@@ -7,7 +7,7 @@ import type { RestaurantTable, DineInSettings, Store } from "@/lib/types";
 export const metadata = { title: "Meja & QR" };
 
 export default async function TablesSettingsPage() {
-  if ((await getPlan()) !== "bisnis") {
+  if (!(await hasFeature("table_qr"))) {
     return <UpgradePrompt feature="Meja & QR (Dine-in)" />;
   }
   const [tablesRes, dineinRes, storeRes] = await Promise.all([
