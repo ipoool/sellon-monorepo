@@ -554,6 +554,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 
 				r.Route("/subscription", func(r chi.Router) {
 					r.Get("/", subscriptionHandler.Get)
+					r.Get("/quote", subscriptionHandler.Quote)
 					r.Post("/request-upgrade", subscriptionHandler.RequestUpgrade)
 					r.Post("/checkout", subscriptionHandler.Checkout)
 					r.Post("/cancel", subscriptionHandler.Cancel)

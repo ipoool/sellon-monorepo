@@ -44,6 +44,21 @@ const PAYMENT_BANK = "BCA";
 const PAYMENT_ACCOUNT_NO = "2040144776";
 const PAYMENT_ACCOUNT_NAME = "Asep Saepulloh";
 
+/** The invoice an upgrade would produce, straight from the API. */
+type UpgradeQuote = {
+  tier: string;
+  months: number;
+  total_cents: number;
+  lines: {
+    kind: "plan" | "addon";
+    code: string;
+    description: string;
+    months: number;
+    unit_price_cents: number;
+    amount_cents: number;
+  }[];
+};
+
 type Props = {
   subscription: Subscription;
   // Invoice history — used here only to detect "ada pending manual
@@ -68,6 +83,7 @@ export function BerlanggananActions({
     subscription.plan === "bisnis" ? "bisnis" : "pro",
   );
   const [months, setMonths] = useState(1);
+  const [quoted, setQuoted] = useState<UpgradeQuote | null>(null);
   const [busy, setBusy] = useState(false);
   // Transfer receipt. Held as a File until submit so the upload happens in
   // the same request that records the invoice — a separate upload call could
@@ -117,6 +133,32 @@ export function BerlanggananActions({
     };
   }, []);
 
+  // Re-quote whenever the dialog opens or the seller changes tier/duration.
+  // The answer carries the selection it was computed for, so a response
+  // that lands after the seller has moved on is simply not the current
+  // quote any more — see `quote` below. That is why nothing is cleared on
+  // the way in: a render-time match is the staleness check, and it costs
+  // no extra render.
+  useEffect(() => {
+    if (!showUpgrade) return;
+    let live = true;
+    fetch(
+      `${apiBase}/api/v1/subscription/quote?tier=${tier}&months=${months}`,
+      { credentials: "include" },
+    )
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: UpgradeQuote | null) => {
+        if (live && d) setQuoted(d);
+      })
+      .catch(() => {
+        // Offline or API down. The plan-only figure below still renders,
+        // and the seller can read the real total off the WhatsApp reply.
+      });
+    return () => {
+      live = false;
+    };
+  }, [showUpgrade, tier, months]);
+
   // Lookup plans by tier. Fallback ke subscription.*_price_cents kalau
   // /api/v1/plans gagal (mis. API down saat SSR) supaya dialog tetap
   // bisa render harga yang masuk akal.
@@ -137,7 +179,21 @@ export function BerlanggananActions({
   const effectivePerMonthCents = usesYearlyRate
     ? yearlyPerMonthCents
     : tierPriceCents;
-  const totalCents = effectivePerMonthCents * months;
+  const planTotalCents = effectivePerMonthCents * months;
+  // The seller types this number into a banking app, so it has to be the
+  // number the invoice will carry — plan plus every add-on the store
+  // holds. Computing it here from the plan price alone is how a store on
+  // Pro + Kasir got told to transfer Rp 99.000 against a Rp 198.000
+  // invoice. `quote` comes from the API, which builds it with the same
+  // function that writes the real lines; the local figure is only the
+  // fallback for the moment before it arrives.
+  // Only honour a quote that answers the CURRENT selection; one still in
+  // flight for the previous tier or duration is not an answer to this
+  // screen.
+  const quote =
+    quoted && quoted.tier === tier && quoted.months === months ? quoted : null;
+  const totalCents = quote?.total_cents ?? planTotalCents;
+  const addonLines = (quote?.lines ?? []).filter((l) => l.kind === "addon");
   const savingCents = usesYearlyRate
     ? (tierPriceCents - yearlyPerMonthCents) * months
     : 0;
@@ -483,6 +539,32 @@ export function BerlanggananActions({
               <option value="6">6 bulan</option>
               <option value="12">12 bulan</option>
             </Select>
+            {/* Itemised the moment there is more than one thing being
+                bought. A seller who activated Kasir last week should see
+                it arrive on this bill rather than discover the total grew
+                and wonder whether they were overcharged. */}
+            {addonLines.length > 0 && (
+              <ul className="mt-1 flex flex-col gap-1 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-700">
+                <li className="flex items-center justify-between">
+                  <span>
+                    SellOn {tierLabel} · {months} bulan
+                  </span>
+                  <span className="font-medium">
+                    {formatRupiah(planTotalCents)}
+                  </span>
+                </li>
+                {addonLines.map((l) => (
+                  <li key={l.code} className="flex items-center justify-between">
+                    <span>
+                      {l.description} · {l.months} bulan
+                    </span>
+                    <span className="font-medium">
+                      {formatRupiah(l.amount_cents)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
             <p className="mt-1 text-sm font-medium text-neutral-900">
               Total: {formatRupiah(totalCents)}
             </p>

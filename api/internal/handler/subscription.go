@@ -905,3 +905,60 @@ func snapItemsFor(lines []repository.InvoiceLine, months int) []payments.SnapIte
 	}
 	return out
 }
+
+// === Quote ===
+
+// GET /api/v1/subscription/quote?tier=pro&months=1 — the invoice this
+// upgrade WOULD produce, without producing it.
+//
+// Manual bank transfer is the only way to pay for a subscription right
+// now, which means the seller reads a number off this screen and types it
+// into their banking app by hand. The frontend used to compute that number
+// itself from the plan price, so a store holding add-ons was told to send
+// Rp 99.000 while RequestUpgrade wrote an invoice for Rp 198.000 — the
+// transfer then matches nothing, and someone has to sort it out over
+// WhatsApp.
+//
+// So the quote comes from quoteFor, the same function both payment paths
+// use to build the real lines. The two cannot disagree because there is
+// only one of them.
+func (h *SubscriptionHandler) Quote(w http.ResponseWriter, r *http.Request) {
+	store, err := h.storeFor(r)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "toko belum dibuat")
+		return
+	}
+	months, _ := strconv.Atoi(r.URL.Query().Get("months"))
+	tier, months, errMsg := resolveUpgradeRequest(
+		r.URL.Query().Get("tier"), r.URL.Query().Get("plan"), months)
+	if errMsg != "" {
+		response.Error(w, http.StatusBadRequest, errMsg)
+		return
+	}
+
+	lines, total, qerr := h.quoteFor(
+		r, store.ID, tier, months, h.priceForMonths(r.Context(), tier, months))
+	if qerr != nil {
+		h.logger.Error("quote", "err", qerr)
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	out := make([]map[string]any, 0, len(lines))
+	for _, l := range lines {
+		out = append(out, map[string]any{
+			"kind":             l.Kind,
+			"code":             l.Code,
+			"description":      l.Description,
+			"months":           l.Months,
+			"unit_price_cents": l.UnitPriceCents,
+			"amount_cents":     l.AmountCents,
+		})
+	}
+	response.JSON(w, http.StatusOK, map[string]any{
+		"tier":        tier,
+		"months":      months,
+		"lines":       out,
+		"total_cents": total,
+	})
+}
