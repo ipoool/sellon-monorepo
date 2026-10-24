@@ -162,6 +162,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	)
 	plansHandler := handler.NewPlansHandler(planRepo, logger)
 	adminPlansHandler := handler.NewAdminPlansHandler(planRepo, platformAuditRepo, users, logger)
+	adminAddonsHandler := handler.NewAdminAddonsHandler(addonRepo, platformAuditRepo, users, logger)
 	downloadHandler := handler.NewDownloadHandler(downloadTokens, downloadLogs, storageClient, logger)
 	digitalDownloadHandler := handler.NewDigitalDownloadHandler(downloadTokens, downloadLogs, stores, logger)
 	buyerOTPs := repository.NewBuyerOTPRepo(pool)
@@ -685,6 +686,11 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 				r.Get("/stores", adminHandler.ListStores)
 				r.Get("/plans", adminPlansHandler.List)
 				r.Put("/plans/{tier}", adminPlansHandler.Update)
+
+				// Add-on pricing. Composition is not editable here on
+				// purpose — see AdminAddonsHandler.
+				r.Get("/addons", adminAddonsHandler.List)
+				r.Put("/addons/{code}", adminAddonsHandler.Update)
 				r.Get("/subscriptions/invoices", adminHandler.ListInvoices)
 				r.Post("/subscriptions/invoices/{id}/activate", adminHandler.ActivateInvoice)
 				r.Post("/subscriptions/invoices/{id}/reject", adminHandler.RejectInvoice)

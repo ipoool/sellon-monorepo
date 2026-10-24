@@ -755,6 +755,21 @@ export type Addon = AddonCatalogEntry & {
   free_until: string | null;
 };
 
+/** An add-on as the platform admin sees it: price, plus who holds it. */
+export type AdminAddon = {
+  code: AddonCode;
+  name: string;
+  description: string;
+  monthly_price_cents: number;
+  yearly_price_cents: number;
+  is_active: boolean;
+  sort_order: number;
+  /** Read-only: composition is owned by the API, not editable here. */
+  features: GatedFeature[];
+  /** How many stores hold it right now. */
+  active_stores: number;
+};
+
 /** One charge on an invoice: the plan, or an add-on. */
 export type InvoiceLine = {
   id: string;

@@ -265,3 +265,31 @@ func (r *AddonRepo) EntitlementsFor(ctx context.Context, storeID uuid.UUID, plan
 	}
 	return feature.EntitlementsFor(plan, codes), nil
 }
+
+// CountActiveByAddon returns how many stores hold each add-on right now.
+//
+// The admin editor shows it beside the retire switch: turning off
+// something forty stores are paying for should be a decision someone
+// makes on purpose, not one they discover afterwards.
+func (r *AddonRepo) CountActiveByAddon(ctx context.Context) (map[string]int, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT addon_code, count(*)
+		FROM store_addons
+		WHERE cancelled_at IS NULL
+		GROUP BY addon_code`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := map[string]int{}
+	for rows.Next() {
+		var code string
+		var n int
+		if err := rows.Scan(&code, &n); err != nil {
+			return nil, err
+		}
+		out[code] = n
+	}
+	return out, rows.Err()
+}
