@@ -755,6 +755,20 @@ export type Addon = AddonCatalogEntry & {
   free_until: string | null;
 };
 
+/**
+ * Where a seller sends their subscription payment. Manual bank transfer is
+ * the only way to pay, so these are served by the API rather than hard-coded
+ * in the bundle — correcting an account number must not need a deploy.
+ */
+export type BillingSettings = {
+  bank_name: string;
+  account_number: string;
+  account_name: string;
+  /** Digits only, country code included (628…). Used to build a wa.me link. */
+  support_whatsapp: string;
+  note: string;
+};
+
 /** An add-on as the platform admin sees it: price, plus who holds it. */
 export type AdminAddon = {
   code: AddonCode;

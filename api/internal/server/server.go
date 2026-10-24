@@ -135,6 +135,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	kdsHandler := handler.NewKDSHandler(kitchenRepo, stores, broker, logger)
 	bannerHandler := handler.NewBannerHandler(bannerRepo, storageClient, logger)
 	addonRepo := repository.NewAddonRepo(pool)
+	billingSettingsRepo := repository.NewBillingSettingsRepo(pool)
 	addonHandler := handler.NewAddonHandler(addonRepo, subscriptions, stores, auditLogger, logger)
 	sellerBannerHandler := handler.NewSellerBannerHandler(sellerBannerRepo, stores, subscriptions, addonRepo, storageClient, logger)
 	paymentHandler := handler.NewPaymentHandler(gateways, stores, encryptor, midtransClient, auditLogger, logger, cfg.WebhookBaseURL)
@@ -155,7 +156,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	promoHandler := handler.NewPromoHandler(promos, stores, subscriptions, planRepo, auditLogger, logger)
 	reportsHandler := handler.NewReportsHandler(stores, reports, orders, subscriptions, anthropicClient, logger)
 	subscriptionHandler := handler.NewSubscriptionHandler(
-		subscriptions, addonRepo, stores, products, orders, users, planRepo,
+		subscriptions, addonRepo, stores, products, orders, users, planRepo, billingSettingsRepo,
 		midtransClient, cfg.PlatformMidtransServerKey,
 		storageClient, mailer, cfg.BillingNotifyEmail, publicWebURL,
 		auditLogger, logger,
@@ -163,6 +164,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	plansHandler := handler.NewPlansHandler(planRepo, logger)
 	adminPlansHandler := handler.NewAdminPlansHandler(planRepo, platformAuditRepo, users, logger)
 	adminAddonsHandler := handler.NewAdminAddonsHandler(addonRepo, platformAuditRepo, users, logger)
+	adminBillingHandler := handler.NewAdminBillingHandler(billingSettingsRepo, platformAuditRepo, users, logger)
 	downloadHandler := handler.NewDownloadHandler(downloadTokens, downloadLogs, storageClient, logger)
 	digitalDownloadHandler := handler.NewDigitalDownloadHandler(downloadTokens, downloadLogs, stores, logger)
 	buyerOTPs := repository.NewBuyerOTPRepo(pool)
@@ -690,6 +692,8 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 
 				// Add-on pricing. Composition is not editable here on
 				// purpose — see AdminAddonsHandler.
+				r.Get("/billing-settings", adminBillingHandler.Get)
+				r.Put("/billing-settings", adminBillingHandler.Update)
 				r.Get("/addons", adminAddonsHandler.List)
 				r.Put("/addons/{code}", adminAddonsHandler.Update)
 				r.Get("/subscriptions/invoices", adminHandler.ListInvoices)

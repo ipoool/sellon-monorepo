@@ -31,6 +31,7 @@ type SubscriptionHandler struct {
 	orders            *repository.OrderRepo
 	users             *repository.UserRepo
 	plans             *repository.PlanRepo
+	billing           *repository.BillingSettingsRepo
 	midtrans          *payments.MidtransClient
 	platformServerKey string
 	storage           storage.Client
@@ -50,6 +51,7 @@ func NewSubscriptionHandler(
 	orders *repository.OrderRepo,
 	users *repository.UserRepo,
 	plans *repository.PlanRepo,
+	billing *repository.BillingSettingsRepo,
 	midtrans *payments.MidtransClient,
 	platformServerKey string,
 	storageClient storage.Client,
@@ -63,6 +65,7 @@ func NewSubscriptionHandler(
 		subs: subs, addons: addons, stores: stores, products: products, orders: orders,
 		users:              users,
 		plans:              plans,
+		billing:            billing,
 		midtrans:           midtrans,
 		platformServerKey:  platformServerKey,
 		storage:            storageClient,
@@ -270,6 +273,22 @@ func (h *SubscriptionHandler) storeFor(r *http.Request) (*repository.Store, erro
 func (h *SubscriptionHandler) Get(w http.ResponseWriter, r *http.Request) {
 	proCents := h.priceForPlan(r.Context(), "pro")
 	bisnisCents := h.priceForPlan(r.Context(), "bisnis")
+	// Where to send the transfer. Manual transfer is the only way to pay,
+	// so this travels with the subscription itself rather than sitting in
+	// the web bundle as a constant. A read failure degrades to empty
+	// fields — the dialog then points at WhatsApp support instead of
+	// showing a wrong account number.
+	billing, berr := h.billing.Get(r.Context())
+	if berr != nil {
+		h.logger.Error("subscription: billing settings", "err", berr)
+	}
+	billingOut := map[string]any{
+		"bank_name":        billing.BankName,
+		"account_number":   billing.AccountNumber,
+		"account_name":     billing.AccountName,
+		"support_whatsapp": billing.SupportWhatsApp,
+		"note":             billing.Note,
+	}
 
 	store, err := h.storeFor(r)
 	if errors.Is(err, repository.ErrStoreNotFound) {
@@ -282,6 +301,7 @@ func (h *SubscriptionHandler) Get(w http.ResponseWriter, r *http.Request) {
 				Addons:           []string{},
 			},
 			"invoices": []invoiceDTO{},
+			"billing":  billingOut,
 		})
 		return
 	}
@@ -313,6 +333,7 @@ func (h *SubscriptionHandler) Get(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, map[string]any{
 		"subscription": dto,
 		"invoices":     out,
+		"billing":      billingOut,
 	})
 }
 

@@ -22,6 +22,7 @@ import { Label } from "@/components/ui/label";
 import { formatRupiah, formatDateID } from "@/lib/format";
 import { quotaBullets } from "@/lib/plan-bullets";
 import type {
+  BillingSettings,
   PublicPlan,
   Subscription,
   SubscriptionInvoice,
@@ -38,11 +39,15 @@ function formatLongDate(iso: string): string {
   });
 }
 
-// Hard-coded for MVP - in production these should be tenant-configured.
-const SUPPORT_WA = "6281291006534"; // 0812 9100 6534
-const PAYMENT_BANK = "BCA";
-const PAYMENT_ACCOUNT_NO = "2040144776";
-const PAYMENT_ACCOUNT_NAME = "Asep Saepulloh";
+/**
+ * Pretty-print a wa.me number for display: 6281291006534 → 0812-9100-6534.
+ * The stored value is digits with a country code because that is what the
+ * link needs; a seller reads the local form.
+ */
+function formatWhatsApp(digits: string): string {
+  const local = digits.startsWith("62") ? "0" + digits.slice(2) : digits;
+  return local.replace(/(\d{4})(\d{4})(\d+)/, "$1-$2-$3");
+}
 
 /** The invoice an upgrade would produce, straight from the API. */
 type UpgradeQuote = {
@@ -69,13 +74,22 @@ type Props = {
   // Plans dari /api/v1/plans — supaya kartu tier di dialog upgrade
   // pakai deskripsi + fitur yang sama dengan landing & /platform/plans.
   plans: PublicPlan[];
+  // Rekening tujuan transfer, dari /api/v1/subscription. Dulu konstanta di
+  // bundle ini; sekarang satu baris di database supaya ganti rekening cukup
+  // lewat /platform/plans, tanpa deploy.
+  billing: BillingSettings;
 };
 
 export function BerlanggananActions({
   subscription,
   invoices,
   plans,
+  billing,
 }: Props) {
+  // An account number we did not receive is worse than none: a seller who
+  // transfers to a stale one loses real money. So the steps below degrade
+  // to "hubungi support" rather than guessing.
+  const hasAccount = Boolean(billing.bank_name && billing.account_number);
   const { refresh } = useRouter();
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [showCancel, setShowCancel] = useState(false);
@@ -580,23 +594,40 @@ export function BerlanggananActions({
             <p className="font-semibold">Cara bayar (manual untuk sekarang):</p>
             <ol className="mt-1.5 list-decimal space-y-1 pl-5">
               <li>
-                Transfer sebesar <strong>{formatRupiah(totalCents)}</strong> ke:
-                <div className="mt-1 rounded-md border border-warning/30 bg-white px-2.5 py-2 font-mono text-[11px] leading-snug">
-                  {PAYMENT_BANK} <strong>{PAYMENT_ACCOUNT_NO}</strong>
-                  <br />
-                  a/n {PAYMENT_ACCOUNT_NAME}
-                </div>
+                Transfer sebesar <strong>{formatRupiah(totalCents)}</strong>{" "}
+                {hasAccount ? (
+                  <>
+                    ke:
+                    <div className="mt-1 rounded-md border border-warning/30 bg-white px-2.5 py-2 font-mono text-[11px] leading-snug">
+                      {billing.bank_name}{" "}
+                      <strong>{billing.account_number}</strong>
+                      <br />
+                      a/n {billing.account_name}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    — hubungi support dulu untuk nomor rekeningnya, jangan
+                    transfer ke rekening lama.
+                  </>
+                )}
               </li>
               <li>
-                Lampirkan bukti transfer di bawah ini — atau kirim ke{" "}
-                <a
-                  href={`https://wa.me/${SUPPORT_WA}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-medium text-success hover:underline"
-                >
-                  WhatsApp 0812-9100-6534
-                </a>
+                Lampirkan bukti transfer di bawah ini
+                {billing.support_whatsapp ? (
+                  <>
+                    {" "}
+                    — atau kirim ke{" "}
+                    <a
+                      href={`https://wa.me/${billing.support_whatsapp}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-medium text-success hover:underline"
+                    >
+                      WhatsApp {formatWhatsApp(billing.support_whatsapp)}
+                    </a>
+                  </>
+                ) : null}
                 .
               </li>
               <li>
@@ -604,6 +635,11 @@ export function BerlanggananActions({
                 dalam 1×24 jam.
               </li>
             </ol>
+            {billing.note && (
+              <p className="mt-2 border-t border-warning/30 pt-2">
+                {billing.note}
+              </p>
+            )}
           </div>
 
           {/* Transfer receipt. Optional on purpose: WhatsApp stays a valid
@@ -698,17 +734,22 @@ export function BerlanggananActions({
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-2 border-t border-neutral-200 bg-neutral-50 px-5 py-3">
-          <a
-            href={`https://wa.me/${SUPPORT_WA}?text=${encodeURIComponent(
-              `Halo SellOn, saya mau upgrade ${tierLabel} ${months} bulan (${formatRupiah(totalCents)}).`,
-            )}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 text-sm font-medium text-neutral-700 transition-colors hover:border-success/40 hover:text-success"
-          >
-            <MessageCircle className="size-4" aria-hidden />
-            Chat support
-          </a>
+          {/* Hidden rather than dead when no support number is configured:
+              a link to wa.me/ with nothing after it opens WhatsApp on a
+              blank chat, which reads as a broken product. */}
+          {billing.support_whatsapp && (
+            <a
+              href={`https://wa.me/${billing.support_whatsapp}?text=${encodeURIComponent(
+                `Halo SellOn, saya mau upgrade ${tierLabel} ${months} bulan (${formatRupiah(totalCents)}).`,
+              )}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 text-sm font-medium text-neutral-700 transition-colors hover:border-success/40 hover:text-success"
+            >
+              <MessageCircle className="size-4" aria-hidden />
+              Chat support
+            </a>
+          )}
           <Button
             variant={pendingManual && !proofFile ? "outline" : "default"}
             onClick={requestUpgrade}

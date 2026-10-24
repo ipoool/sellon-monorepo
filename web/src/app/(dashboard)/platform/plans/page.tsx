@@ -2,10 +2,11 @@ import { redirect } from "next/navigation";
 
 import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { AdminAddonsEditor } from "@/components/admin/admin-addons-editor";
+import { AdminBillingEditor } from "@/components/admin/admin-billing-editor";
 import { AdminPlansEditor } from "@/components/admin/admin-plans-editor";
 import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
-import type { AdminAddon, PublicPlan } from "@/lib/types";
+import type { AdminAddon, BillingSettings, PublicPlan } from "@/lib/types";
 
 export const metadata = { title: "Harga Paket" };
 
@@ -14,12 +15,20 @@ export default async function PlatformPaketPage() {
   if (!me) redirect("/login");
   if (me.role !== "admin" || me.is_impersonated) redirect("/dashboard");
 
-  const [data, addonsRes] = await Promise.all([
+  const [data, addonsRes, billingRes] = await Promise.all([
     serverApi<{ plans: PublicPlan[] }>("/api/v1/admin/plans"),
     serverApi<{ addons: AdminAddon[] }>("/api/v1/admin/addons"),
+    serverApi<{ billing: BillingSettings }>("/api/v1/admin/billing-settings"),
   ]);
   const initial = data?.plans ?? [];
   const addons = addonsRes?.addons ?? [];
+  const billing: BillingSettings = billingRes?.billing ?? {
+    bank_name: "",
+    account_number: "",
+    account_name: "",
+    support_whatsapp: "",
+    note: "",
+  };
 
   return (
     <DashboardShell
@@ -32,6 +41,9 @@ export default async function PlatformPaketPage() {
           and seeing both together is how you keep three packages from
           quietly costing more than the bundle. */}
       <AdminAddonsEditor initial={addons} />
+      {/* Last, because it is the one thing on this page that moves money
+          rather than describing it. */}
+      <AdminBillingEditor initial={billing} />
     </DashboardShell>
   );
 }

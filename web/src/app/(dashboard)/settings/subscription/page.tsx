@@ -9,6 +9,7 @@ import { formatRupiah, formatDateID } from "@/lib/format";
 import { quotaBullets } from "@/lib/plan-bullets";
 import type {
   Addon,
+  BillingSettings,
   PublicPlan,
   Subscription,
   SubscriptionInvoice,
@@ -45,6 +46,7 @@ export default async function BerlanggananPage() {
     serverApi<{
       subscription: Subscription;
       invoices: SubscriptionInvoice[];
+      billing: BillingSettings;
     }>("/api/v1/subscription"),
     serverApi<{ plans: PublicPlan[] }>("/api/v1/plans"),
     serverApi<{ addons: Addon[] }>("/api/v1/subscription/addons"),
@@ -60,6 +62,16 @@ export default async function BerlanggananPage() {
     bisnis_price_cents: 299_000_00,
   };
   const invoices = data?.invoices ?? [];
+  // Empty strings rather than the old hard-coded account: if the API is
+  // unreachable the dialog must say "hubungi support", never show a
+  // stale number someone might transfer to.
+  const billing: BillingSettings = data?.billing ?? {
+    bank_name: "",
+    account_number: "",
+    account_name: "",
+    support_whatsapp: "",
+    note: "",
+  };
   const addons = addonsRes?.addons ?? [];
   const plans = plansRes?.plans ?? [];
   // Stable lookup by tier for the comparison cards.
@@ -127,6 +139,7 @@ export default async function BerlanggananPage() {
               subscription={sub}
               invoices={invoices}
               plans={plans}
+              billing={billing}
             />
           </div>
         </div>
