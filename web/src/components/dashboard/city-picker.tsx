@@ -53,12 +53,17 @@ export function CityPicker({
 
   // Re-sync the visible label whenever the parent provides a fresh
   // selectedName (e.g., when initial server data lands).
-  useEffect(() => {
-    if (selectedName !== undefined && !open) {
-      setQuery(selectedName);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedName]);
+  //
+  // Compared during render against the last value we saw, rather than in
+  // an effect: the input then shows the new label in the same commit,
+  // instead of rendering the stale one first and correcting it. The
+  // `!open` guard is unchanged — a dropdown the user is typing into must
+  // never have its text replaced underneath them.
+  const [lastSelectedName, setLastSelectedName] = useState(selectedName);
+  if (selectedName !== lastSelectedName) {
+    setLastSelectedName(selectedName);
+    if (selectedName !== undefined && !open) setQuery(selectedName);
+  }
 
   // Debounced fetch.
   useEffect(() => {

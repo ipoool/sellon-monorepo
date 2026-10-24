@@ -17,12 +17,17 @@ type Props = {
 export function HoldOrderPanel({ sessionId, onClose, onRestored }: Props) {
   const { cart, loadCart, clearCart } = usePOS();
   const [held, setHeld] = useState<POSHeldOrder[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Which session the list in hand belongs to. Derived loading beats a
+  // flag the mount effect has to set synchronously, and it also covers
+  // the case the flag missed: switching shifts showed the previous
+  // shift's held orders as if they were current.
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
+  const [refetching, setRefetching] = useState(false);
+  const loading = loadedFor !== sessionId || refetching;
   const [showHoldForm, setShowHoldForm] = useState(cart.length > 0);
   const [label, setLabel] = useState("");
 
-  const refetch = async () => {
-    setLoading(true);
+  const load = async () => {
     try {
       const res = await fetch(
         `${apiBase}/api/v1/pos/held?session_id=${sessionId}`,
@@ -31,12 +36,25 @@ export function HoldOrderPanel({ sessionId, onClose, onRestored }: Props) {
       const data = await res.json();
       setHeld(data.held ?? []);
     } finally {
-      setLoading(false);
+      // Even a failed load has answered for this session — otherwise the
+      // panel spins forever instead of showing an empty list.
+      setLoadedFor(sessionId);
+    }
+  };
+
+  // Called from the hold/restore handlers, where a spinner is wanted on
+  // top of a list that is already correct for this session.
+  const refetch = async () => {
+    setRefetching(true);
+    try {
+      await load();
+    } finally {
+      setRefetching(false);
     }
   };
 
   useEffect(() => {
-    refetch();
+    load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 

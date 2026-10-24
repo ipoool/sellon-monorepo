@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import {
   Printer,
@@ -21,7 +21,12 @@ import {
   connectPrinter,
   printTestBluetooth,
   connectedPrinterName,
+  printerNameServerSnapshot,
+  subscribePrinter,
 } from "@/lib/bluetooth-printer";
+
+/** No-op subscribe: Web Bluetooth support cannot change mid-page. */
+const subscribeNever = () => () => {};
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
@@ -48,22 +53,29 @@ export function PrinterSettingsForm({ initial }: { initial: Config }) {
   const [footer, setFooter] = useState(initial.footer ?? "");
   const [saving, setSaving] = useState(false);
 
-  // Bluetooth state (client-only).
-  const [btSupported, setBtSupported] = useState(false);
-  const [btName, setBtName] = useState<string | null>(null);
+  // Bluetooth state (client-only). Read from the printer module as an
+  // external store: the connection lives there, outlives this component,
+  // and can drop at any moment — so subscribing keeps the name honest
+  // instead of snapshotting it once at mount.
+  const btName = useSyncExternalStore(
+    subscribePrinter,
+    connectedPrinterName,
+    printerNameServerSnapshot,
+  );
+  const btSupported = useSyncExternalStore(
+    subscribeNever,
+    isBluetoothSupported,
+    () => false,
+  );
   const [connecting, setConnecting] = useState(false);
   const [testing, setTesting] = useState(false);
-
-  useEffect(() => {
-    setBtSupported(isBluetoothSupported());
-    setBtName(connectedPrinterName());
-  }, []);
 
   const handleConnect = async () => {
     setConnecting(true);
     try {
+      // connectPrinter publishes the new connection, so btName updates
+      // through the store rather than being set here as well.
       const name = await connectPrinter();
-      setBtName(name);
       showSuccess(`Terhubung ke ${name}`);
     } catch (e) {
       // Cancelling the device chooser isn't an error — stay silent.

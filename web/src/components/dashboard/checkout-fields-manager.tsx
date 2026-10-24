@@ -30,15 +30,19 @@ type Row = CheckoutField & { _cid: string };
 
 export function CheckoutFieldsManager({ initial }: { initial: CheckoutConfig }) {
   const router = useRouter();
-  const cid = useRef(0);
-  const newCid = () => `c${cid.current++}`;
-
   const [emailMode, setEmailMode] = useState<CheckoutConfig["email_mode"]>(
     initial.email_mode || "optional",
   );
+  // Seed ids by index rather than by bumping a ref: the state initializer
+  // runs during render, and a ref read there is exactly what React forbids
+  // (under StrictMode the double invoke would also burn ids).
   const [rows, setRows] = useState<Row[]>(() =>
-    (initial.fields ?? []).map((f) => ({ ...f, _cid: newCid() })),
+    (initial.fields ?? []).map((f, i) => ({ ...f, _cid: `c${i}` })),
   );
+  // Counter picks up where the seeded ids left off. Only ever read from an
+  // event handler, which is where mutating a ref is legal.
+  const cid = useRef(initial.fields?.length ?? 0);
+  const newCid = () => `c${cid.current++}`;
   const [saving, setSaving] = useState(false);
 
   const update = (cidKey: string, patch: Partial<Row>) =>

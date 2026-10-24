@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { Link2, Check, Send } from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+
+/** No-op subscribe: the page origin cannot change while the page lives. */
+const subscribeNever = () => () => {};
 
 type Props = {
   storeSlug: string;
@@ -27,12 +30,18 @@ export function ShareProductButton({
   // Render the absolute URL only after mount so server-side HTML matches
   // the first client render (avoids hydration mismatch). Default to the
   // relative path which both server and client agree on.
+  //
+  // useSyncExternalStore rather than an effect: the origin is external
+  // state that simply differs between server and client, and this is the
+  // hook built to read exactly that. The subscribe callback is a no-op
+  // because window.location.origin never changes for the life of the page.
   const relative = `/${storeSlug}/product/${productSlug}`;
-  const [url, setUrl] = useState(relative);
-
-  useEffect(() => {
-    setUrl(`${window.location.origin}${relative}`);
-  }, [relative]);
+  const origin = useSyncExternalStore(
+    subscribeNever,
+    () => window.location.origin,
+    () => "",
+  );
+  const url = origin ? `${origin}${relative}` : relative;
 
   async function copy() {
     try {

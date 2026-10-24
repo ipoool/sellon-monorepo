@@ -168,11 +168,17 @@ export function CheckoutWizard({
   const [city, setCity] = useState("");
   const [cityID, setCityID] = useState("");
 
-  const [shipping, setShipping] = useState<ShippingOption[]>([]);
-  const [shippingLoading, setShippingLoading] = useState(false);
+  // The shipping quote, keyed to the inputs it was fetched for. Keeping
+  // the key means "loading", "no options" and "stale options from the
+  // previous city" are told apart by comparison instead of by an effect
+  // that has to blank three states synchronously before every fetch.
+  const [quote, setQuote] = useState<{
+    key: string;
+    options: ShippingOption[];
+    error: string | null;
+  } | null>(null);
   // Distinct from "no courier for this city": a 5xx / network failure must not
   // read as "penjual tidak melayani kota ini".
-  const [quoteError, setQuoteError] = useState<string | null>(null);
   const [pickedShipping, setPickedShipping] = useState<string>("");
 
   const [paymentMethod, setPaymentMethod] = useState<string>(
@@ -290,23 +296,34 @@ export function CheckoutWizard({
   // Fetch shipping options whenever cart + city change. Quote endpoint
   // takes the items array verbatim so multi-product carts get a real
   // total, not just one product's quote.
+  //
+  // `quoteKey` is the identity of the request these inputs describe, and
+  // "" means there is nothing to quote at all (digital-only cart, or a
+  // city too short to search). Everything the UI reads is derived from it
+  // below, so a result belonging to the previous city can never be shown
+  // as if it were current.
+  const physicalItems = items.reduce<
+    Array<{ product_id: string; quantity: number }>
+  >((acc, it) => {
+    if (it.product_type === "physical") {
+      acc.push({ product_id: it.product_id, quantity: it.qty });
+    }
+    return acc;
+  }, []);
+  const trimmedCity = city.trim();
+  const quoteKey =
+    skipShippingStep || trimmedCity.length < 3 || items.length === 0
+      ? ""
+      : JSON.stringify([trimmedCity, cityID, storeSlug, physicalItems]);
+
+  const freshQuote = quoteKey !== "" && quote?.key === quoteKey ? quote : null;
+  const shipping = freshQuote?.options ?? [];
+  const quoteError = freshQuote?.error ?? null;
+  const shippingLoading = quoteKey !== "" && freshQuote === null;
+
   useEffect(() => {
-    if (skipShippingStep) {
-      setShipping([]);
-      setPickedShipping("");
-      setQuoteError(null);
-      return;
-    }
-    const trimmed = city.trim();
-    if (trimmed.length < 3 || items.length === 0) {
-      setShipping([]);
-      setPickedShipping("");
-      setQuoteError(null);
-      return;
-    }
+    if (quoteKey === "") return;
     const ctrl = new AbortController();
-    setShippingLoading(true);
-    setQuoteError(null);
     const t = setTimeout(() => {
       void (async () => {
         try {
@@ -316,16 +333,9 @@ export function CheckoutWizard({
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                city: trimmed,
+                city: trimmedCity,
                 city_id: cityID,
-                items: items.reduce<
-                  Array<{ product_id: string; quantity: number }>
-                >((acc, it) => {
-                  if (it.product_type === "physical") {
-                    acc.push({ product_id: it.product_id, quantity: it.qty });
-                  }
-                  return acc;
-                }, []),
+                items: physicalItems,
               }),
               signal: ctrl.signal,
             },
@@ -335,22 +345,28 @@ export function CheckoutWizard({
           if (ctrl.signal.aborted) return;
           const d = await r.json().catch(() => ({}));
           if (!r.ok) {
-            setShipping([]);
-            setQuoteError(
-              (d as { error?: string }).error ||
+            setQuote({
+              key: quoteKey,
+              options: [],
+              error:
+                (d as { error?: string }).error ||
                 "Gagal menghitung ongkir, coba lagi.",
-            );
+            });
             return;
           }
-          setShipping((d.options as ShippingOption[]) || []);
-          setQuoteError(null);
+          setQuote({
+            key: quoteKey,
+            options: (d.options as ShippingOption[]) || [],
+            error: null,
+          });
         } catch {
           if (!ctrl.signal.aborted) {
-            setShipping([]);
-            setQuoteError("Gagal menghitung ongkir, coba lagi.");
+            setQuote({
+              key: quoteKey,
+              options: [],
+              error: "Gagal menghitung ongkir, coba lagi.",
+            });
           }
-        } finally {
-          if (!ctrl.signal.aborted) setShippingLoading(false);
         }
       })();
     }, 350);
@@ -358,8 +374,16 @@ export function CheckoutWizard({
       ctrl.abort();
       clearTimeout(t);
     };
-  }, [city, cityID, items, storeSlug, skipShippingStep]);
+    // quoteKey encodes city, cityID, storeSlug and the physical items, so
+    // it is a strictly tighter dependency than listing them: physicalItems
+    // is a fresh array every render and would re-fire the fetch on each one.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quoteKey]);
 
+  // A courier the buyer picked for the previous city is simply not among
+  // these options, so it is not selected. Derived rather than cleared by
+  // the fetch effect, which left a render where a stale selection was
+  // still current against a fresh option list.
   const pickedOption = shipping.find(
     (o) => `${o.code}|${o.service}` === pickedShipping,
   );

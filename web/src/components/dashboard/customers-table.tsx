@@ -30,9 +30,17 @@ export function CustomersTable({ customers }: { customers: Customer[] }) {
 
   // Reset to page 1 whenever the filter inputs change so the user never
   // sees an empty page after narrowing the result set.
-  useEffect(() => {
+  //
+  // Adjusted during render rather than in an effect: React re-runs this
+  // component immediately with the corrected page and never commits the
+  // intermediate "page 7 of 1" to the DOM, so there is no flash of an
+  // empty table.
+  const filterKey = `${query}\u0000${filter}`;
+  const [lastFilterKey, setLastFilterKey] = useState(filterKey);
+  if (filterKey !== lastFilterKey) {
+    setLastFilterKey(filterKey);
     setPage(1);
-  }, [query, filter]);
+  }
 
   const blacklistCount = useMemo(
     () => customers.filter((c) => c.is_blacklisted).length,

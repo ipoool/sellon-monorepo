@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { showError, showSuccess } from "@/lib/toast";
 import { useRouter } from "next/navigation";
 import {
@@ -127,7 +127,10 @@ export function ActivityLog({ initial, filter }: Props) {
     push("/settings/activity");
   }
 
-  const loadMore = useCallback(async () => {
+  // Plain function, not useCallback: the only consumer is the "Muat lagi"
+  // onClick below — nothing is memoized on its identity, so the manual
+  // memoization bought nothing and the compiler could not preserve it.
+  const loadMore = async () => {
     if (loading || done) return;
     const last = entries[entries.length - 1];
     if (!last) return;
@@ -149,7 +152,7 @@ export function ActivityLog({ initial, filter }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [loading, done, entries, filter?.since, filter?.until]);
+  };
 
   // Filter form lives outside the empty-state branch so it stays
   // visible even when the current filter returns nothing - that way

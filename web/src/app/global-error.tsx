@@ -101,6 +101,12 @@ export default function GlobalError({
             >
               Coba lagi
             </button>
+            {/* A hard navigation, not <Link>. This boundary trips when the
+                ROOT layout threw, so the app shell is the thing that is
+                broken — a client-side route change would re-render into
+                the same broken tree. Reloading the document is the
+                recovery. */}
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
             <a
               href="/"
               style={{

@@ -69,34 +69,7 @@ export function ProductGrid({ products, categories }: Props) {
     });
   }, [products, query, activeCategory]);
 
-  // Barcode scanner: USB scanners type fast + send Enter. We match either a
-  // real GTIN (8–14 digits, exact match on product.gtin) or the printable
-  // product-id hex code (12 hex chars). On a single exact match, auto-add.
-  useEffect(() => {
-    const raw = query.trim();
-    if (!raw) return;
 
-    if (/^\d{8,14}$/.test(raw)) {
-      const matches = products.filter((p) => p.gtin && p.gtin === raw);
-      if (matches.length === 1) {
-        selectProduct(matches[0]);
-        setQuery("");
-        return;
-      }
-    }
-
-    const up = raw.toUpperCase();
-    if (up.length === 12 && /^[0-9A-F]+$/.test(up)) {
-      const matches = products.filter(
-        (p) => p.id.replace(/-/g, "").slice(0, 12).toUpperCase() === up,
-      );
-      if (matches.length === 1) {
-        selectProduct(matches[0]);
-        setQuery("");
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query]);
 
   const needsPicker = (p: Product) =>
     p.has_variants ||
@@ -163,6 +136,44 @@ export function ProductGrid({ products, categories }: Props) {
 
   const handleAdd = (p: Product) => selectProduct(p);
 
+  // Barcode scanner: USB scanners type fast + send Enter. We match either a
+  // real GTIN (8–14 digits, exact match on product.gtin) or the printable
+  // product-id hex code (12 hex chars). On a single exact match, auto-add.
+  //
+  // Runs from the input's onChange rather than an effect on `query`.
+  // Scanning is a reaction to typing, not a consequence of the rendered
+  // state — and as an effect it also fired whenever `query` was set from
+  // anywhere else, which could add a product to the cart without anyone
+  // having scanned anything.
+  const scanMatch = (raw: string): Product | null => {
+    const value = raw.trim();
+    if (!value) return null;
+
+    if (/^\d{8,14}$/.test(value)) {
+      const byGtin = products.filter((p) => p.gtin && p.gtin === value);
+      if (byGtin.length === 1) return byGtin[0];
+    }
+
+    const up = value.toUpperCase();
+    if (up.length === 12 && /^[0-9A-F]+$/.test(up)) {
+      const byCode = products.filter(
+        (p) => p.id.replace(/-/g, "").slice(0, 12).toUpperCase() === up,
+      );
+      if (byCode.length === 1) return byCode[0];
+    }
+    return null;
+  };
+
+  const handleQueryChange = (value: string) => {
+    const scanned = scanMatch(value);
+    if (scanned) {
+      selectProduct(scanned);
+      setQuery("");
+      return;
+    }
+    setQuery(value);
+  };
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Search + filter (sejajar) */}
@@ -173,7 +184,7 @@ export function ProductGrid({ products, categories }: Props) {
             ref={inputRef}
             type="text"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => handleQueryChange(e.target.value)}
             placeholder={
               isTouch
                 ? "Cari produk atau scan barcode..."

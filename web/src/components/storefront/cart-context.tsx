@@ -103,6 +103,14 @@ export function CartProvider({ storeSlug, children }: Props) {
   // Hydrate from localStorage once on mount. We delay to a useEffect
   // (rather than a lazy init) so SSR markup matches client first
   // render — `localStorage` is undefined on the server.
+  //
+  // set-state-in-effect is disabled deliberately, not overlooked. The cart
+  // is state the app both READS from storage and WRITES as the buyer
+  // shops, so useSyncExternalStore does not fit; and a lazy initialiser
+  // would make the server render an empty cart while the client renders a
+  // full one, which is the hydration mismatch this shape exists to avoid.
+  // It runs once per mount, not per change.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     try {
       const raw = localStorage.getItem(cartKey(storeSlug));
@@ -118,6 +126,7 @@ export function CartProvider({ storeSlug, children }: Props) {
     hydrated.current = true;
     setIsHydrated(true);
   }, [storeSlug]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Persist on every state change. Skip the initial render so we
   // don't overwrite real data with the empty default before hydrate.

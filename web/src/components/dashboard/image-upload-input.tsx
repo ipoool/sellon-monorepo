@@ -29,12 +29,12 @@ export function ImageUploadInput({
   const inputRef = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState(false);
   // Track per-URL broken state lewat React (bukan style.display mutation
-  // langsung di DOM) supaya saat user upload ulang dengan URL baru,
-  // state reset otomatis dan image baru bisa render.
-  const [broken, setBroken] = useState(false);
-  useEffect(() => {
-    setBroken(false);
-  }, [value]);
+  // langsung di DOM). Yang disimpan adalah URL yang gagal, bukan boolean:
+  // begitu `value` berganti, URL-nya tidak lagi cocok dan state-nya reset
+  // dengan sendirinya — tanpa effect yang menulis state hanya untuk
+  // membatalkan dirinya sendiri satu render kemudian.
+  const [brokenUrl, setBrokenUrl] = useState<string | null>(null);
+  const broken = brokenUrl !== null && brokenUrl === value;
 
   // FE cap: logo + banner tidak boleh > 5 MB. Untuk product backend
   // sudah compress jadi cap di-skip (file besar di-resize otomatis).
@@ -115,7 +115,7 @@ export function ImageUploadInput({
                 fill
                 sizes="(max-width: 768px) 100vw, 320px"
                 className="object-cover"
-                onError={() => setBroken(true)}
+                onError={() => setBrokenUrl(value)}
               />
             )}
             <button

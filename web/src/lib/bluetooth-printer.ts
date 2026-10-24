@@ -4,8 +4,10 @@
 // Safari/iOS. Callers must feature-detect with `isBluetoothSupported()` and
 // fall back to the browser print dialog where unsupported.
 //
-// Types: the DOM lib doesn't ship Web Bluetooth typings, so we lean on `any`
-// at the navigator boundary rather than pulling in @types/web-bluetooth.
+// Types: the DOM lib doesn't ship Web Bluetooth typings. Rather than pull
+// in @types/web-bluetooth for four calls, the slice we actually use is
+// declared below — enough that a typo in a characteristic property is a
+// compile error instead of a printer that silently prints nothing.
 
 import { formatRupiah } from "@/lib/format";
 import type { OrderDetail, Store } from "@/lib/types";
@@ -27,18 +29,83 @@ const PRINTER_SERVICE_HINTS: Array<number | string> = [
   "e7810a71-73ae-499d-8c15-faa9aef0c3f2",
 ];
 
+// === Minimal Web Bluetooth surface ===
+//
+// Only the members this file touches. `Bt` prefix so nothing here can
+// collide with a future lib.dom that ships the real definitions.
+
+type BtCharacteristic = {
+  properties: { write: boolean; writeWithoutResponse: boolean };
+  writeValue(value: BufferSource): Promise<void>;
+  writeValueWithoutResponse(value: BufferSource): Promise<void>;
+};
+
+type BtService = {
+  getCharacteristics(): Promise<BtCharacteristic[]>;
+};
+
+// connect() resolves to the server itself, so one shape covers both the
+// `device.gatt` handle and the value you get back from connecting.
+type BtServer = {
+  readonly connected: boolean;
+  connect(): Promise<BtServer>;
+  disconnect(): void;
+  getPrimaryServices(): Promise<BtService[]>;
+};
+
+type BtDevice = {
+  readonly name?: string;
+  readonly gatt?: BtServer;
+  addEventListener(type: string, listener: () => void): void;
+};
+
+type BtRequestOptions = {
+  acceptAllDevices?: boolean;
+  optionalServices?: Array<number | string>;
+};
+
+type Bt = { requestDevice(options: BtRequestOptions): Promise<BtDevice> };
+
+/** navigator.bluetooth, or undefined where the browser has no Web Bluetooth. */
+function bluetooth(): Bt | undefined {
+  if (typeof navigator === "undefined") return undefined;
+  return (navigator as Navigator & { bluetooth?: Bt }).bluetooth;
+}
+
 type CachedConn = {
-  device: any;
-  characteristic: any;
+  device: BtDevice;
+  characteristic: BtCharacteristic;
 };
 
 let conn: CachedConn | null = null;
 
+// The live connection is external mutable state shared by every component
+// that cares about it, so it is published as a store rather than copied
+// into each one at mount. Before this, a printer that dropped off cleared
+// `conn` but re-rendered nothing — the settings form went on claiming it
+// was connected until the page was reloaded.
+const connListeners = new Set<() => void>();
+
+function setConn(next: CachedConn | null) {
+  conn = next;
+  for (const l of connListeners) l();
+}
+
+/** Subscribe to connect/disconnect. Pair with connectedPrinterName(). */
+export function subscribePrinter(cb: () => void): () => void {
+  connListeners.add(cb);
+  return () => {
+    connListeners.delete(cb);
+  };
+}
+
+/** Server snapshot: there is no Bluetooth during SSR. */
+export function printerNameServerSnapshot(): string | null {
+  return null;
+}
+
 export function isBluetoothSupported(): boolean {
-  return (
-    typeof navigator !== "undefined" &&
-    typeof (navigator as any).bluetooth?.requestDevice === "function"
-  );
+  return typeof bluetooth()?.requestDevice === "function";
 }
 
 export function connectedPrinterName(): string | null {
@@ -53,8 +120,8 @@ export async function connectPrinter(): Promise<string> {
   if (!isBluetoothSupported()) {
     throw new Error("Browser ini tidak mendukung Bluetooth (gunakan Chrome/Android).");
   }
-  const bt = (navigator as any).bluetooth;
-  let device: any;
+  const bt = bluetooth()!;
+  let device: BtDevice;
   try {
     device = await bt.requestDevice({
       acceptAllDevices: true,
@@ -73,14 +140,16 @@ export async function connectPrinter(): Promise<string> {
     throw new Error("Gagal membuka daftar printer Bluetooth");
   }
 
-  let server: any;
+  let server: BtServer;
   try {
-    server = await device.gatt.connect();
+    // isBluetoothSupported() passed and the chooser returned a device, so
+    // gatt is present; the `!` is the one place that assumption lives.
+    server = await device.gatt!.connect();
   } catch {
     throw new Error("Gagal terhubung ke printer. Pastikan printer menyala & dalam jangkauan.");
   }
   const services = await server.getPrimaryServices();
-  let writable: any = null;
+  let writable: BtCharacteristic | null = null;
   for (const svc of services) {
     const chars = await svc.getCharacteristics();
     for (const ch of chars) {
@@ -93,7 +162,7 @@ export async function connectPrinter(): Promise<string> {
   }
   if (!writable) {
     try {
-      device.gatt.disconnect();
+      device.gatt!.disconnect();
     } catch {
       // ignore
     }
@@ -101,10 +170,10 @@ export async function connectPrinter(): Promise<string> {
   }
 
   device.addEventListener("gattserverdisconnected", () => {
-    conn = null;
+    setConn(null);
   });
 
-  conn = { device, characteristic: writable };
+  setConn({ device, characteristic: writable });
   return device.name ?? "Printer Bluetooth";
 }
 
@@ -114,7 +183,7 @@ export function disconnectPrinter(): void {
   } catch {
     // ignore
   }
-  conn = null;
+  setConn(null);
 }
 
 async function writeBytes(bytes: Uint8Array): Promise<void> {

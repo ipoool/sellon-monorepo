@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import type { POSSession, POSCartItem, SelectedOption } from "@/lib/types";
 import {
   saveCart as dbSaveCart,
@@ -129,6 +129,14 @@ export function posLineKey(it: {
   return `${it.product_id}::${it.variant_id ?? ""}::${opts}::${it.serving_type ?? ""}`;
 }
 
+const COARSE_POINTER = "(pointer: coarse)";
+
+function subscribeCoarsePointer(onChange: () => void): () => void {
+  const mq = window.matchMedia(COARSE_POINTER);
+  mq.addEventListener("change", onChange);
+  return () => mq.removeEventListener("change", onChange);
+}
+
 export function POSProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<POSSession | null>(null);
   const [cart, setCart] = useState<POSCartItem[]>([]);
@@ -139,21 +147,22 @@ export function POSProvider({ children }: { children: ReactNode }) {
   const [printerConfig, setPrinterConfig] = useState<PrinterConfig | null>(null);
   const [taxConfig, setTaxConfig] = useState<TaxConfig | null>(null);
   const [loyaltyCustomer, setLoyaltyCustomer] = useState<LoyaltyCustomer | null>(null);
-  const [redeemPoints, setRedeemPoints] = useState(0);
+  // What the cashier typed. The value the order actually carries is the
+  // clamped `redeemPoints` derived further down — see the comment there.
+  const [redeemPointsInput, setRedeemPoints] = useState(0);
   const [midtransLive, setMidtransLive] = useState(false);
   const [offlineEnabled, setOfflineEnabled] = useState(false);
 
   // Detect touch / coarse-pointer devices so keyboard shortcut hints can
-  // hide on tablets. Defaults to false (desktop) to avoid SSR/hydration
-  // mismatch; corrected on mount + on input-method change.
-  const [isTouch, setIsTouch] = useState(false);
-  useEffect(() => {
-    const mq = window.matchMedia("(pointer: coarse)");
-    setIsTouch(mq.matches);
-    const onChange = (e: MediaQueryListEvent) => setIsTouch(e.matches);
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
-  }, []);
+  // hide on tablets. The media query IS external state, so it is read
+  // through useSyncExternalStore: false on the server (desktop, no
+  // hydration mismatch), the real value from the first client render on,
+  // and live-updated when a tablet is docked to a keyboard.
+  const isTouch = useSyncExternalStore(
+    subscribeCoarsePointer,
+    () => window.matchMedia(COARSE_POINTER).matches,
+    () => false,
+  );
 
   // Persist the in-progress cart to IndexedDB so it survives a refresh or going
   // offline. Restore once on mount, then save on every change. `hydrated` gates
@@ -183,8 +192,14 @@ export function POSProvider({ children }: { children: ReactNode }) {
   // cart write can never null it out (see saveActiveSession below).
   useEffect(() => {
     if (!hydrated) return;
-    void dbSaveCart({ cart, customerName, customerWA, discount, redeemPoints });
-  }, [hydrated, cart, customerName, customerWA, discount, redeemPoints]);
+    void dbSaveCart({
+      cart,
+      customerName,
+      customerWA,
+      discount,
+      redeemPoints: redeemPointsInput,
+    });
+  }, [hydrated, cart, customerName, customerWA, discount, redeemPointsInput]);
   // Persist the active shift on its own key with explicit open/close semantics:
   // a non-null session is stored, a close (null) deletes it. Gated on `hydrated`
   // so the initial null (before restore) can't delete a cached shift.
@@ -306,18 +321,23 @@ export function POSProvider({ children }: { children: ReactNode }) {
   // redeemPoints too high — the discount caps correctly, but the customer
   // would be debited more points than the discount is worth. Re-runs on any
   // bill change so the redeemed points always match the payable total.
-  useEffect(() => {
-    if (!loyaltyConfig?.enabled || !loyaltyCustomer || redeemPoints <= 0) return;
+  // Derived, not clamped after the fact. The effect this replaces wrote the
+  // corrected value one render LATE, so there was a window in which
+  // `redeemPoints` exceeded what the bill could absorb — and that value is
+  // what payment-modal puts on the order as `redeem_points`. A cashier who
+  // removed an item and hit Bayar inside that window debited the customer
+  // more points than the discount was worth. Computed here, the
+  // over-redeemed value is never current at all.
+  const maxUsablePoints = useMemo(() => {
+    if (!loyaltyConfig?.enabled || !loyaltyCustomer) return 0;
     const remaining = Math.max(0, subtotalCents - tierDiscountCents - discountCents);
     const rate = loyaltyConfig.redeem_rate_cents || 0;
-    const maxUsable =
-      rate > 0
-        ? Math.min(loyaltyCustomer.loyalty_points, Math.floor(remaining / rate))
-        : loyaltyCustomer.loyalty_points;
-    if (redeemPoints > maxUsable) {
-      setRedeemPoints(maxUsable);
-    }
-  }, [loyaltyConfig, loyaltyCustomer, redeemPoints, subtotalCents, tierDiscountCents, discountCents]);
+    return rate > 0
+      ? Math.min(loyaltyCustomer.loyalty_points, Math.floor(remaining / rate))
+      : loyaltyCustomer.loyalty_points;
+  }, [loyaltyConfig, loyaltyCustomer, subtotalCents, tierDiscountCents, discountCents]);
+
+  const redeemPoints = Math.max(0, Math.min(redeemPointsInput, maxUsablePoints));
 
   const redeemDiscountCents = useMemo(() => {
     if (!loyaltyConfig?.enabled || !loyaltyCustomer || redeemPoints <= 0) return 0;

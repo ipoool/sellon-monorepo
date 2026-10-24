@@ -42,10 +42,28 @@ export function ProductPreviewDialog({
   onClose,
 }: Props) {
   const dialogRef = useRef<HTMLDialogElement>(null);
-  const [product, setProduct] = useState<Product | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [activePhotoIdx, setActivePhotoIdx] = useState(0);
-  const [variantId, setVariantId] = useState<string>("");
+  // Everything below is derived from "which product is this dialog
+  // currently showing", rather than reset by an effect. An effect that
+  // writes loading/photo/variant synchronously has to render the previous
+  // product's state once before correcting it; keying the state to the
+  // request means the stale values are never current in the first place.
+  const reqKey = open ? productId : "";
+  const [result, setResult] = useState<{ key: string; product: Product | null }>(
+    { key: "", product: null },
+  );
+  const product = result.key === reqKey ? result.product : null;
+  // Loading is simply "open, and what I hold is not an answer to this
+  // request yet" — including the error case, which records a null product
+  // so the dialog settles instead of spinning forever.
+  const loading = open && result.key !== reqKey;
+
+  const [photo, setPhoto] = useState({ key: "", idx: 0 });
+  const activePhotoIdx = photo.key === reqKey ? photo.idx : 0;
+  const setActivePhotoIdx = (idx: number) => setPhoto({ key: reqKey, idx });
+
+  const [variant, setVariant] = useState({ key: "", id: "" });
+  const variantId = variant.key === reqKey ? variant.id : "";
+  const setVariantId = (id: string) => setVariant({ key: reqKey, id });
 
   useEffect(() => {
     const d = dialogRef.current;
@@ -78,23 +96,23 @@ export function ProductPreviewDialog({
   useEffect(() => {
     if (!open) return;
     const ctrl = new AbortController();
-    setLoading(true);
-    setActivePhotoIdx(0);
-    setVariantId("");
-    fetch(`${apiBase}/api/v1/products/${productId}`, {
+    const key = productId;
+    fetch(`${apiBase}/api/v1/products/${key}`, {
       credentials: "include",
       signal: ctrl.signal,
     })
       .then(async (res) => {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-        setProduct(data.product as Product);
+        setResult({ key, product: data.product as Product });
       })
       .catch((err) => {
+        // An abort means a newer request owns the dialog now; recording
+        // this one's failure would show its empty state under theirs.
         if (err?.name === "AbortError") return;
         showError(err);
-      })
-      .finally(() => setLoading(false));
+        setResult({ key, product: null });
+      });
     return () => ctrl.abort();
   }, [open, productId]);
 

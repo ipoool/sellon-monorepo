@@ -100,11 +100,18 @@ export function LayoutPreviewDialog({
   const [previewLayout, setPreviewLayout] =
     useState<ProductLayout>(initialLayout);
   const [device, setDevice] = useState<DeviceFrame>("desktop");
-  const [products, setProducts] = useState<StorefrontProductPreview[]>([]);
-  const [storeHeader, setStoreHeader] = useState<StorefrontHeaderPreview | null>(
-    null,
-  );
-  const [loading, setLoading] = useState(true);
+  // Keyed to the store it was fetched for, so "loading" is derived rather
+  // than toggled by the effect: what we hold is either an answer to this
+  // slug or it is not.
+  const [fetched, setFetched] = useState<{
+    key: string;
+    products: StorefrontProductPreview[];
+    store: StorefrontHeaderPreview | null;
+  } | null>(null);
+  const fresh = fetched?.key === storeSlug ? fetched : null;
+  const products = fresh?.products ?? [];
+  const storeHeader = fresh?.store ?? null;
+  const loading = fresh === null;
 
   // Open dialog via native showModal.
   useEffect(() => {
@@ -123,8 +130,8 @@ export function LayoutPreviewDialog({
   // Endpoint /api/v1/storefront/:slug public — tidak perlu auth.
   useEffect(() => {
     let aborted = false;
-    setLoading(true);
-    fetch(`${apiBase}/api/v1/storefront/${storeSlug}`)
+    const key = storeSlug;
+    fetch(`${apiBase}/api/v1/storefront/${key}`)
       .then((r) => r.json())
       .then(
         (data: {
@@ -132,15 +139,18 @@ export function LayoutPreviewDialog({
           store?: StorefrontHeaderPreview;
         }) => {
           if (aborted) return;
-          setProducts(data.products ?? []);
-          if (data.store) setStoreHeader(data.store);
+          setFetched({
+            key,
+            products: data.products ?? [],
+            store: data.store ?? null,
+          });
         },
       )
       .catch((err) => {
-        if (!aborted) showError(err);
-      })
-      .finally(() => {
-        if (!aborted) setLoading(false);
+        if (aborted) return;
+        showError(err);
+        // Settle on an empty preview rather than spinning forever.
+        setFetched({ key, products: [], store: null });
       });
     return () => {
       aborted = true;
