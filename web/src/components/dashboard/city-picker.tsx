@@ -107,10 +107,19 @@ export function CityPicker({
         })
         .catch((err) => {
           if ((err as Error).name === "AbortError") return;
-          // Transient (e.g. RajaOngkir throttle) — show a soft inline hint,
-          // not a global toast. The next keystroke usually recovers.
+          // Transient (e.g. RajaOngkir throttle or a 502) — show a soft
+          // inline hint, not a global toast. The next keystroke usually
+          // recovers.
           setSearchErr(true);
           setResults([]);
+          // Release the typed city to the parent anyway, for the same
+          // reason the 503 branch does (BUG-018): otherwise it stays
+          // trapped in this component and checkout step 2 blocks on an
+          // empty city while the buyer is looking at the city they typed.
+          // An upstream outage must not be able to stop a sale — least of
+          // all for a seller whose own ongkir rates never needed the
+          // lookup in the first place.
+          if (query.trim()) onChange("", query);
         })
         .finally(() => setLoading(false));
     }, 250);

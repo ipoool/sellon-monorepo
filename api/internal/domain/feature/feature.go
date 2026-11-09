@@ -15,6 +15,7 @@ const (
 	Membership      Feature = "membership"
 	Loyalty         Feature = "loyalty"
 	MetaIntegration Feature = "meta_integration"
+	CustomShipping  Feature = "custom_shipping"
 )
 
 // Addon is a purchasable bundle of features, sold on top of Pro.
@@ -64,15 +65,19 @@ var addonOf = func() map[Feature]Addon {
 // to buy. CheckoutFields sits here rather than in a package because custom
 // checkout fields are storefront polish, and Pro is the storefront tier —
 // folding it into Kasir or Membership would have been filing, not grouping.
+//
+// CustomShipping joins them for the same reason: seller-defined ongkir is
+// storefront configuration, not a cashier or membership concern.
 var proOnly = map[Feature]bool{
 	MetaIntegration: true,
 	CheckoutFields:  true,
+	CustomShipping:  true,
 }
 
 // gatedOrder is the stable iteration order for Granted.
 var gatedOrder = []Feature{
 	POS, AIAnalytics, Printer, CheckoutFields, TableQR,
-	Membership, Loyalty, MetaIntegration,
+	Membership, Loyalty, MetaIntegration, CustomShipping,
 }
 
 // AddonFeatures returns what an add-on contains, for display.

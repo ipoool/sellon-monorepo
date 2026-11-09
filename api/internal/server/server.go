@@ -136,6 +136,7 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	bannerHandler := handler.NewBannerHandler(bannerRepo, storageClient, logger)
 	addonRepo := repository.NewAddonRepo(pool)
 	billingSettingsRepo := repository.NewBillingSettingsRepo(pool)
+	shippingRateRepo := repository.NewShippingRateRepo(pool)
 	addonHandler := handler.NewAddonHandler(addonRepo, subscriptions, stores, auditLogger, logger)
 	sellerBannerHandler := handler.NewSellerBannerHandler(sellerBannerRepo, stores, subscriptions, addonRepo, storageClient, logger)
 	paymentHandler := handler.NewPaymentHandler(gateways, stores, encryptor, midtransClient, auditLogger, logger, cfg.WebhookBaseURL)
@@ -143,11 +144,13 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 	storefrontHandler := handler.NewStorefrontHandler(
 		stores, products, variants, orders, bankAccounts, categories, promos, gateways,
 		encryptor, midtransClient,
-		subscriptions, planRepo, users, waTemplates, modifierRepo, tableRepo, broker, rajaOngkir, mailer, twilioClient,
+		subscriptions, planRepo, users, waTemplates, modifierRepo, tableRepo, shippingRateRepo,
+		broker, rajaOngkir, mailer, twilioClient,
 		storageClient, auditLogger, publicWebURL, cfg.OrderExpiryHours, logger,
 	)
 	orderStreamHandler := handler.NewOrderStreamHandler(stores, broker, logger)
 	citiesHandler := handler.NewCitiesHandler(rajaOngkir, logger)
+	shippingRateHandler := handler.NewShippingRateHandler(shippingRateRepo, stores, auditLogger, logger)
 	filesHandler := handler.NewFilesHandler(storageClient, logger)
 	waTemplateHandler := handler.NewWATemplateHandler(waTemplates, stores, auditLogger, logger)
 	webhookHandler := handler.NewWebhookHandler(gateways, orders, stores, users, encryptor, mailer, fulfiller, metaNotifier, publicWebURL, logger)
@@ -361,6 +364,17 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 				}
 
 				r.Get("/dashboard/stats", dashHandler.Stats)
+
+				// Seller-defined ongkir. Pro and up — the storefront quote
+				// re-checks the plan itself, so a lapsed store stops
+				// serving rates it can no longer edit here.
+				r.Route("/shipping-rates", func(r chi.Router) {
+					r.Use(feat(feature.CustomShipping))
+					r.Get("/", shippingRateHandler.List)
+					r.Post("/", shippingRateHandler.Create)
+					r.Put("/{id}", shippingRateHandler.Update)
+					r.Delete("/{id}", shippingRateHandler.Delete)
+				})
 
 				// Platform promo/info banners for the dashboard slider (read-only
 				// for sellers; admins manage them under /admin/banners).

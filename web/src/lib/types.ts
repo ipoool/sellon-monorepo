@@ -726,6 +726,7 @@ export type Subscription = {
 /** Features that cost money. Mirrors domain/feature in the API. */
 export type GatedFeature =
   | "pos"
+  | "custom_shipping"
   | "ai_analytics"
   | "printer"
   | "checkout_fields"
@@ -767,6 +768,29 @@ export type BillingSettings = {
   /** Digits only, country code included (628…). Used to build a wa.me link. */
   support_whatsapp: string;
   note: string;
+};
+
+/**
+ * One seller-defined ongkir option.
+ *
+ * `areas` holds normalised city names (lower case, no "kota"/"kabupaten"
+ * prefix) — the API normalises on write, so what is stored is exactly what
+ * the matcher compares against.
+ *
+ * Three shapes, and the difference matters:
+ *  - areas non-empty  → serves exactly those cities
+ *  - areas empty      → available everywhere (how pickup is written)
+ *  - is_fallback      → serves every city no other rate claims
+ */
+export type ShippingRate = {
+  id: string;
+  name: string;
+  price_cents: number;
+  eta: string;
+  areas: string[];
+  is_fallback: boolean;
+  is_active: boolean;
+  sort_order: number;
 };
 
 /** An add-on as the platform admin sees it: price, plus who holds it. */

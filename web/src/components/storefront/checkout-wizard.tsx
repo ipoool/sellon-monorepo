@@ -117,6 +117,17 @@ type Props = {
 
 type Step = 1 | 2 | 3 | 4;
 
+/**
+ * Display name for a shipping option.
+ *
+ * Couriers have a service tier ("JNE REG"); a seller's own rate does not
+ * ("Kurir Toko"), and joining blindly left a trailing space on every label
+ * and on the courier recorded against the order.
+ */
+function optionLabel(o: { courier: string; service: string }): string {
+  return o.service ? `${o.courier} ${o.service}` : o.courier;
+}
+
 export function CheckoutWizard({
   storeSlug,
   storeName,
@@ -577,7 +588,7 @@ export function CheckoutWizard({
     const courierLabel = skipShippingStep
       ? "Digital — kirim via link"
       : pickedOption
-        ? `${pickedOption.courier} ${pickedOption.service}`
+        ? optionLabel(pickedOption)
         : "—";
     const paymentLabel =
       paymentMethods.find((p) => p.value === paymentMethod)?.label || "—";
@@ -594,6 +605,9 @@ export function CheckoutWizard({
           customer_address: skipShippingStep ? "" : customerAddress.trim(),
           customer_city: skipShippingStep ? "" : city.trim(),
           courier: courierLabel,
+          // The option's own code, so the server can price a seller-defined
+          // rate from its own row instead of trusting shipping_cents.
+          shipping_code: pickedOption?.code ?? "",
           payment_method: paymentLabel,
           notes: notes.trim(),
           // Carries the cookie-banner answer so the server can honour a
@@ -677,7 +691,7 @@ export function CheckoutWizard({
   const courierLabelText = skipShippingStep
     ? "Digital — kirim via link"
     : pickedOption
-      ? `${pickedOption.courier} ${pickedOption.service}`
+      ? optionLabel(pickedOption)
       : "Dikonfirmasi penjual";
 
   return (
@@ -869,9 +883,11 @@ export function CheckoutWizard({
                               {o.courier}{" "}
                               <span className="text-neutral-500">{o.service}</span>
                             </p>
-                            <p className="text-xs text-neutral-500">
-                              Estimasi {o.eta}
-                            </p>
+                            {o.eta && (
+                              <p className="text-xs text-neutral-500">
+                                Estimasi {o.eta}
+                              </p>
+                            )}
                           </div>
                           <div className="flex flex-col items-end">
                             <span className="font-display text-sm font-semibold text-neutral-900">
@@ -1040,7 +1056,7 @@ export function CheckoutWizard({
               taxLabel={taxLabel}
               grandTotal={grandTotal}
               skipShipping={skipShippingStep}
-              pickedOptionLabel={pickedOption ? `${pickedOption.courier} ${pickedOption.service}` : ""}
+              pickedOptionLabel={pickedOption ? optionLabel(pickedOption) : ""}
             />
           </div>
         </StepCard>

@@ -46,6 +46,7 @@ type StorefrontHandler struct {
 	waTemplates *repository.WATemplateRepo
 	modifiers   *repository.ModifierRepo
 	tables      *repository.TableRepo
+	shipRates   *repository.ShippingRateRepo
 	broker      *events.Broker
 	rajaongkir  *rajaongkir.Client
 	mailer      *email.Mailer
@@ -70,6 +71,7 @@ func NewStorefrontHandler(
 	waTemplates *repository.WATemplateRepo,
 	modifiers *repository.ModifierRepo,
 	tables *repository.TableRepo,
+	shipRates *repository.ShippingRateRepo,
 	broker *events.Broker,
 	rk *rajaongkir.Client,
 	mailer *email.Mailer,
@@ -89,6 +91,7 @@ func NewStorefrontHandler(
 		waTemplates: waTemplates,
 		modifiers:   modifiers,
 		tables:      tables,
+		shipRates:   shipRates,
 		broker:      broker, rajaongkir: rk,
 		mailer: mailer, twilio: twilio,
 		storage:  storageCli,
@@ -684,7 +687,12 @@ type createOrderReq struct {
 	TableID         string `json:"table_id"`
 	ServingType     string `json:"serving_type"`
 	ShippingCents   int64  `json:"shipping_cents"`
-	PromoCode       string `json:"promo_code"`
+	// ShippingCode is the option code the buyer picked, as returned by the
+	// quote endpoint ("custom:<rate id>", or a courier code). Optional for
+	// backwards compatibility; when it names one of the seller's OWN rates
+	// the price is verified against that row rather than trusted.
+	ShippingCode string `json:"shipping_code"`
+	PromoCode    string `json:"promo_code"`
 	// Source marks the order channel. "kiosk" enables the anonymous in-store
 	// flow (no name/WA required, always gets a pickup number). Empty/other
 	// values are treated as the normal "storefront" channel.
@@ -1034,6 +1042,20 @@ func (h *StorefrontHandler) CreateOrder(w http.ResponseWriter, r *http.Request) 
 	if shippingCents < 0 {
 		shippingCents = 0
 	}
+
+	// When the seller defines their own ongkir, the price is not a figure
+	// to be taken on trust: the authoritative value is one row away. The
+	// courier path cannot do this — nobody here knows what JNE would have
+	// charged — so this check exists precisely where it is possible.
+	if ok, price, msg := h.verifyCustomShipping(
+		r.Context(), store, req.ShippingCode, shippingCents,
+	); !ok {
+		response.Error(w, http.StatusBadRequest, msg)
+		return
+	} else if price >= 0 {
+		shippingCents = price
+	}
+
 	if code := strings.TrimSpace(req.PromoCode); code != "" {
 		var subtotal int64
 		for _, it := range items {
@@ -1682,6 +1704,16 @@ func (h *StorefrontHandler) ShippingQuote(w http.ResponseWriter, r *http.Request
 		originCity = store.City
 	}
 
+	// Seller-defined rates come first and, when any are live, they are the
+	// WHOLE answer: a seller who delivers by motorbike within Bandung does
+	// not want JNE quoted beside it, and an order placed against a courier
+	// they do not use is one they cannot fulfil at the price shown.
+	if custom, served := h.customShippingFor(r.Context(), store, req.City); served {
+		h.respondShippingQuote(w, custom, totalWeightG, req.City, originCity,
+			subtotalCents, store)
+		return
+	}
+
 	var options []shipping.Option
 
 	// Try RajaOngkir first when:
@@ -1756,8 +1788,22 @@ func (h *StorefrontHandler) ShippingQuote(w http.ResponseWriter, r *http.Request
 		options = filtered
 	}
 
-	// Apply free-shipping threshold: if subtotal qualifies, override every
-	// option's price to 0 and tag the response so the UI can surface it.
+	h.respondShippingQuote(w, options, totalWeightG, req.City, originCity,
+		subtotalCents, store)
+}
+
+// respondShippingQuote applies the free-ongkir threshold and writes the
+// response. Shared by the custom-rate and courier paths so a seller's
+// "gratis ongkir di atas Rp X" works the same either way — it used to live
+// inline, which is how one of two exits forgets it.
+func (h *StorefrontHandler) respondShippingQuote(
+	w http.ResponseWriter,
+	options []shipping.Option,
+	totalWeightG int,
+	buyerCity, sellerCity string,
+	subtotalCents int64,
+	store *repository.Store,
+) {
 	freeShipping := store.FreeShippingThresholdCents > 0 &&
 		subtotalCents >= store.FreeShippingThresholdCents
 	if freeShipping {
@@ -1765,15 +1811,80 @@ func (h *StorefrontHandler) ShippingQuote(w http.ResponseWriter, r *http.Request
 			options[i].PriceRpah = 0
 		}
 	}
+	if options == nil {
+		options = []shipping.Option{}
+	}
 
 	response.JSON(w, http.StatusOK, map[string]any{
 		"options":                       options,
 		"total_weight_g":                totalWeightG,
-		"buyer_city":                    req.City,
-		"seller_city":                   originCity,
+		"buyer_city":                    buyerCity,
+		"seller_city":                   sellerCity,
 		"free_shipping":                 freeShipping,
 		"free_shipping_threshold_cents": store.FreeShippingThresholdCents,
 	})
+}
+
+// customShippingFor returns the seller's own ongkir options for this buyer,
+// and whether seller-defined rates are in force at all.
+//
+// `served` is true whenever the store has at least one ACTIVE rate — even
+// if none of them covers this particular city. That is deliberate: a seller
+// who lists only Bandung has said they do not deliver elsewhere, and
+// quoting JNE to a Makassar buyer would invent a service they never
+// offered. The buyer sees an empty courier list, which is the truth.
+func (h *StorefrontHandler) customShippingFor(
+	ctx context.Context, store *repository.Store, buyerCity string,
+) (opts []shipping.Option, served bool) {
+	if h.shipRates == nil {
+		return nil, false
+	}
+	rows, err := h.shipRates.ListActive(ctx, store.ID)
+	if err != nil {
+		h.logger.Error("custom shipping: list", "err", err, "store", store.ID)
+		return nil, false
+	}
+	if len(rows) == 0 {
+		return nil, false
+	}
+
+	// Custom ongkir is a Pro feature, so a store that lapsed back to Free
+	// must stop serving its rates. Fails OPEN on a lookup error: these rows
+	// were written by a Pro store, and showing them during a DB blip beats
+	// quoting couriers the seller does not use.
+	if plan, perr := h.subs.GetPlan(ctx, store.ID); perr == nil &&
+		!feature.EntitlementsFor(plan, nil).Has(feature.CustomShipping) {
+		return nil, false
+	}
+
+	matched := shipping.MatchCustomRates(toCustomRates(rows), buyerCity)
+	out := make([]shipping.Option, 0, len(matched))
+	for _, m := range matched {
+		out = append(out, shipping.Option{
+			Courier:   m.Name,
+			Code:      shipping.CustomCode(m.ID),
+			Service:   "",
+			PriceRpah: m.PriceCents / 100,
+			ETA:       m.ETA,
+			Zone:      "custom",
+		})
+	}
+	return out, true
+}
+
+func toCustomRates(rows []repository.ShippingRate) []shipping.CustomRate {
+	out := make([]shipping.CustomRate, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, shipping.CustomRate{
+			ID:         r.ID.String(),
+			Name:       r.Name,
+			PriceCents: r.PriceCents,
+			ETA:        r.ETA,
+			Areas:      r.Areas,
+			IsFallback: r.IsFallback,
+		})
+	}
+	return out
 }
 
 // POST /api/v1/storefront/{slug}/orders/{number}/payment-proof
@@ -2172,4 +2283,66 @@ func (h *StorefrontHandler) Showcase(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	response.JSON(w, http.StatusOK, map[string]any{"stores": out})
+}
+
+// verifyCustomShipping checks a buyer-supplied ongkir against the seller's
+// own rate table.
+//
+// Returns (ok, price, message). A price of -1 means "nothing to enforce,
+// leave the caller's figure alone"; any other value is the price the order
+// must carry.
+//
+// The free-shipping threshold is NOT applied here — it runs later in
+// CreateOrder and may legitimately zero this figure. So a submitted 0 is
+// accepted whenever the store has a threshold at all, and the later pass
+// decides whether it was earned.
+func (h *StorefrontHandler) verifyCustomShipping(
+	ctx context.Context, store *repository.Store, code string, submitted int64,
+) (ok bool, price int64, msg string) {
+	if h.shipRates == nil {
+		return true, -1, ""
+	}
+	rows, err := h.shipRates.ListActive(ctx, store.ID)
+	if err != nil {
+		// A lookup failure must not block a sale. The figure stays as the
+		// buyer sent it, exactly as before this feature existed.
+		h.logger.Error("verify custom shipping: list", "err", err, "store", store.ID)
+		return true, -1, ""
+	}
+	if len(rows) == 0 {
+		return true, -1, ""
+	}
+	if plan, perr := h.subs.GetPlan(ctx, store.ID); perr == nil &&
+		!feature.EntitlementsFor(plan, nil).Has(feature.CustomShipping) {
+		return true, -1, ""
+	}
+
+	// Rates are in force. An order that names no rate is either an older
+	// client or a hand-made request; accept a zero (pickup-shaped) figure
+	// and refuse to invent a price for anything else.
+	rateID := shipping.CustomRateID(strings.TrimSpace(code))
+	if rateID == "" {
+		if submitted == 0 {
+			return true, 0, ""
+		}
+		return false, 0, "pilih salah satu opsi pengiriman yang tersedia"
+	}
+
+	for _, row := range rows {
+		if row.ID.String() != rateID {
+			continue
+		}
+		if submitted == row.PriceCents {
+			return true, row.PriceCents, ""
+		}
+		// A zero against a priced rate is only plausible as free ongkir,
+		// which the threshold pass settles a few lines later.
+		if submitted == 0 && store.FreeShippingThresholdCents > 0 {
+			return true, 0, ""
+		}
+		// Anything else is the client disagreeing with the seller's own
+		// table. The seller's row wins.
+		return true, row.PriceCents, ""
+	}
+	return false, 0, "opsi pengiriman tidak tersedia untuk toko ini"
 }
