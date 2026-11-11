@@ -884,7 +884,11 @@ export function CheckoutWizard({
                   ongkir akan dikonfirmasi penjual via WhatsApp.
                 </p>
               ) : (
-                <ul className="flex max-h-72 flex-col gap-1.5 overflow-y-auto rounded-lg border border-neutral-200 bg-white p-1.5">
+                <ul
+                  role="radiogroup"
+                  aria-label="Pilihan pengiriman"
+                  className="flex max-h-72 flex-col gap-1.5 overflow-y-auto rounded-lg border border-neutral-200 bg-white p-1.5"
+                >
                   {shipping.map((o) => {
                     const key = optionKey(o);
                     const active = effectivePicked === key;
@@ -892,6 +896,8 @@ export function CheckoutWizard({
                       <li key={key}>
                         <button
                           type="button"
+                          role="radio"
+                          aria-checked={active}
                           onClick={() => setPickedShipping(key)}
                           className={cn(
                             "flex w-full items-center justify-between gap-3 rounded-md border p-2.5 text-left transition-colors",
@@ -900,7 +906,21 @@ export function CheckoutWizard({
                               : "border-neutral-200 hover:bg-neutral-50",
                           )}
                         >
-                          <div className="min-w-0">
+                          {/* A radio mark, so an UNPICKED row still reads as a
+                              choice. Picking is mandatory now; without this the
+                              list looked like a price table and a buyer could
+                              stall on "Pilih pengiriman dulu" with nothing on
+                              screen suggesting the rows were tappable. */}
+                          <span
+                            aria-hidden
+                            className={cn(
+                              "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border",
+                              active
+                                ? "border-brand-500 border-[5px]"
+                                : "border-neutral-300",
+                            )}
+                          />
+                          <div className="min-w-0 flex-1">
                             <p className="text-sm font-medium text-neutral-900">
                               {o.courier}{" "}
                               <span className="text-neutral-500">{o.service}</span>
