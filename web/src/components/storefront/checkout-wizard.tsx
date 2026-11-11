@@ -128,6 +128,12 @@ function optionLabel(o: { courier: string; service: string }): string {
   return o.service ? `${o.courier} ${o.service}` : o.courier;
 }
 
+/** Identity of an option within one quote. Code alone is not unique: a
+ *  courier returns several services under the same code. */
+function optionKey(o: { code: string; service: string }): string {
+  return `${o.code}|${o.service}`;
+}
+
 export function CheckoutWizard({
   storeSlug,
   storeName,
@@ -395,9 +401,14 @@ export function CheckoutWizard({
   // these options, so it is not selected. Derived rather than cleared by
   // the fetch effect, which left a render where a stale selection was
   // still current against a fresh option list.
-  const pickedOption = shipping.find(
-    (o) => `${o.code}|${o.service}` === pickedShipping,
-  );
+  //
+  // A lone option is selected for the buyer. One row reads as information
+  // rather than a choice, and the seller carried the cost of that
+  // misreading — a store with a single "Kurir Gudang" rate was taking
+  // orders at ongkir 0 because nobody thought to tap it.
+  const effectivePicked =
+    pickedShipping || (shipping.length === 1 ? optionKey(shipping[0]) : "");
+  const pickedOption = shipping.find((o) => optionKey(o) === effectivePicked);
   const baseShippingCents = pickedOption ? pickedOption.price_rpah * 100 : 0;
   const shippingCents = skipShippingStep
     ? 0
@@ -544,6 +555,17 @@ export function CheckoutWizard({
     if (forStep >= 2 && !skipShippingStep) {
       if (!customerAddress.trim()) return "Alamat pengiriman wajib diisi";
       if (!city.trim()) return "Kota tujuan wajib diisi";
+      // An option on offer must be chosen. Without this the buyer could
+      // walk past the courier list and place the order at ongkir 0 — the
+      // seller then ships at their own expense and finds out later. It
+      // bites hardest with seller-defined rates, where the price is the
+      // seller's own figure rather than an estimate to be confirmed over
+      // WhatsApp. When the quote returned nothing (or failed), proceeding
+      // is still allowed: that is the case the "dikonfirmasi penjual"
+      // copy below is for.
+      if (shipping.length > 0 && !pickedOption) {
+        return "Pilih pengiriman dulu";
+      }
       const shipMiss = missingRequiredCustom(shippingFields);
       if (shipMiss) return shipMiss;
     }
@@ -864,8 +886,8 @@ export function CheckoutWizard({
               ) : (
                 <ul className="flex max-h-72 flex-col gap-1.5 overflow-y-auto rounded-lg border border-neutral-200 bg-white p-1.5">
                   {shipping.map((o) => {
-                    const key = `${o.code}|${o.service}`;
-                    const active = pickedShipping === key;
+                    const key = optionKey(o);
+                    const active = effectivePicked === key;
                     return (
                       <li key={key}>
                         <button

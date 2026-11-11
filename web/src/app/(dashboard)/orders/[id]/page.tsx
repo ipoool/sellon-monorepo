@@ -28,7 +28,12 @@ import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
 import { formatRupiah, formatDateTimeID } from "@/lib/format";
 import { paymentMethodLabel } from "@/lib/payment";
-import type { OrderDetail, PaymentGatewayStatus, Store } from "@/lib/types";
+import type {
+  OrderDetail,
+  PaymentGatewayStatus,
+  ShippingRate,
+  Store,
+} from "@/lib/types";
 
 export const metadata = { title: "Detail Pesanan" };
 
@@ -64,7 +69,7 @@ export default async function OrderDetailPage({
   if (!me) redirect("/login");
   const { id } = await params;
 
-  const [orderRes, storeRes, gatewayRes, templatesRes] = await Promise.all([
+  const [orderRes, storeRes, gatewayRes, templatesRes, ratesRes] = await Promise.all([
     serverApi<{ order: OrderDetail }>(`/api/v1/orders/${id}`),
     serverApi<{ store: Store | null }>("/api/v1/store"),
     serverApi<PaymentGatewayStatus>("/api/v1/payments/midtrans"),
@@ -73,6 +78,10 @@ export default async function OrderDetailPage({
     serverApi<{ templates: Record<string, string> }>(
       "/api/v1/whatsapp-templates",
     ),
+    // The store's own ongkir names, so the "Kirim & Input Resi" form can
+    // offer the courier this order was actually placed with. Answers 402
+    // below Pro, which `?? []` turns into "no own couriers".
+    serverApi<{ rates: ShippingRate[] }>("/api/v1/shipping-rates"),
   ]);
   if (!orderRes?.order) notFound();
   const order = orderRes.order;
@@ -81,6 +90,12 @@ export default async function OrderDetailPage({
     is_configured: false,
     has_server_key: false,
   };
+  // Active rates only: a retired one should not be offered for a new
+  // shipment, though an order already placed against it still shows its
+  // own courier (threaded separately, from the order row).
+  const ownCouriers = (ratesRes?.rates ?? [])
+    .filter((r) => r.is_active)
+    .map((r) => r.name);
 
   return (
     <DashboardShell
@@ -162,6 +177,7 @@ export default async function OrderDetailPage({
             <OrderStatusActions
               order={order}
               paymentGateway={paymentGateway}
+              ownCouriers={ownCouriers}
               className="mt-5"
             />
           </Card>

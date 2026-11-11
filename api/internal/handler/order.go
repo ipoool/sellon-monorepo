@@ -36,6 +36,7 @@ type OrderHandler struct {
 	fulfiller *fulfillment.Fulfiller
 	meta      *meta.Notifier
 	mailer    *email.Mailer
+	shipRates *repository.ShippingRateRepo
 	webOrigin string
 	logger    *slog.Logger
 }
@@ -50,6 +51,7 @@ func NewOrderHandler(
 	fulfiller *fulfillment.Fulfiller,
 	metaNotifier *meta.Notifier,
 	mailer *email.Mailer,
+	shipRates *repository.ShippingRateRepo,
 	webOrigin string,
 	logger *slog.Logger,
 ) *OrderHandler {
@@ -59,6 +61,7 @@ func NewOrderHandler(
 		fulfiller: fulfiller,
 		meta:      metaNotifier,
 		mailer:    mailer,
+		shipRates: shipRates,
 		webOrigin: webOrigin,
 		logger:    logger,
 	}
@@ -469,7 +472,14 @@ func (h *OrderHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 	case "process":
 		actionErr = h.orders.Process(r.Context(), store.ID, id)
 	case "ship":
-		if strings.TrimSpace(req.TrackingNumber) == "" {
+		// A resi is required for a real courier, because it is the only
+		// thing the buyer can track. A seller delivering with their own
+		// vehicle has no such number to type, and demanding one left them
+		// inventing a JNE resi for a parcel JNE never touched — so the
+		// requirement is lifted exactly when the courier IS one of the
+		// store's own shipping rates.
+		if strings.TrimSpace(req.TrackingNumber) == "" &&
+			!h.isOwnCourier(r.Context(), store.ID, req.Courier) {
 			response.Error(w, http.StatusBadRequest, "nomor resi wajib diisi")
 			return
 		}
@@ -1024,4 +1034,30 @@ func (h *OrderHandler) GeneratePaymentLink(w http.ResponseWriter, r *http.Reques
 		"payment_url": snap.RedirectURL,
 		"token":       snap.Token,
 	})
+}
+
+// isOwnCourier reports whether `courier` names one of the store's own
+// shipping rates rather than a national carrier.
+//
+// Returns false on any lookup failure, which keeps the resi requirement in
+// place — the safe direction, since the cost of a wrong "false" is one
+// extra field and the cost of a wrong "true" is a buyer with no tracking.
+func (h *OrderHandler) isOwnCourier(
+	ctx context.Context, storeID uuid.UUID, courier string,
+) bool {
+	name := strings.ToLower(strings.TrimSpace(courier))
+	if name == "" || h.shipRates == nil {
+		return false
+	}
+	rows, err := h.shipRates.ListForStore(ctx, storeID)
+	if err != nil {
+		h.logger.Error("ship: own-courier lookup", "err", err, "store", storeID)
+		return false
+	}
+	for _, r := range rows {
+		if strings.ToLower(strings.TrimSpace(r.Name)) == name {
+			return true
+		}
+	}
+	return false
 }

@@ -27,6 +27,8 @@ import type { OrderDetail, PaymentGatewayStatus } from "@/lib/types";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
+// National carriers. A resi is meaningful for these — it is the number
+// the buyer tracks — so the form keeps requiring one.
 const couriers = [
   { value: "JNE Reguler", label: "JNE Reguler" },
   { value: "J&T Express", label: "J&T Express" },
@@ -39,6 +41,12 @@ const couriers = [
 type Props = {
   order: OrderDetail;
   paymentGateway: PaymentGatewayStatus;
+  /**
+   * Names of the store's own shipping rates ("Kurir Gudang", "Ambil di
+   * toko"). These carry no tracking number, so selecting one makes the
+   * resi field optional — the backend applies the same rule.
+   */
+  ownCouriers?: string[];
   className?: string;
 };
 
@@ -89,9 +97,35 @@ function isMidtransMethod(method: string): boolean {
   return MIDTRANS_METHODS.has(method);
 }
 
-export function OrderStatusActions({ order, paymentGateway, className }: Props) {
+export function OrderStatusActions({
+  order,
+  paymentGateway,
+  ownCouriers = [],
+  className,
+}: Props) {
   const { push, refresh } = useRouter();
   const [pending, setPending] = useState<string | null>(null);
+
+  // Courier options, own rates first.
+  //
+  // The order's OWN courier is forced in even when it is not a live rate:
+  // a <select> whose value matches no <option> silently shows the first
+  // one instead, so an order placed with "Kurir Gudang" was being marked
+  // shipped as "JNE Reguler" without anyone choosing that.
+  const ownSet = new Set(ownCouriers.map((c) => c.trim()).filter(Boolean));
+  if (order.courier?.trim() && !couriers.some((c) => c.value === order.courier)) {
+    ownSet.add(order.courier.trim());
+  }
+  const ownList = [...ownSet];
+  const courierOptions = [
+    ...ownList.map((name) => ({ value: name, label: name })),
+    ...couriers,
+  ];
+  // Tracking is only required for a carrier that issues one.
+  const [shipCourier, setShipCourier] = useState(
+    order.courier || courierOptions[0]?.value || "",
+  );
+  const trackingRequired = !ownSet.has(shipCourier.trim());
 
   // Inline forms are mutually exclusive — opening one auto-closes the others
   // so the action panel never has two competing forms onscreen at once.
@@ -609,7 +643,8 @@ export function OrderStatusActions({ order, paymentGateway, className }: Props) 
             </p>
             <p className="mt-0.5 text-xs text-neutral-600">
               Pilih kurir dan masukin nomor resi. Pembeli akan dapat info ini
-              di halaman order.
+              di halaman order. Kalau kamu antar sendiri, pilih kurir
+              tokomu — resi tidak wajib.
             </p>
           </div>
           <div
@@ -621,9 +656,10 @@ export function OrderStatusActions({ order, paymentGateway, className }: Props) 
               <Select
                 id="ship_courier"
                 name="courier"
-                defaultValue={order.courier || "JNE Reguler"}
+                value={shipCourier}
+                onChange={(e) => setShipCourier(e.target.value)}
               >
-                {couriers.map((c) => (
+                {courierOptions.map((c) => (
                   <option key={c.value} value={c.value}>
                     {c.label}
                   </option>
@@ -640,15 +676,22 @@ export function OrderStatusActions({ order, paymentGateway, className }: Props) 
               />
             </div>
             <div className="flex flex-col gap-1.5 sm:col-span-2">
-              <Label htmlFor="ship_tracking">No. Resi *</Label>
+              <Label htmlFor="ship_tracking">
+                No. Resi {trackingRequired ? "*" : "(opsional)"}
+              </Label>
               <Input
                 id="ship_tracking"
                 name="tracking_number"
-                required
+                required={trackingRequired}
                 defaultValue={order.tracking_number}
-                placeholder="JNE1234567890"
+                placeholder={trackingRequired ? "JNE1234567890" : "Kosongkan kalau tidak ada"}
                 className="font-mono"
               />
+              {!trackingRequired && (
+                <p className="text-xs text-neutral-500">
+                  Kirim pakai kurir sendiri — nomor resi boleh dikosongkan.
+                </p>
+              )}
             </div>
             <div className="flex justify-end gap-2 sm:col-span-2">
               <Button
@@ -676,12 +719,12 @@ export function OrderStatusActions({ order, paymentGateway, className }: Props) 
                   const tracking = (
                     root.querySelector<HTMLInputElement>("#ship_tracking")?.value ?? ""
                   ).trim();
-                  if (tracking === "") {
-                    showError("Nomor resi wajib diisi.");
-                    return;
-                  }
                   if (courier === "") {
                     showError("Pilih kurir terlebih dahulu.");
+                    return;
+                  }
+                  if (tracking === "" && !ownSet.has(courier)) {
+                    showError("Nomor resi wajib diisi.");
                     return;
                   }
                   setConfirm({
