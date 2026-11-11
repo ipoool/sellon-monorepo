@@ -330,8 +330,16 @@ export function OrderStatusActions({
           description: (
             <>
               Pengiriman: <strong>{c.courier}</strong>
-              {c.courier_service ? ` (${c.courier_service})` : ""} · Resi:{" "}
-              <code className="font-mono text-xs">{c.tracking_number}</code>.
+              {c.courier_service ? ` (${c.courier_service})` : ""}
+              {c.tracking_number ? (
+                <>
+                  {" · Resi: "}
+                  <code className="font-mono text-xs">{c.tracking_number}</code>
+                </>
+              ) : (
+                " · tanpa nomor resi"
+              )}
+              .
               <br />
               {"Status berubah ke 'dikirim' dan tidak bisa di-undo dari sini."}
             </>
@@ -642,9 +650,9 @@ export function OrderStatusActions({
               Input Detail Pengiriman
             </p>
             <p className="mt-0.5 text-xs text-neutral-600">
-              Pilih kurir dan masukin nomor resi. Pembeli akan dapat info ini
-              di halaman order. Kalau kamu antar sendiri, pilih kurir
-              tokomu — resi tidak wajib.
+              Pilih kurir dan masukin nomor resi. Pembeli akan dapat info
+              ini di halaman order. Kalau kamu antar sendiri, pilih kurir
+              tokomu — kolom resi tidak akan muncul.
             </p>
           </div>
           <div
@@ -666,33 +674,38 @@ export function OrderStatusActions({
                 ))}
               </Select>
             </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="ship_service">Layanan (opsional)</Label>
-              <Input
-                id="ship_service"
-                name="courier_service"
-                defaultValue={order.courier_service}
-                placeholder="REG, YES, dll"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5 sm:col-span-2">
-              <Label htmlFor="ship_tracking">
-                No. Resi {trackingRequired ? "*" : "(opsional)"}
-              </Label>
-              <Input
-                id="ship_tracking"
-                name="tracking_number"
-                required={trackingRequired}
-                defaultValue={order.tracking_number}
-                placeholder={trackingRequired ? "JNE1234567890" : "Kosongkan kalau tidak ada"}
-                className="font-mono"
-              />
-              {!trackingRequired && (
-                <p className="text-xs text-neutral-500">
-                  Kirim pakai kurir sendiri — nomor resi boleh dikosongkan.
-                </p>
-              )}
-            </div>
+            {/* Service tier and resi belong to a carrier. Delivering with
+                your own vehicle has neither, and leaving them on screen as
+                "optional" still reads as two things left undone. */}
+            {trackingRequired ? (
+              <>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="ship_service">Layanan (opsional)</Label>
+                  <Input
+                    id="ship_service"
+                    name="courier_service"
+                    defaultValue={order.courier_service}
+                    placeholder="REG, YES, dll"
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5 sm:col-span-2">
+                  <Label htmlFor="ship_tracking">No. Resi *</Label>
+                  <Input
+                    id="ship_tracking"
+                    name="tracking_number"
+                    required
+                    defaultValue={order.tracking_number}
+                    placeholder="JNE1234567890"
+                    className="font-mono"
+                  />
+                </div>
+              </>
+            ) : (
+              <p className="rounded-lg border border-neutral-200 bg-white px-3 py-2.5 text-xs text-neutral-600 sm:col-span-2">
+                Diantar dengan kurir tokomu — tidak ada nomor resi, dan
+                pembeli tidak akan ditanya nomor resi.
+              </p>
+            )}
             <div className="flex justify-end gap-2 sm:col-span-2">
               <Button
                 type="button"
@@ -713,6 +726,8 @@ export function OrderStatusActions({
                   const courier = (
                     root.querySelector<HTMLSelectElement>("#ship_courier")?.value ?? ""
                   ).trim();
+                  // Both fields are absent for an own-courier shipment;
+                  // querySelector returns null and these stay empty.
                   const courierService = (
                     root.querySelector<HTMLInputElement>("#ship_service")?.value ?? ""
                   ).trim();

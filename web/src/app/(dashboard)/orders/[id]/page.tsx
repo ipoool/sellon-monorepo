@@ -368,13 +368,24 @@ export default async function OrderDetailPage({
                   {order.courier || "—"}
                 </dd>
               </div>
+              {/* An own-courier delivery has no resi and never will, so a
+                  dash under "No. Resi" reads as something still missing.
+                  Say what is true instead. */}
               <div>
                 <dt className="text-xs font-medium uppercase tracking-wider text-neutral-500">
                   No. Resi
                 </dt>
-                <dd className="mt-0.5 font-mono text-xs text-neutral-900">
-                  {order.tracking_number || "—"}
-                </dd>
+                {order.tracking_number ? (
+                  <dd className="mt-0.5 font-mono text-xs text-neutral-900">
+                    {order.tracking_number}
+                  </dd>
+                ) : (
+                  <dd className="mt-0.5 text-xs text-neutral-500">
+                    {ownCouriers.includes(order.courier?.trim() ?? "")
+                      ? "Tidak ada — diantar kurir toko"
+                      : "—"}
+                  </dd>
+                )}
               </div>
             </dl>
           </Card>

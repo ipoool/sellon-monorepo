@@ -47,6 +47,7 @@ type BuyerOrder = {
   promo_code: string;
   total_cents: number;
   courier: string;
+  tracking_number: string;
   customer_name: string;
   customer_whatsapp: string;
   customer_address: string;
@@ -361,6 +362,40 @@ export default async function BuyerOrderPage({
                   )}
                 </div>
               </div>
+
+              {/* Shipment details, once there are any. The buyer used to be
+                  told nothing here and had to find the resi in a WhatsApp
+                  message; and for an own-courier delivery there is no resi
+                  to find, so the section says who is bringing it instead
+                  of showing an empty field. */}
+              {order.status === "shipped" && order.courier && (
+                <div className="mt-5 border-t border-neutral-200 pt-5">
+                  <h2 className="text-sm font-semibold text-neutral-900">
+                    Pengiriman
+                  </h2>
+                  <dl className="mt-2 flex flex-col gap-1 text-sm text-neutral-700">
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-neutral-500">Kurir</dt>
+                      <dd className="text-right font-medium text-neutral-900">
+                        {order.courier}
+                      </dd>
+                    </div>
+                    {order.tracking_number ? (
+                      <div className="flex justify-between gap-3">
+                        <dt className="text-neutral-500">No. Resi</dt>
+                        <dd className="text-right font-mono text-xs text-neutral-900">
+                          {order.tracking_number}
+                        </dd>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-neutral-500">
+                        Diantar langsung oleh kurir toko — tidak pakai nomor
+                        resi.
+                      </p>
+                    )}
+                  </dl>
+                </div>
+              )}
 
               {sellerWA && (
                 <div className="mt-5 border-t border-neutral-200 pt-5">

@@ -6,7 +6,7 @@ import { MessageCircle, Send, Receipt } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { fillTemplate, waLink } from "@/lib/whatsapp";
+import { dropLinesWithVars, fillTemplate, waLink } from "@/lib/whatsapp";
 import { formatRupiah } from "@/lib/format";
 import { WA_TEMPLATE_DEFAULTS } from "@/lib/wa-templates";
 import type { OrderDetail } from "@/lib/types";
@@ -25,6 +25,13 @@ const templateLabels: Record<TemplateKey, string> = {
   payment_link: "Link Pembayaran",
   shipping_update: "Update Resi",
 };
+
+/** The shipping message carries no resi on an own-courier delivery, so it
+ *  is not a "Update Resi" — name it after what it actually contains. */
+function templateLabel(key: TemplateKey, hasTracking: boolean): string {
+  if (key === "shipping_update" && !hasTracking) return "Info Pengiriman";
+  return templateLabels[key];
+}
 
 type PendingSend = {
   key: TemplateKey;
@@ -89,7 +96,12 @@ export function OrderQuickWA({ order, storeName, storeSlug, templates }: Props) 
   // Build the filled message + WA link and stage it for the confirm
   // dialog. Actual send (window.open + audit log) happens on confirm.
   function stage(templateKey: TemplateKey, templateBody: string) {
-    const message = fillTemplate(templateBody, baseVars);
+    // No tracking number means an own-courier delivery. Drop the lines
+    // that would otherwise reach the buyer as "Nomor Resi: —".
+    const body = order.tracking_number
+      ? templateBody
+      : dropLinesWithVars(templateBody, ["nomor_resi", "link_tracking"]);
+    const message = fillTemplate(body, baseVars);
     const url = waLink(order.customer_whatsapp, message);
     if (!url) return;
     setPending({ key: templateKey, message, url });
@@ -122,7 +134,11 @@ export function OrderQuickWA({ order, storeName, storeSlug, templates }: Props) 
   const hasPaymentUrl = !!order.payment_url;
   const canSendPayment = hasPaymentUrl && order.payment_status !== "paid" && order.status !== "cancelled";
   const showPaymentHint = !hasPaymentUrl && order.payment_status !== "paid" && order.status !== "cancelled";
-  const canSendShipping = order.status === "shipped" && !!order.tracking_number;
+  // Shipped is the condition; a resi is not. Requiring one left a seller
+  // who delivers with their own courier unable to tell the buyer the
+  // parcel had gone out at all — the one message that matters most on an
+  // own-courier delivery, because there is no tracking page to check.
+  const canSendShipping = order.status === "shipped";
 
   return (
     <Card>
@@ -184,7 +200,7 @@ export function OrderQuickWA({ order, storeName, storeSlug, templates }: Props) 
           }
         >
           <Send className="size-4" aria-hidden />
-          Kirim Update Resi
+          {order.tracking_number ? "Kirim Update Resi" : "Kirim Info Pengiriman"}
         </Button>
       </div>
 
@@ -202,7 +218,7 @@ export function OrderQuickWA({ order, storeName, storeSlug, templates }: Props) 
         onConfirm={confirmSend}
         title={
           pending
-            ? `Kirim ${templateLabels[pending.key]} via WhatsApp?`
+            ? `Kirim ${templateLabel(pending.key, !!order.tracking_number)} via WhatsApp?`
             : "Kirim via WhatsApp?"
         }
         kind="default"
