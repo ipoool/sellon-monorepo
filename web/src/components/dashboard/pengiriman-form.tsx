@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { CityPicker } from "@/components/dashboard/city-picker";
+import { cn } from "@/lib/utils";
 import type { Store } from "@/lib/types";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -37,9 +38,19 @@ const couriers: {
 
 type Props = {
   initial: Store;
+  /**
+   * The store has at least one active ongkir rate of its own, which means
+   * the courier list below is not used at all.
+   *
+   * The card is dimmed and disabled rather than hidden: a seller who
+   * toggled JNE last month needs to see that the switch is still on AND
+   * that it no longer does anything, or they will keep looking for the
+   * setting that "broke".
+   */
+  customRatesActive?: boolean;
 };
 
-export function PengirimanForm({ initial }: Props) {
+export function PengirimanForm({ initial, customRatesActive = false }: Props) {
   const { refresh } = useRouter();
   const [originCityID, setOriginCityID] = useState(
     initial.shipping_origin_city_id ?? "",
@@ -157,7 +168,7 @@ export function PengirimanForm({ initial }: Props) {
       </Card>
 
       <Card>
-        <div className="mb-4">
+        <div className={cn("mb-4", customRatesActive && "opacity-50")}>
           <h2 className="font-semibold text-neutral-900">Kurir Aktif</h2>
           <p className="mt-0.5 text-sm text-neutral-500">
             Pilih kurir yang muncul di checkout pembeli. Kurir bertanda{" "}
@@ -168,7 +179,23 @@ export function PengirimanForm({ initial }: Props) {
             terhubung; sisanya pakai estimasi tabel bawaan.
           </p>
         </div>
-        <ul className="flex flex-col divide-y divide-neutral-200 rounded-lg border border-neutral-200">
+        {customRatesActive && (
+          <div className="mb-4 flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-neutral-800">
+            <Info className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden />
+            <p>
+              <strong>Kurir otomatis sedang tidak dipakai.</strong> Toko kamu
+              memakai Ongkir Sendiri di atas, jadi daftar ini tidak muncul di
+              checkout. Nonaktifkan atau hapus semua tarif ongkir sendiri
+              kalau mau kembali pakai kurir otomatis.
+            </p>
+          </div>
+        )}
+        <ul
+          className={cn(
+            "flex flex-col divide-y divide-neutral-200 rounded-lg border border-neutral-200",
+            customRatesActive && "opacity-50",
+          )}
+        >
           {couriers.map((c) => {
             const active = enabled.has(c.code);
             return (
@@ -200,6 +227,7 @@ export function PengirimanForm({ initial }: Props) {
                 <Switch
                   size="sm"
                   checked={active}
+                  disabled={customRatesActive}
                   onChange={(e) => toggle(c.code, e.target.checked)}
                   aria-label={`Aktifkan kurir ${c.label}`}
                 />
@@ -207,7 +235,7 @@ export function PengirimanForm({ initial }: Props) {
             );
           })}
         </ul>
-        {enabled.size === 0 && (
+        {enabled.size === 0 && !customRatesActive && (
           <p className="mt-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-neutral-700">
             Tidak ada kurir aktif - pembeli tidak bisa pilih ongkir di checkout.
           </p>
@@ -236,9 +264,13 @@ export function PengirimanForm({ initial }: Props) {
         </div>
       </Card>
 
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-sm">
-                            </span>
+      {/* The button used to float unlabelled between this form and the
+          Ongkir Sendiri card below it, so it read as if it saved both.
+          It saves only what is above it; the rates save themselves. */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <span className="text-xs text-neutral-500">
+          Menyimpan asal pengiriman, kurir aktif, dan gratis ongkir.
+        </span>
         <Button type="submit" disabled={pending}>
           <Save className="size-4" aria-hidden />
           {pending ? "Menyimpan…" : "Simpan"}

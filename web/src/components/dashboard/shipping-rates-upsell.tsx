@@ -13,7 +13,7 @@ import { Card } from "@/components/ui/card";
  */
 export function ShippingRatesUpsell() {
   return (
-    <Card className="mt-5">
+    <Card>
       <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex gap-3">
           <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-600">

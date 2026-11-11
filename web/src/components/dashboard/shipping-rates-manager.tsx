@@ -149,7 +149,7 @@ export function ShippingRatesManager({ initial }: { initial: ShippingRate[] }) {
   }
 
   return (
-    <Card className="mt-5">
+    <Card>
       <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Truck className="size-4 text-neutral-500" aria-hidden />
@@ -265,7 +265,12 @@ export function ShippingRatesManager({ initial }: { initial: ShippingRate[] }) {
         </Button>
       )}
 
-      {pending && <p className="mt-3 text-xs text-neutral-400">Menyegarkan…</p>}
+      <p className="mt-3 text-xs text-neutral-500">
+        Tiap tarif tersimpan sendiri begitu kamu klik Simpan di barisnya.
+        Tombol Simpan di bagian bawah halaman mengurusi pengaturan kurir,
+        bukan daftar ini.
+      </p>
+      {pending && <p className="mt-1 text-xs text-neutral-400">Menyegarkan…</p>}
 
       <ConfirmDialog
         open={deleting !== null}

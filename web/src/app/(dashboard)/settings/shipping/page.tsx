@@ -23,14 +23,20 @@ export default async function PengaturanPengirimanPage() {
         ?.rates ?? [])
     : [];
 
+  // Ongkir Sendiri goes FIRST, above the courier settings it overrides.
+  // It used to sit at the bottom, so the line explaining that it hides
+  // the automatic couriers was read only after a seller had finished
+  // toggling couriers that would never be used.
+  const customRatesActive = rates.some((r) => r.is_active);
+
   return (
-    <>
-      <PengirimanForm initial={store} />
+    <div className="flex flex-col gap-5">
       {canCustomShip ? (
         <ShippingRatesManager initial={rates} />
       ) : (
         <ShippingRatesUpsell />
       )}
-    </>
+      <PengirimanForm initial={store} customRatesActive={customRatesActive} />
+    </div>
   );
 }
