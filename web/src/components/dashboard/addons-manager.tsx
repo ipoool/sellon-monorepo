@@ -96,9 +96,12 @@ export function AddonsManager({
             <li
               key={a.code}
               className={
+                // flex column + mt-auto on the footer: the packages carry
+                // different numbers of bullets, so without this the Aktifkan
+                // buttons sat at three different heights.
                 on
-                  ? "rounded-xl border border-brand-300 bg-brand-50/40 p-4"
-                  : "rounded-xl border border-neutral-200 bg-white p-4"
+                  ? "flex flex-col rounded-xl border border-brand-300 bg-brand-50/40 p-4"
+                  : "flex flex-col rounded-xl border border-neutral-200 bg-white p-4"
               }
             >
               <div className="flex items-start justify-between gap-2">
@@ -118,7 +121,7 @@ export function AddonsManager({
                 <span className="text-sm text-neutral-500"> / bulan</span>
               </p>
 
-              <ul className="mt-3 flex flex-col gap-1.5 border-t border-neutral-100 pt-3">
+              <ul className="mt-3 flex flex-1 flex-col gap-1.5 border-t border-neutral-100 pt-3">
                 {a.features.map((f) => (
                   <li
                     key={f}
