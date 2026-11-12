@@ -10,7 +10,7 @@ import type { AdminUser } from "@/lib/types";
 
 export const metadata = { title: "Pengguna" };
 
-type SearchParams = Promise<{ q?: string }>;
+type SearchParams = Promise<{ q?: string; plan?: string }>;
 
 export default async function PlatformPenggunaPage({
   searchParams,
@@ -23,16 +23,28 @@ export default async function PlatformPenggunaPage({
 
   const params = await searchParams;
   const q = params.q ?? "";
+  // Anything else is "no filter", so a hand-edited URL cannot produce an
+  // empty table with no tab highlighted.
+  const plan = params.plan === "free" || params.plan === "paid" ? params.plan : "";
   const url =
     "/api/v1/admin/users?limit=50" +
-    (q ? `&q=${encodeURIComponent(q)}` : "");
+    (q ? `&q=${encodeURIComponent(q)}` : "") +
+    (plan ? `&plan=${plan}` : "");
   // Both in one round trip: the table is the page, the stats are context.
   const [data, stats] = await Promise.all([
-    serverApi<{ users: AdminUser[] }>(url),
+    serverApi<{
+      users: AdminUser[];
+      counts: { all: number; free: number; paid: number };
+    }>(url),
     getAdminStats(),
   ]);
   const initial = data?.users ?? [];
   const activeUsers = stats.total_users - stats.banned_users;
+  // Counts ride along with the list, computed over the same population the
+  // table shows (non-admin users). The "Langganan berbayar" card above
+  // answers a different question — subscriptions platform-wide — so the
+  // two can legitimately differ when an admin account owns a store.
+  const counts = data?.counts ?? { all: 0, free: 0, paid: 0 };
 
   return (
     <DashboardShell
@@ -56,7 +68,12 @@ export default async function PlatformPenggunaPage({
         />
       </div>
 
-      <AdminUsersTable initial={initial} initialQuery={q} />
+      <AdminUsersTable
+        initial={initial}
+        initialQuery={q}
+        initialPlan={plan}
+        counts={counts}
+      />
     </DashboardShell>
   );
 }

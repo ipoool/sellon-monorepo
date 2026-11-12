@@ -39,6 +39,19 @@ type AdminStats struct {
 // Stats runs the dashboard aggregates in parallel-friendly order. Money
 // figures count orders whose payment_status = 'paid' AND status <> 'cancelled'
 // — paid-then-cancelled rows are assumed refunded out of band (BUG-012).
+// paidSubPredicate is what "berlangganan" means, written once.
+//
+// A paid tier is not enough: a row whose period has run out is a lapsed
+// customer, not a paying one, and the expiry worker may not have flipped
+// its status yet. The admin table shows such a store as Gratis, so the
+// count beside it has to agree — the alternative is a screen that
+// contradicts itself.
+//
+// Expects the subscriptions row to be aliased `sub`.
+const paidSubPredicate = `COALESCE(sub.plan, 'free') IN ('pro','bisnis')
+	  AND COALESCE(sub.status, 'active') = 'active'
+	  AND (sub.current_period_end IS NULL OR sub.current_period_end > now())`
+
 func (r *AdminRepo) Stats(ctx context.Context) (*AdminStats, error) {
 	out := &AdminStats{}
 
@@ -64,8 +77,8 @@ func (r *AdminRepo) Stats(ctx context.Context) (*AdminStats, error) {
 		     WHERE payment_status = 'paid'
 		       AND status <> 'cancelled'
 		       AND created_at >= date_trunc('month', now())),
-		  (SELECT COUNT(*) FROM subscriptions
-		     WHERE plan IN ('pro','bisnis') AND status = 'active')
+		  (SELECT COUNT(*) FROM subscriptions sub
+		     WHERE `+paidSubPredicate+`)
 	`).Scan(
 		&out.TotalUsers, &out.BannedUsers, &out.UsersThisMonth,
 		&out.TotalStores, &out.OpenStores, &out.StoresThisMonth,
@@ -101,7 +114,40 @@ type AdminUserRow struct {
 // ListUsers powers the admin /users list. Filters out admin-role users so
 // they don't show up in the list. q is free-text matched against email/name.
 // before is a created_at cursor for pagination.
-func (r *AdminRepo) ListUsers(ctx context.Context, q string, limit int, before *time.Time) ([]AdminUserRow, error) {
+// UserPlanCounts is the tab population for the admin user table.
+type UserPlanCounts struct {
+	All  int
+	Paid int
+	Free int
+}
+
+// CountUsersByPlan counts the SAME population ListUsers returns —
+// non-admin users, joined to their store's subscription the same way.
+//
+// Deliberately not reused from Stats.PaidSubsCount: that one counts
+// subscriptions platform-wide, this one counts the rows in this table. A
+// tab reading "4" above three visible rows is a bug report waiting to
+// happen.
+func (r *AdminRepo) CountUsersByPlan(ctx context.Context) (*UserPlanCounts, error) {
+	out := &UserPlanCounts{}
+	if err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(*),
+		       COUNT(*) FILTER (WHERE `+paidSubPredicate+`)
+		FROM users u
+		LEFT JOIN stores s ON s.owner_id = u.id
+		LEFT JOIN subscriptions sub ON sub.store_id = s.id
+		WHERE u.role <> 'admin'
+	`).Scan(&out.All, &out.Paid); err != nil {
+		return nil, err
+	}
+	out.Free = out.All - out.Paid
+	return out, nil
+}
+
+// ListUsers lists non-admin users. `plan` filters by subscription state:
+// "paid" for live subscribers, "free" for everyone else (including users
+// with no store at all), "" for no filter.
+func (r *AdminRepo) ListUsers(ctx context.Context, q, plan string, limit int, before *time.Time) ([]AdminUserRow, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
@@ -111,6 +157,14 @@ func (r *AdminRepo) ListUsers(ctx context.Context, q string, limit int, before *
 		args = append(args, "%"+strings.ToLower(s)+"%")
 		p := itoa(len(args))
 		clauses = append(clauses, "(LOWER(u.email) LIKE $"+p+" OR LOWER(u.name) LIKE $"+p+")")
+	}
+	// COALESCE in the predicate means a user with no store yields FALSE,
+	// not NULL, so the negation below actually matches them.
+	switch plan {
+	case "paid":
+		clauses = append(clauses, "("+paidSubPredicate+")")
+	case "free":
+		clauses = append(clauses, "NOT ("+paidSubPredicate+")")
 	}
 	if before != nil {
 		args = append(args, *before)

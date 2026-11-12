@@ -34,6 +34,11 @@ const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 type Props = {
   initial: AdminUser[];
   initialQuery: string;
+  /** "" | "free" | "paid" — mirrored in the URL so a filtered view is
+   *  linkable and survives a refresh, exactly like the search box. */
+  initialPlan: string;
+  /** Totals for the tab counts, from the same aggregate the stat cards use. */
+  counts: { all: number; free: number; paid: number };
 };
 
 function formatDate(iso: string) {
@@ -46,14 +51,40 @@ function formatDate(iso: string) {
   });
 }
 
+/**
+ * Whether a subscription is live right now.
+ *
+ * A paid tier alone is not enough: the period may have run out while the
+ * expiry worker has yet to flip the status. Mirrors `paidSubPredicate` in
+ * the API, which is what the "Berlangganan" tab counts — the badge and the
+ * tab must never disagree about the same row.
+ */
+export function isSubscribed(u: {
+  plan: string;
+  sub_status: string;
+  current_period_end?: string | null;
+}): boolean {
+  if (u.plan !== "pro" && u.plan !== "bisnis") return false;
+  if (u.sub_status !== "active") return false;
+  if (!u.current_period_end) return true;
+  return new Date(u.current_period_end).getTime() > Date.now();
+}
+
 function PlanCell({ plan, subStatus, periodEnd }: {
   plan: string;
   subStatus: string;
   periodEnd?: string | null;
 }) {
-  const isPaid = plan === "pro" || plan === "bisnis";
+  // A lapsed subscriber IS on the free tier — that is what they can
+  // actually use today. Showing "Pro · Expired" described a plan they no
+  // longer have and made the paid count impossible to eyeball.
+  const live = isSubscribed({
+    plan,
+    sub_status: subStatus,
+    current_period_end: periodEnd,
+  });
 
-  const planBadge = isPaid ? (
+  const planBadge = live ? (
     <Badge variant="warning" className="gap-1">
       <Crown className="size-3" aria-hidden />
       {plan === "pro" ? "Pro" : "Bisnis"}
@@ -62,7 +93,7 @@ function PlanCell({ plan, subStatus, periodEnd }: {
     <Badge variant="outline">Gratis</Badge>
   );
 
-  if (!isPaid || !periodEnd) return planBadge;
+  if (!live || !periodEnd) return planBadge;
 
   const date = new Date(periodEnd);
   const now = new Date();
@@ -70,13 +101,7 @@ function PlanCell({ plan, subStatus, periodEnd }: {
   const label = formatDate(periodEnd);
 
   let expiryNode: React.ReactNode;
-  if (subStatus === "expired" || diffDays < 0) {
-    expiryNode = (
-      <span className="inline-flex items-center gap-1 rounded-full bg-danger/10 px-2 py-0.5 text-xs font-medium text-danger">
-        Expired
-      </span>
-    );
-  } else if (diffDays <= 3) {
+  if (diffDays <= 3) {
     expiryNode = (
       <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
         <AlertTriangle className="size-3" aria-hidden />
@@ -98,9 +123,27 @@ function PlanCell({ plan, subStatus, periodEnd }: {
 type DialogKind = "ban" | "impersonate" | "delete";
 type DialogState = { kind: DialogKind; user: AdminUser } | null;
 
-export function AdminUsersTable({ initial, initialQuery }: Props) {
+export function AdminUsersTable({
+  initial,
+  initialQuery,
+  initialPlan,
+  counts,
+}: Props) {
   const { push } = useRouter();
+  // The list is local state because ban/unban/delete edit rows in place.
+  // That meant it never picked up a NEW server list: searching or switching
+  // tabs soft-navigates, the server returns a filtered list, and this
+  // component kept rendering the one it was mounted with. Searching simply
+  // did nothing unless you hard-reloaded.
+  //
+  // Re-synced during render rather than in an effect, so the fresh list is
+  // on screen in the same commit instead of flashing the stale one first.
   const [users, setUsers] = useState(() => initial);
+  const [serverUsers, setServerUsers] = useState(initial);
+  if (serverUsers !== initial) {
+    setServerUsers(initial);
+    setUsers(initial);
+  }
   const [query, setQuery] = useState(() => initialQuery);
   const [pending, startTransition] = useTransition();
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -150,13 +193,26 @@ export function AdminUsersTable({ initial, initialQuery }: Props) {
     }
   }
 
+  // Both controls write the same URL, so switching tabs keeps the search
+  // term and searching keeps the tab.
+  function urlFor(nextQuery: string, nextPlan: string) {
+    const sp = new URLSearchParams();
+    if (nextQuery) sp.set("q", nextQuery);
+    if (nextPlan) sp.set("plan", nextPlan);
+    const qs = sp.toString();
+    return qs ? `/platform/users?${qs}` : "/platform/users";
+  }
+
   function onSearch(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const url = query
-      ? `/platform/users?q=${encodeURIComponent(query)}`
-      : "/platform/users";
-    startTransition(() => push(url));
+    startTransition(() => push(urlFor(query, initialPlan)));
   }
+
+  const tabs: { key: string; label: string; count: number }[] = [
+    { key: "", label: "Semua", count: counts.all },
+    { key: "free", label: "Gratis", count: counts.free },
+    { key: "paid", label: "Berlangganan", count: counts.paid },
+  ];
 
   async function runToggleBan(user: AdminUser) {
     const isBanned = !!user.banned_at;
@@ -242,6 +298,37 @@ export function AdminUsersTable({ initial, initialQuery }: Props) {
   return (
     <Card className="overflow-hidden p-0">
       <div className="border-b border-neutral-200 px-4 py-3 sm:px-5">
+        {/* Tabs above the search, because the tab decides WHICH list you
+            are searching. Links, not buttons: an admin who filters to the
+            paying users can send that URL to someone. */}
+        <div className="mb-3 flex flex-wrap items-center gap-1.5">
+          {tabs.map((t) => {
+            const active = initialPlan === t.key;
+            return (
+              <Link
+                key={t.key || "all"}
+                href={urlFor(initialQuery, t.key)}
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors",
+                  active
+                    ? "border-brand-300 bg-brand-50 text-brand-700"
+                    : "border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-50",
+                )}
+              >
+                {t.label}
+                <span
+                  className={cn(
+                    "rounded-full px-1.5 py-0.5 text-xs tabular-nums",
+                    active ? "bg-brand-100 text-brand-700" : "bg-neutral-100 text-neutral-500",
+                  )}
+                >
+                  {t.count.toLocaleString("id-ID")}
+                </span>
+              </Link>
+            );
+          })}
+        </div>
         <form onSubmit={onSearch} className="flex items-center gap-2">
           <div className="relative flex-1">
             <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-neutral-400">

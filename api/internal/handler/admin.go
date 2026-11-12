@@ -163,7 +163,13 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	users, err := h.admin.ListUsers(r.Context(), q.Get("q"), limit, before)
+	// Only the two values the tabs emit; anything else lists everyone.
+	plan := q.Get("plan")
+	if plan != "paid" && plan != "free" {
+		plan = ""
+	}
+
+	users, err := h.admin.ListUsers(r.Context(), q.Get("q"), plan, limit, before)
 	if err != nil {
 		h.logger.Error("admin list users", "err", err)
 		response.Error(w, http.StatusInternalServerError, "internal error")
@@ -173,7 +179,23 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	for _, u := range users {
 		out = append(out, toAdminUserRowDTO(u))
 	}
-	response.JSON(w, http.StatusOK, map[string]any{"users": out})
+
+	// Tab counts travel with the list so the filter chips and the rows
+	// below them always describe the same population.
+	counts, cerr := h.admin.CountUsersByPlan(r.Context())
+	if cerr != nil {
+		h.logger.Error("admin user plan counts", "err", cerr)
+		counts = &repository.UserPlanCounts{}
+	}
+
+	response.JSON(w, http.StatusOK, map[string]any{
+		"users": out,
+		"counts": map[string]int{
+			"all":  counts.All,
+			"free": counts.Free,
+			"paid": counts.Paid,
+		},
+	})
 }
 
 // GET /api/v1/admin/users/{id}
