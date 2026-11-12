@@ -565,6 +565,9 @@ func New(cfg *config.Config, logger *slog.Logger, pool *pgxpool.Pool) (*Server, 
 				r.Route("/reports", func(r chi.Router) {
 					r.Get("/overview", reportsHandler.Overview)
 					r.Get("/export", reportsHandler.Export)
+					// Open to every tier: a seller who charges tax owes the
+					// report regardless of what they pay us.
+					r.Get("/tax", reportsHandler.TaxExport)
 					r.Post("/ai-insight", reportsHandler.AiInsight)
 				})
 

@@ -385,3 +385,101 @@ func (r *ReportsRepo) SetCachedInsight(ctx context.Context, storeID uuid.UUID, i
 	`, storeID, insightJSON)
 	return err
 }
+
+// TaxOrderRow is one line of the tax report: a paid order, with the figures
+// a seller has to put on a return.
+type TaxOrderRow struct {
+	CreatedAt     time.Time
+	PaidAt        *time.Time
+	OrderNumber   string
+	CustomerName  string
+	PaymentMethod string
+	SubtotalCents int64
+	DiscountCents int64
+	ShippingCents int64
+	TaxCents      int64
+	TaxBps        int
+	TaxInclusive  bool
+	TotalCents    int64
+}
+
+// TaxBaseCents is the DPP — the amount the rate was applied to.
+//
+// The order already stores the tax it charged, so this derives the base
+// from that rather than recomputing the rate: a rate the seller changed
+// last month must not restate what was collected last month.
+//
+// Exclusive: the goods total IS the base, tax sits on top.
+// Inclusive: the price already contains the tax, so the base is the goods
+// total minus the embedded tax.
+func (r TaxOrderRow) TaxBaseCents() int64 {
+	// No tax charged means no taxable base. Reporting the goods total as
+	// DPP on an untaxed sale would make the summary fail its own
+	// arithmetic: DPP x rate would not equal the tax owed.
+	if r.TaxCents <= 0 {
+		return 0
+	}
+	goods := r.SubtotalCents - r.DiscountCents
+	if goods < 0 {
+		goods = 0
+	}
+	if r.TaxInclusive {
+		return goods - r.TaxCents
+	}
+	return goods
+}
+
+// UntaxedSalesCents is the goods value of a sale that carried no tax —
+// shown separately so the file still reconciles against total revenue.
+func (r TaxOrderRow) UntaxedSalesCents() int64 {
+	if r.TaxCents > 0 {
+		return 0
+	}
+	goods := r.SubtotalCents - r.DiscountCents
+	if goods < 0 {
+		goods = 0
+	}
+	return goods
+}
+
+// TaxReport lists paid, non-cancelled orders in [from, to) — the sales the
+// tax was actually collected on.
+//
+// Unpaid and cancelled orders are excluded on purpose: nothing was
+// collected, so nothing is owed. Orders that carry no tax are INCLUDED
+// with zero in the tax columns, so the file reconciles against the
+// store's own sales figures instead of leaving an unexplained gap.
+func (r *ReportsRepo) TaxReport(
+	ctx context.Context, storeID uuid.UUID, from, to time.Time,
+) ([]TaxOrderRow, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT created_at, paid_at, order_number,
+		       COALESCE(customer_name, ''), COALESCE(payment_method, ''),
+		       subtotal_cents, discount_cents, shipping_cents,
+		       tax_cents, tax_bps, tax_inclusive, total_cents
+		FROM orders
+		WHERE store_id = $1
+		  AND payment_status = 'paid'
+		  AND status <> 'cancelled'
+		  AND created_at >= $2 AND created_at < $3
+		ORDER BY created_at`, storeID, from, to)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []TaxOrderRow{}
+	for rows.Next() {
+		var t TaxOrderRow
+		if err := rows.Scan(
+			&t.CreatedAt, &t.PaidAt, &t.OrderNumber, &t.CustomerName,
+			&t.PaymentMethod, &t.SubtotalCents, &t.DiscountCents,
+			&t.ShippingCents, &t.TaxCents, &t.TaxBps, &t.TaxInclusive,
+			&t.TotalCents,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}

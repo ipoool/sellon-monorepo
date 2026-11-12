@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -644,4 +645,147 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// GET /api/v1/reports/tax?from=YYYY-MM-DD&to=YYYY-MM-DD
+//
+// The tax a seller has to report, as a CSV they can hand to whoever files
+// it. One row per paid order plus a summary block, because a total with no
+// transactions behind it is not something anyone can defend.
+//
+// Figures come from what each order actually CHARGED, never recomputed
+// from the store's current rate: changing the rate today must not restate
+// what was collected last month.
+func (h *ReportsHandler) TaxExport(w http.ResponseWriter, r *http.Request) {
+	store, err := h.storeFor(r)
+	if errors.Is(err, repository.ErrStoreNotFound) {
+		response.Error(w, http.StatusBadRequest, "toko belum dibuat")
+		return
+	}
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	// Default to the current month in WIB — the Indonesian tax period.
+	now := time.Now().In(wib)
+	from := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, wib)
+	to := from.AddDate(0, 1, 0)
+	fromLabel, toLabel := from.Format("2006-01-02"), to.AddDate(0, 0, -1).Format("2006-01-02")
+
+	if fs := strings.TrimSpace(r.URL.Query().Get("from")); fs != "" {
+		if ts := strings.TrimSpace(r.URL.Query().Get("to")); ts != "" {
+			f, e1 := time.ParseInLocation("2006-01-02", fs, wib)
+			t, e2 := time.ParseInLocation("2006-01-02", ts, wib)
+			if e1 == nil && e2 == nil && !t.Before(f) {
+				from, to = f, t.AddDate(0, 0, 1)
+				fromLabel, toLabel = fs, ts
+			}
+		}
+	}
+
+	rows, err := h.reports.TaxReport(r.Context(), store.ID, from, to)
+	if err != nil {
+		h.logger.Error("tax export", "err", err, "store", store.ID)
+		response.Error(w, http.StatusInternalServerError, "gagal menyusun laporan")
+		return
+	}
+
+	label := store.TaxLabel
+	if label == "" {
+		label = "PPN"
+	}
+
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition",
+		`attachment; filename="laporan-pajak-`+store.Slug+`-`+fromLabel+`-sd-`+toLabel+`.csv"`)
+	// UTF-8 BOM so Excel on Windows decodes the Indonesian headers.
+	_, _ = w.Write([]byte("\xEF\xBB\xBF"))
+	cw := csv.NewWriter(w)
+	defer cw.Flush()
+
+	_ = cw.Write([]string{"LAPORAN PAJAK " + strings.ToUpper(label)})
+	_ = cw.Write([]string{"Toko", store.Name})
+	_ = cw.Write([]string{"Masa pajak", fromLabel + " s/d " + toLabel})
+	_ = cw.Write([]string{"Tarif saat ini", formatBps(store.TaxBps)})
+	_ = cw.Write([]string{"Metode", taxModeLabel(store.TaxInclusive)})
+	_ = cw.Write([]string{"Dibuat", now.Format("2006-01-02 15:04") + " WIB"})
+	_ = cw.Write([]string{})
+	_ = cw.Write([]string{
+		"Tanggal", "Tanggal Bayar", "No. Pesanan", "Pelanggan", "Metode Bayar",
+		"Subtotal", "Diskon", "DPP", "Tarif", label, "Ongkir", "Total",
+	})
+
+	var sumBase, sumTax, sumTotal, sumShipping, sumUntaxed int64
+	taxedCount := 0
+	for _, t := range rows {
+		base := t.TaxBaseCents()
+		paid := ""
+		if t.PaidAt != nil {
+			paid = t.PaidAt.In(wib).Format("2006-01-02")
+		}
+		_ = cw.Write([]string{
+			t.CreatedAt.In(wib).Format("2006-01-02"),
+			paid,
+			t.OrderNumber,
+			t.CustomerName,
+			t.PaymentMethod,
+			csvRupiah(t.SubtotalCents),
+			csvRupiah(t.DiscountCents),
+			csvRupiah(base),
+			formatBps(t.TaxBps),
+			csvRupiah(t.TaxCents),
+			csvRupiah(t.ShippingCents),
+			csvRupiah(t.TotalCents),
+		})
+		sumBase += base
+		sumUntaxed += t.UntaxedSalesCents()
+		sumTax += t.TaxCents
+		sumTotal += t.TotalCents
+		sumShipping += t.ShippingCents
+		if t.TaxCents > 0 {
+			taxedCount++
+		}
+	}
+
+	_ = cw.Write([]string{})
+	_ = cw.Write([]string{"RINGKASAN"})
+	_ = cw.Write([]string{"Jumlah transaksi dibayar", strconv.Itoa(len(rows))})
+	_ = cw.Write([]string{"— di antaranya kena pajak", strconv.Itoa(taxedCount)})
+	_ = cw.Write([]string{"Total DPP (kena pajak)", csvRupiah(sumBase)})
+	_ = cw.Write([]string{"Penjualan tanpa pajak", csvRupiah(sumUntaxed)})
+	_ = cw.Write([]string{"Total ongkir (tidak kena pajak)", csvRupiah(sumShipping)})
+	_ = cw.Write([]string{"Total omzet dibayar", csvRupiah(sumTotal)})
+	_ = cw.Write([]string{"TOTAL " + strings.ToUpper(label) + " TERUTANG", csvRupiah(sumTax)})
+	_ = cw.Write([]string{})
+	_ = cw.Write([]string{
+		"Catatan: hanya pesanan berstatus LUNAS dan tidak dibatalkan yang dihitung. " +
+			"Angka pajak diambil dari yang benar-benar ditagih di tiap pesanan, " +
+			"bukan dihitung ulang dari tarif saat ini.",
+	})
+}
+
+// csvRupiah writes cents as a plain integer rupiah figure — no thousands
+// separators, so the spreadsheet reads the cell as a NUMBER and the
+// accountant can sum the column. Distinct from `rupiah` in analytics.go,
+// which formats for human display.
+func csvRupiah(cents int64) string { return strconv.FormatInt(cents/100, 10) }
+
+func formatBps(bps int) string {
+	if bps <= 0 {
+		return "0%"
+	}
+	whole := bps / 100
+	frac := bps % 100
+	if frac == 0 {
+		return strconv.Itoa(whole) + "%"
+	}
+	return strconv.Itoa(whole) + "," + fmt.Sprintf("%02d", frac) + "%"
+}
+
+func taxModeLabel(inclusive bool) string {
+	if inclusive {
+		return "Termasuk harga (inclusive)"
+	}
+	return "Ditambahkan di atas harga (exclusive)"
 }

@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { Boxes, Download } from "lucide-react";
+import { Boxes, Download, Receipt } from "lucide-react";
 
 import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import type {
   AnalyticsOverview,
   CashEntry,
   ReportOverview,
+  Store,
   Subscription,
 } from "@/lib/types";
 
@@ -44,13 +45,14 @@ export default async function LaporanAnalyticsPage({
   // every tier. analytics/overview + cash-entries are BISNIS-only → serverApi
   // returns null on 402 (Free & Pro), and the financial section + AI render a
   // locked upsell for them.
-  const [reportRes, ovRes, cashRes, subRes] = await Promise.all([
+  const [reportRes, ovRes, cashRes, subRes, storeRes] = await Promise.all([
     serverApi<ReportOverview>(`/api/v1/reports/overview?${qs}`),
     serverApi<{ overview: AnalyticsOverview | null }>(
       `/api/v1/analytics/overview?${qs}`,
     ),
     serverApi<{ entries: CashEntry[] }>(`/api/v1/cash-entries?${qs}`),
     serverApi<{ subscription: Subscription }>("/api/v1/subscription"),
+    serverApi<{ store: Store | null }>("/api/v1/store"),
   ]);
 
   const report = reportRes ?? null;
@@ -59,6 +61,10 @@ export default async function LaporanAnalyticsPage({
   // stays open to all. Gate on the entitlement rather than the tier, so a
   // Pro store that activated the package gets what it pays for.
   const hasAI = (subRes?.subscription?.features ?? []).includes("ai_analytics");
+  // The tax report only exists for a store that charges tax. Showing the
+  // button otherwise hands the seller an empty file and a question.
+  const taxOn = !!storeRes?.store?.tax_enabled;
+  const taxLabel = storeRes?.store?.tax_label || "PPN";
 
   return (
     <DashboardShell
@@ -84,6 +90,19 @@ export default async function LaporanAnalyticsPage({
               <span className="hidden sm:inline">Export</span>
             </Button>
           </a>
+          {taxOn && (
+            <a
+              href={`${apiBase}/api/v1/reports/tax?${qs}`}
+              download
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <Button size="sm" variant="outline">
+                <Receipt className="size-4" aria-hidden />
+                <span className="hidden sm:inline">Laporan {taxLabel}</span>
+              </Button>
+            </a>
+          )}
           <AnalyticsAiButton from={from} to={to} isPaid={hasAI} />
         </div>
       }
