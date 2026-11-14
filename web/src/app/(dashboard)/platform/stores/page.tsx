@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Stat } from "@/components/ui/stat";
+import { PlanBadge } from "@/components/admin/plan-badge";
 import { StoreRowActions } from "@/components/admin/store-row-actions";
 import { getMe } from "@/lib/server-auth";
 import { serverApi } from "@/lib/server-api";
@@ -113,6 +114,7 @@ export default async function PlatformTokoPage({
               <thead className="bg-neutral-50 text-left text-xs uppercase tracking-wider text-neutral-500">
                 <tr>
                   <th className="px-4 py-3 sm:px-5">Toko</th>
+                  <th className="px-4 py-3">Langganan</th>
                   <th className="px-4 py-3 text-right">Produk</th>
                   <th className="px-4 py-3 text-right">Pesanan</th>
                   <th className="px-4 py-3 text-right">Revenue</th>
@@ -149,6 +151,13 @@ export default async function PlatformTokoPage({
                           </Link>
                         </div>
                       </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <PlanBadge
+                        plan={s.plan}
+                        subStatus={s.sub_status}
+                        periodEnd={s.period_end}
+                      />
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums font-medium text-neutral-900">
                       {s.products_count}

@@ -15,7 +15,6 @@ import {
   Loader2,
   Trash2,
   Crown,
-  AlertTriangle,
   MoreHorizontal,
 } from "lucide-react";
 
@@ -24,6 +23,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { PlanBadge } from "@/components/admin/plan-badge";
 import { AdminGrantSubscriptionDialog } from "@/components/admin/admin-grant-subscription-dialog";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -49,75 +49,6 @@ function formatDate(iso: string) {
     year: "numeric",
     timeZone: "Asia/Jakarta",
   });
-}
-
-/**
- * Whether a subscription is live right now.
- *
- * A paid tier alone is not enough: the period may have run out while the
- * expiry worker has yet to flip the status. Mirrors `paidSubPredicate` in
- * the API, which is what the "Berlangganan" tab counts — the badge and the
- * tab must never disagree about the same row.
- */
-export function isSubscribed(u: {
-  plan: string;
-  sub_status: string;
-  current_period_end?: string | null;
-}): boolean {
-  if (u.plan !== "pro" && u.plan !== "bisnis") return false;
-  if (u.sub_status !== "active") return false;
-  if (!u.current_period_end) return true;
-  return new Date(u.current_period_end).getTime() > Date.now();
-}
-
-function PlanCell({ plan, subStatus, periodEnd }: {
-  plan: string;
-  subStatus: string;
-  periodEnd?: string | null;
-}) {
-  // A lapsed subscriber IS on the free tier — that is what they can
-  // actually use today. Showing "Pro · Expired" described a plan they no
-  // longer have and made the paid count impossible to eyeball.
-  const live = isSubscribed({
-    plan,
-    sub_status: subStatus,
-    current_period_end: periodEnd,
-  });
-
-  const planBadge = live ? (
-    <Badge variant="warning" className="gap-1">
-      <Crown className="size-3" aria-hidden />
-      {plan === "pro" ? "Pro" : "Bisnis"}
-    </Badge>
-  ) : (
-    <Badge variant="outline">Gratis</Badge>
-  );
-
-  if (!live || !periodEnd) return planBadge;
-
-  const date = new Date(periodEnd);
-  const now = new Date();
-  const diffDays = Math.ceil((date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-  const label = formatDate(periodEnd);
-
-  let expiryNode: React.ReactNode;
-  if (diffDays <= 3) {
-    expiryNode = (
-      <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
-        <AlertTriangle className="size-3" aria-hidden />
-        {label}
-      </span>
-    );
-  } else {
-    expiryNode = <span className="text-xs text-neutral-500">{label}</span>;
-  }
-
-  return (
-    <div className="flex flex-col items-start gap-1">
-      {planBadge}
-      {expiryNode}
-    </div>
-  );
 }
 
 type DialogKind = "ban" | "impersonate" | "delete";
@@ -422,7 +353,7 @@ export function AdminUsersTable({
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      <PlanCell
+                      <PlanBadge
                         plan={u.plan}
                         subStatus={u.sub_status}
                         periodEnd={u.period_end}
